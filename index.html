@@ -834,74 +834,58 @@ function spineHeight(book) {
 // Rule: text should grow as large as possible without exceeding 80% of height or 60% of width
 function spineTextStyle(width, title, heightPct) {
   const len = title.length;
-  const maxH = (heightPct / 100) * 550 * 0.80; // 80% of spine height
-  const maxW = width * 0.60; // 60% of spine width
+  const maxH = Math.round((heightPct / 100) * 550 * 0.80); // 80% of spine height in px
+  const maxW = Math.round(width * 0.60); // 60% of spine width in px
 
-  // Create a hidden measurement element
-  const probe = document.createElement('span');
-  probe.style.cssText = `
-    position:absolute; visibility:hidden; pointer-events:none;
-    writing-mode:vertical-rl; text-orientation:mixed;
-    font-family:var(--font-read); line-height:1.1;
-    word-break:break-word; hyphens:auto;
-    max-height:${maxH}px; width:auto; white-space:normal;
-  `;
-  probe.textContent = title;
-  document.body.appendChild(probe);
-
-  // Binary search: find the largest font size where text fits in bounds
-  let lo = 8, hi = 52, best = 10;
-  for (let i = 0; i < 10; i++) {
-    const mid = Math.round((lo + hi) / 2);
-    probe.style.fontSize = mid + 'px';
-    probe.style.fontWeight = mid >= 26 ? '600' : mid >= 16 ? '500' : '400';
-
-    const textH = probe.scrollHeight;
-    const textW = probe.scrollWidth;
-
-    if (textH <= maxH && textW <= maxW) {
-      best = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-
-  document.body.removeChild(probe);
-
-  let size = best;
-
-  // Uppercase for short titles
-  let transform = '';
-  if (len <= 12 && size >= 13) {
-    // Re-measure with uppercase
-    const probe2 = document.createElement('span');
-    probe2.style.cssText = `
-      position:absolute; visibility:hidden; pointer-events:none;
-      writing-mode:vertical-rl; text-orientation:mixed;
-      font-family:var(--font-read); line-height:1.1;
-      word-break:break-word; hyphens:auto; text-transform:uppercase;
+  function measure(text, fontSize, fontWeight, uppercase) {
+    const el = document.createElement('span');
+    el.style.cssText = `
+      position:absolute;top:-9999px;left:-9999px;visibility:hidden;
+      writing-mode:vertical-rl;text-orientation:mixed;
+      font-family:Thow,Georgia,serif;line-height:1.1;
+      word-break:break-word;hyphens:auto;white-space:normal;
+      font-size:${fontSize}px;font-weight:${fontWeight};
+      ${uppercase ? 'text-transform:uppercase;' : ''}
       max-height:${maxH}px;
     `;
-    probe2.textContent = title;
-    document.body.appendChild(probe2);
+    el.textContent = text;
+    document.body.appendChild(el);
+    // In vertical-rl with max-height set:
+    //   offsetHeight = constrained to maxH (or less if text is short)
+    //   offsetWidth = how many "columns" the text wraps into
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    document.body.removeChild(el);
+    return { w, h };
+  }
 
-    // Find best size for uppercase (uppercase chars are wider, so size may differ)
-    lo = 8; hi = 52; let bestUpper = 10;
-    for (let i = 0; i < 10; i++) {
+  function findBest(text, uppercase) {
+    let lo = 8, hi = 56, best = 8;
+    for (let i = 0; i < 12; i++) {
       const mid = Math.round((lo + hi) / 2);
-      probe2.style.fontSize = mid + 'px';
-      probe2.style.fontWeight = mid >= 26 ? '600' : mid >= 16 ? '500' : '400';
-      const tH = probe2.scrollHeight;
-      const tW = probe2.scrollWidth;
-      if (tH <= maxH && tW <= maxW) { bestUpper = mid; lo = mid + 1; }
-      else { hi = mid - 1; }
+      if (lo > hi) break;
+      const fw = mid >= 26 ? 600 : mid >= 16 ? 500 : 400;
+      const m = measure(text, mid, fw, uppercase);
+      // Text fits if its wrapped width doesn't exceed our max
+      // and the height used is within bounds
+      if (m.w <= maxW && m.h <= maxH) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
     }
-    document.body.removeChild(probe2);
+    return best;
+  }
 
-    // Use uppercase if it's still a reasonable size
-    if (bestUpper >= 12) {
-      size = bestUpper;
+  let size = findBest(title, false);
+
+  // Try uppercase for short titles
+  let transform = '';
+  if (len <= 12) {
+    const upperSize = findBest(title, true);
+    if (upperSize >= 11) {
+      size = upperSize;
       transform = 'text-transform:uppercase;';
     }
   }
