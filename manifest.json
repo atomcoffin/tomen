@@ -1,8 +1,10 @@
 {
-  "name": "Pendium — Reader",
-  "short_name": "Pendium",
+  "name": "Tomen",
+  "short_name": "Tomen",
   "description": "A minimal, beautiful ebook reader",
-  "start_url": "./index.html",
+  "id": "/pendium-reader/",
+  "start_url": ".",
+  "scope": ".",
   "display": "standalone",
   "background_color": "#FAF6F1",
   "theme_color": "#C45D3E",
@@ -11,12 +13,14 @@
     {
       "src": "icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }
