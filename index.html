@@ -562,18 +562,144 @@ html, body {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 // ===== STATE =====
-let library = JSON.parse(localStorage.getItem('tomen_library') || '[]');
-let currentBook = null;
+let library = []; // Metadata only: {id, title, author, cover, progress, chapterIndex, scrollPos}
+let currentBook = null; // Full book with chapters when opened
 let currentChapterIndex = 0;
 let chapters = [];
 let toc = [];
 let uiVisible = true;
 let currentView = localStorage.getItem('tomen_view') || 'text';
 
+// ===== INDEXEDDB STORAGE =====
+const DB_NAME = 'tomen';
+const DB_VERSION = 1;
+let db = null;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains('books')) {
+        d.createObjectStore('books', { keyPath: 'id' });
+      }
+      if (!d.objectStoreNames.contains('content')) {
+        d.createObjectStore('content', { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = (e) => { db = e.target.result; resolve(db); };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function dbGet(store, id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readonly');
+    const req = tx.objectStore(store).get(id);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function dbGetAll(store) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readonly');
+    const req = tx.objectStore(store).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function dbPut(store, data) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    const req = tx.objectStore(store).put(data);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function dbDelete(store, id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    const req = tx.objectStore(store).delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
 // ===== HELPERS =====
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function saveLibrary() { localStorage.setItem('tomen_library', JSON.stringify(library)); }
 function $(id) { return document.getElementById(id); }
+
+// Save just the lightweight book metadata (not chapter content)
+async function saveBookMeta(book) {
+  const meta = {
+    id: book.id, title: book.title, author: book.author, cover: book.cover,
+    progress: book.progress || 0, chapterIndex: book.chapterIndex || 0,
+    scrollPos: book.scrollPos || 0, chapterCount: (book.chapters || []).length,
+    contentSize: (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0)
+  };
+  await dbPut('books', meta);
+}
+
+// Save the heavy book content (chapters + toc)
+async function saveBookContent(book) {
+  await dbPut('content', { id: book.id, chapters: book.chapters, toc: book.toc });
+}
+
+// Save progress for currently-open book (metadata only, no content rewrite)
+async function saveLibrary() {
+  // Find the book in library array and persist its metadata
+  if (currentBook) {
+    const idx = library.findIndex(b => b.id === currentBook.id);
+    if (idx >= 0) {
+      library[idx].progress = currentBook.progress;
+      library[idx].chapterIndex = currentBook.chapterIndex;
+      library[idx].scrollPos = currentBook.scrollPos;
+      await saveBookMeta(library[idx]);
+    }
+  }
+}
+
+// Load full book content by ID (on demand when opening)
+async function loadBookContent(id) {
+  const content = await dbGet('content', id);
+  return content || { chapters: [], toc: [] };
+}
+
+// Delete a book completely
+async function deleteBook(id) {
+  await dbDelete('books', id);
+  await dbDelete('content', id);
+  library = library.filter(b => b.id !== id);
+}
+
+// Migrate from old localStorage format
+async function migrateFromLocalStorage() {
+  const old = localStorage.getItem('tomen_library');
+  if (!old) return;
+  try {
+    const oldLib = JSON.parse(old);
+    if (!Array.isArray(oldLib) || oldLib.length === 0) {
+      localStorage.removeItem('tomen_library');
+      return;
+    }
+    console.log(`Migrating ${oldLib.length} books from localStorage to IndexedDB…`);
+    for (const b of oldLib) {
+      await saveBookMeta(b);
+      if (b.chapters) await saveBookContent(b);
+    }
+    localStorage.removeItem('tomen_library');
+    console.log('Migration complete.');
+  } catch (err) {
+    console.error('Migration failed:', err);
+  }
+}
+
+async function loadLibrary() {
+  library = await dbGetAll('books');
+}
 
 // Generate a color from a string (fallback for books without covers)
 function strColor(str) {
@@ -636,7 +762,7 @@ async function getSpineColor(book) {
 
 // Estimate "thickness" from total text content
 function spineWidth(book) {
-  const total = (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
+  const total = book.contentSize || (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
   // Real EPUBs range from ~100k (novella) to 2M+ (epic)
   // Use logarithmic scale so differences are visible across the whole range
   const log = Math.log10(Math.max(1000, total));
@@ -648,7 +774,7 @@ function spineWidth(book) {
 
 // Estimate height — varies from 75% to 100% of container
 function spineHeight(book) {
-  const total = (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
+  const total = book.contentSize || (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
   // Also use a title-seeded offset so books of similar length still differ slightly
   let titleSeed = 0;
   for (let i = 0; i < book.title.length; i++) titleSeed += book.title.charCodeAt(i);
@@ -850,7 +976,6 @@ async function importFiles(files) {
     await new Promise(r => setTimeout(r, 0));
   }
 
-  saveLibrary();
   renderLibrary();
   showLoading(false);
   if (skipped > 0) {
@@ -870,13 +995,21 @@ async function loadTextFile(file, batch = false) {
   const text = await file.text();
   const title = file.name.replace(/\.[^.]+$/, '');
   const html = `<h1>${esc(title)}</h1>` + text.split(/\n\n+/).map(p => `<p>${esc(p.trim())}</p>`).join('');
-  library.push({
+  const book = {
     id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
     title, author: '', cover: null,
     chapters: [{ title, html }], toc: [{ title, index: 0 }],
     progress: 0, chapterIndex: 0, scrollPos: 0
+  };
+  await saveBookMeta(book);
+  await saveBookContent(book);
+  // Add lightweight meta to in-memory library (without chapters/toc)
+  library.push({
+    id: book.id, title: book.title, author: book.author, cover: book.cover,
+    progress: 0, chapterIndex: 0, scrollPos: 0,
+    chapterCount: 1, contentSize: html.length
   });
-  if (!batch) { saveLibrary(); renderLibrary(); }
+  if (!batch) renderLibrary();
 }
 
 async function loadEpub(file, batch = false) {
@@ -980,16 +1113,25 @@ async function loadEpub(file, batch = false) {
       }
     }
 
-    library.push({
+    const finalToc = bookToc.length > 0 ? bookToc : bookChapters.map((ch, i) => ({ title: ch.title, index: i }));
+    const contentSize = bookChapters.reduce((s, c) => s + (c.html?.length || 0), 0);
+    const book = {
       id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
-      title, author, cover, chapters: bookChapters,
-      toc: bookToc.length > 0 ? bookToc : bookChapters.map((ch, i) => ({ title: ch.title, index: i })),
+      title, author, cover, chapters: bookChapters, toc: finalToc,
       progress: 0, chapterIndex: 0, scrollPos: 0
+    };
+    await saveBookMeta(book);
+    await saveBookContent(book);
+    library.push({
+      id: book.id, title: book.title, author: book.author, cover: book.cover,
+      progress: 0, chapterIndex: 0, scrollPos: 0,
+      chapterCount: bookChapters.length, contentSize
     });
-    if (!batch) { saveLibrary(); renderLibrary(); }
+    if (!batch) renderLibrary();
   } catch (err) {
     console.error('EPUB parse error:', err);
     if (!batch) alert('Could not open this EPUB. It may be DRM-protected or unsupported.');
+    throw err;  // re-throw so importFiles can count it as skipped
   }
   if (!batch) showLoading(false);
 }
@@ -1007,20 +1149,30 @@ function blobToDataURL(blob) {
 }
 
 // ===== READER =====
-function openBook(index) {
-  currentBook = library[index];
-  chapters = currentBook.chapters;
-  toc = currentBook.toc;
-  currentChapterIndex = currentBook.chapterIndex || 0;
-  $('r-title').textContent = currentBook.title;
-  $('screen-lib').classList.remove('active');
-  $('screen-reader').classList.add('active');
-  uiVisible = true;
-  $('r-toolbar').classList.remove('hidden');
-  $('r-bottom').classList.remove('hidden');
-  renderChapter();
-  buildTOC();
-  setTimeout(() => { $('r-content').scrollTop = currentBook.scrollPos || 0; }, 30);
+async function openBook(index) {
+  const meta = library[index];
+  showLoading(true, 'Opening book…');
+  try {
+    const content = await loadBookContent(meta.id);
+    currentBook = { ...meta, chapters: content.chapters, toc: content.toc };
+    chapters = currentBook.chapters;
+    toc = currentBook.toc;
+    currentChapterIndex = currentBook.chapterIndex || 0;
+    $('r-title').textContent = currentBook.title;
+    $('screen-lib').classList.remove('active');
+    $('screen-reader').classList.add('active');
+    uiVisible = true;
+    $('r-toolbar').classList.remove('hidden');
+    $('r-bottom').classList.remove('hidden');
+    renderChapter();
+    buildTOC();
+    setTimeout(() => { $('r-content').scrollTop = currentBook.scrollPos || 0; }, 30);
+  } catch (err) {
+    console.error('Failed to open book:', err);
+    alert('Could not open this book.');
+  } finally {
+    showLoading(false);
+  }
 }
 
 function showLibrary() {
@@ -1152,7 +1304,7 @@ function editName() {
 }
 
 // ===== INIT =====
-(function init() {
+(async function init() {
   const t = localStorage.getItem('tomen_theme') || '';
   setTheme(t);
   const fs = localStorage.getItem('tomen_fontSize');
@@ -1170,6 +1322,16 @@ function editName() {
       }
     }, 500);
   }
+
+  // Open IndexedDB and load library
+  try {
+    await openDB();
+    await migrateFromLocalStorage();
+    await loadLibrary();
+  } catch (err) {
+    console.error('Storage init failed:', err);
+  }
+
   setView(currentView);
 })();
 </script>
