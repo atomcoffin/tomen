@@ -127,7 +127,7 @@ html, body {
 
 /* Library body */
 .lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 28px 28px; min-height: 0; }
-.lib-body.spine-active { overflow-y: hidden; padding-bottom: 12px; }
+.lib-body.spine-active { overflow-y: hidden; overflow-x: hidden; padding: 0; }
 .lib-body::-webkit-scrollbar { width: 4px; }
 .lib-body::-webkit-scrollbar-thumb { background: var(--fog); border-radius: 2px; opacity: 0.3; }
 
@@ -197,16 +197,16 @@ html, body {
 .view-spine-wrap {
   overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 12px;
+  padding-bottom: 0;
   height: 100%;
 }
 .view-spine-wrap::-webkit-scrollbar { height: 0; }
 .view-spine {
-  display: flex; gap: 3px; height: 100%; min-width: min-content;
-  padding-right: 40px;
+  display: flex; align-items: flex-end; gap: 3px; height: 100%; min-width: min-content;
+  padding: 0 40px 0 28px;
 }
 .spine {
-  flex-shrink: 0; height: 100%;
+  flex-shrink: 0;
   border-radius: 3px 6px 6px 3px;
   display: flex; align-items: center; justify-content: center;
   box-shadow: inset -2px 0 4px rgba(0,0,0,0.15), 2px 0 6px rgba(0,0,0,0.06);
@@ -215,11 +215,11 @@ html, body {
 .spine:hover { filter: brightness(1.1); }
 .spine-text {
   writing-mode: vertical-rl; text-orientation: mixed;
-  font-family: var(--font-read); font-size: 12px; font-weight: 400;
-  color: white; letter-spacing: 0.5px;
-  padding: 16px 0; overflow: hidden; text-overflow: ellipsis;
-  max-height: calc(100% - 24px);
-  text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  font-family: var(--font-read);
+  color: white; line-height: 0.95;
+  padding: 20px 0; overflow: hidden;
+  max-height: calc(100% - 32px);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.35);
 }
 .spine-prog {
   position: absolute; bottom: 0; left: 0; right: 0;
@@ -594,27 +594,55 @@ async function getSpineColor(book) {
 // Estimate "thickness" from total text content
 function spineWidth(book) {
   const total = (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
-  // Range: 32px (short story) to 80px (epic novel)
-  return Math.max(32, Math.min(80, Math.round(total / 3000) + 32));
+  // Range: 40px (short) to 120px (massive tome)
+  return Math.max(40, Math.min(120, Math.round(total / 2000) + 40));
 }
 
-// Compute spine text style — varies size and weight based on width and title length
-function spineTextStyle(width, titleLen) {
-  // Wider spines can hold larger text
-  let size, weight;
-  if (width >= 64) {
-    size = titleLen > 25 ? 11 : titleLen > 15 ? 13 : 15;
-    weight = 600;
-  } else if (width >= 48) {
-    size = titleLen > 25 ? 10 : titleLen > 15 ? 12 : 13;
-    weight = 500;
-  } else {
-    size = titleLen > 20 ? 9 : 10;
-    weight = 400;
+// Estimate height — varies from 82% to 100% of container
+function spineHeight(book) {
+  const total = (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
+  // Short books are shorter, long books reach full height
+  // Normalize: under 20k chars = short, over 200k = tall
+  const ratio = Math.min(1, Math.max(0, (total - 10000) / 200000));
+  return 82 + Math.round(ratio * 18); // 82% to 100%
+}
+
+// Compute spine text style — fills the spine but stays refined
+function spineTextStyle(width, titleLen, heightPct) {
+  // Available height in pixels (approximate from percentage of ~600px container)
+  const availHeight = (heightPct / 100) * 550;
+
+  // Max size constrained by spine width — text shouldn't overflow sideways
+  const maxFromWidth = Math.round(width * 0.45);
+
+  // Size needed to fill the height nicely (each char ~0.7x font-size tall)
+  const fillSize = Math.round(availHeight / (titleLen * 0.7));
+
+  // Use whichever is smaller, with a floor
+  let size = Math.min(maxFromWidth, fillSize);
+  size = Math.max(9, Math.min(40, size));
+
+  // Short titles: go uppercase but pull size DOWN for refinement
+  let transform = '';
+  if (titleLen <= 10 && size >= 18) {
+    transform = 'text-transform:uppercase;';
+    size = Math.round(size * 0.7); // smaller uppercase reads more elegant
   }
-  // Vary letter-spacing: tighter for larger text, looser for small
-  const spacing = size >= 13 ? '0.3px' : size >= 11 ? '0.8px' : '1.2px';
-  return `font-size:${size}px;font-weight:${weight};letter-spacing:${spacing}`;
+
+  // Weight scales with size but not too heavy
+  let weight;
+  if (size >= 24) weight = 600;
+  else if (size >= 16) weight = 500;
+  else weight = 400;
+
+  // Letter-spacing: uppercase gets wide tracking, large gets tight, small gets airy
+  let spacing;
+  if (transform) spacing = '2px';
+  else if (size >= 20) spacing = '-0.3px';
+  else if (size >= 14) spacing = '0.3px';
+  else spacing = '0.8px';
+
+  return `font-size:${size}px;font-weight:${weight};letter-spacing:${spacing};${transform}`;
 }
 
 // ===== LIBRARY RENDERING =====
@@ -674,16 +702,15 @@ function renderGridView(el) {
 }
 
 async function renderSpineView(el) {
-  // Build spines with placeholder colors first, then update with extracted colors
   const spineData = library.map((b, i) => ({
-    book: b, index: i, width: spineWidth(b),
+    book: b, index: i, width: spineWidth(b), height: spineHeight(b),
     fallback: strColor(b.title), progress: b.progress || 0
   }));
 
   el.innerHTML = '<div class="view-spine-wrap"><div class="view-spine" id="spine-row">' +
     spineData.map(s => {
-      const ts = spineTextStyle(s.width, s.book.title.length);
-      return `<div class="spine" id="spine-${s.index}" style="width:${s.width}px;background:linear-gradient(180deg,${s.fallback[0]},${s.fallback[1]})" onclick="openBook(${s.index})" title="${esc(s.book.title)}">
+      const ts = spineTextStyle(s.width, s.book.title.length, s.height);
+      return `<div class="spine" id="spine-${s.index}" style="width:${s.width}px;height:${s.height}%;background:linear-gradient(180deg,${s.fallback[0]},${s.fallback[1]})" onclick="openBook(${s.index})" title="${esc(s.book.title)}">
         <span class="spine-text" style="${ts}">${esc(s.book.title)}</span>
         ${s.progress > 0 ? '<div class="spine-prog"><div class="spine-prog-fill" style="width:' + s.progress + '%"></div></div>' : ''}
       </div>`;
