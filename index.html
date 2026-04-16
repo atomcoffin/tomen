@@ -128,12 +128,12 @@ html, body {
 /* Library body */
 .lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 28px 28px; min-height: 0; }
 .lib-body.spine-active {
-  overflow: visible;
+  overflow: hidden;
   padding: 0;
   display: flex;
   min-height: 0;
 }
-.lib-body.spine-active > .view-spine-wrap { flex: 1; min-height: 0; }
+.lib-body.spine-active > .view-spine-wrap { flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; }
 .lib-body::-webkit-scrollbar { width: 4px; }
 .lib-body::-webkit-scrollbar-thumb { background: var(--fog); border-radius: 2px; opacity: 0.3; }
 
@@ -204,10 +204,14 @@ html, body {
   overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   height: 100%;
+  width: 100%;
 }
-.view-spine-wrap::-webkit-scrollbar { height: 0; }
+.view-spine-wrap::-webkit-scrollbar { height: 6px; }
+.view-spine-wrap::-webkit-scrollbar-track { background: transparent; }
+.view-spine-wrap::-webkit-scrollbar-thumb { background: var(--fog); border-radius: 3px; opacity: 0.3; }
 .view-spine {
-  display: flex; align-items: flex-end; gap: 3px; height: 100%; min-width: min-content;
+  display: flex; align-items: flex-end; gap: 3px; height: 100%;
+  width: max-content;
   padding: 0 40px 28px 28px;
 }
 .spine {
@@ -434,6 +438,7 @@ html, body {
   .r-content { padding: 28px 20px; }
   .view-spine { padding: 0 24px 20px 16px; gap: 2px; }
   .spine { --spine-scale: 0.45; }
+  .view-spine-wrap::-webkit-scrollbar { height: 0; }
 }
 @media (min-width: 481px) and (max-width: 768px) {
   .spine { --spine-scale: 0.65; }
