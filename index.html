@@ -423,15 +423,39 @@ html, body {
 
 /* Responsive */
 @media (max-width: 480px) {
-  .lib-header { padding: 20px 20px 0; }
-  .lib-body { padding: 0 20px 20px; }
+  .lib-header { padding: 16px 16px 0; }
+  .lib-body { padding: 0 16px 16px; }
+  .lib-top { margin-bottom: 16px; }
+  .lib-brand { font-size: 20px; }
+  .lib-actions { gap: 6px; margin-bottom: 14px; }
+  .btn { padding: 8px 12px; font-size: 12px; }
   .view-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 14px; }
-  .tv-title { font-size: 24px; }
+  .tv-title { font-size: 22px; }
   .r-content { padding: 28px 20px; }
+  .view-spine { padding: 0 24px 20px 16px; gap: 2px; }
+  .spine { --spine-scale: 0.45; }
 }
-@media (min-width: 768px) {
+@media (min-width: 481px) and (max-width: 768px) {
+  .spine { --spine-scale: 0.65; }
+  .view-spine { padding: 0 32px 24px 20px; }
+}
+@media (min-width: 769px) {
   .view-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .spine { --spine-scale: 1; }
 }
+
+/* Sort select */
+.sort-select {
+  padding: 8px 12px; border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border); background: transparent;
+  font-family: var(--font-ui); font-size: 12px; color: var(--stone);
+  cursor: pointer; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238A7E76' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+.sort-select:hover { background-color: var(--linen); color: var(--ink); }
 </style>
 </head>
 <body>
@@ -467,6 +491,13 @@ html, body {
         <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 16a1.5 1.5 0 01-1.5 1.5H3.5A1.5 1.5 0 012 16V4a1.5 1.5 0 011.5-1.5h4L9 5h7.5A1.5 1.5 0 0118 6.5z"/></svg>
         Add folder
       </button>
+      <select class="sort-select" id="sort-select" onchange="setSort(this.value)">
+        <option value="title">A — Z</option>
+        <option value="title-desc">Z — A</option>
+        <option value="author">Author</option>
+        <option value="recent">Recently added</option>
+        <option value="progress">Progress</option>
+      </select>
     </div>
   </div>
   <div class="lib-body" id="lib-body"></div>
@@ -560,6 +591,7 @@ let chapters = [];
 let toc = [];
 let uiVisible = true;
 let currentView = localStorage.getItem('tomen_view') || 'text';
+let currentSort = localStorage.getItem('tomen_sort') || 'title';
 
 // ===== INDEXEDDB STORAGE =====
 const DB_NAME = 'tomen';
@@ -755,13 +787,22 @@ async function getSpineColor(book) {
 // Estimate "thickness" from total text content
 function spineWidth(book) {
   const total = book.contentSize || (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
-  // Real EPUBs range from ~100k (novella) to 2M+ (epic)
-  // Use logarithmic scale so differences are visible across the whole range
   const log = Math.log10(Math.max(1000, total));
-  // log10(100k)=5, log10(500k)=5.7, log10(1M)=6, log10(2M)=6.3
-  // Map range 4.5–6.5 to 44–120px
   const w = Math.round(((log - 4.5) / 2) * 76 + 44);
-  return Math.max(44, Math.min(120, w));
+  const base = Math.max(44, Math.min(120, w));
+  return Math.round(base * spineScale);
+}
+
+// Get the current spine scale from CSS (responsive)
+let spineScale = 1;
+function updateSpineScale() {
+  const test = document.createElement('div');
+  test.className = 'spine';
+  test.style.cssText = 'position:absolute;visibility:hidden;';
+  document.body.appendChild(test);
+  const val = getComputedStyle(test).getPropertyValue('--spine-scale');
+  document.body.removeChild(test);
+  spineScale = parseFloat(val) || 1;
 }
 
 // Estimate height — varies from 75% to 100% of container
@@ -827,6 +868,34 @@ function setView(v) {
   renderLibrary();
 }
 
+function setSort(s) {
+  currentSort = s;
+  localStorage.setItem('tomen_sort', s);
+  renderLibrary();
+}
+
+function getSortedLibrary() {
+  const sorted = [...library];
+  switch (currentSort) {
+    case 'title':
+      sorted.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+      break;
+    case 'title-desc':
+      sorted.sort((a, b) => (b.title || '').localeCompare(a.title || ''));
+      break;
+    case 'author':
+      sorted.sort((a, b) => (a.author || '').localeCompare(b.author || ''));
+      break;
+    case 'recent':
+      sorted.reverse(); // most recently added last in array → reverse to show first
+      break;
+    case 'progress':
+      sorted.sort((a, b) => (b.progress || 0) - (a.progress || 0));
+      break;
+  }
+  return sorted;
+}
+
 function renderLibrary() {
   const body = $('lib-body');
   if (library.length === 0) {
@@ -837,16 +906,17 @@ function renderLibrary() {
     </div>`;
     return;
   }
-  if (currentView === 'text') renderTextView(body);
-  else if (currentView === 'grid') renderGridView(body);
-  else renderSpineView(body);
+  const sorted = getSortedLibrary();
+  if (currentView === 'text') renderTextView(body, sorted);
+  else if (currentView === 'grid') renderGridView(body, sorted);
+  else renderSpineView(body, sorted);
 }
 
-function renderTextView(el) {
-  el.innerHTML = '<div class="view-text">' + library.map((b, i) => {
+function renderTextView(el, books) {
+  el.innerHTML = '<div class="view-text">' + books.map(b => {
     const p = b.progress || 0;
     const isReading = p > 0 && p < 100;
-    return `<div class="tv-item" onclick="openBook(${i})">
+    return `<div class="tv-item" onclick="openBookById('${b.id}')">
       <div class="tv-title${isReading ? ' reading' : ''}">${esc(b.title)}</div>
       <div class="tv-author">${esc(b.author || 'Unknown')}${isReading ? ' · <span style="font-family:var(--font-mono);font-size:11px">' + Math.round(p) + '%</span>' : ''}</div>
       ${isReading ? '<div class="tv-progress"><div class="tv-progress-fill" style="width:' + p + '%"></div></div>' : ''}
@@ -854,8 +924,8 @@ function renderTextView(el) {
   }).join('') + '</div>';
 }
 
-function renderGridView(el) {
-  el.innerHTML = '<div class="view-grid">' + library.map((b, i) => {
+function renderGridView(el, books) {
+  el.innerHTML = '<div class="view-grid">' + books.map(b => {
     const p = b.progress || 0;
     const c = strColor(b.title);
     const cover = b.cover
@@ -864,7 +934,7 @@ function renderGridView(el) {
            <div class="gcp-title">${esc(b.title)}</div>
            <div class="gcp-author">${esc(b.author || '')}</div>
          </div>`;
-    return `<div class="gc" onclick="openBook(${i})">
+    return `<div class="gc" onclick="openBookById('${b.id}')">
       <div class="gc-cover">${cover}${p > 0 ? '<div class="gc-prog"><div class="gc-prog-fill" style="width:' + p + '%"></div></div>' : ''}</div>
       <div class="gc-title">${esc(b.title)}</div>
       <div class="gc-author">${esc(b.author || 'Unknown')}</div>
@@ -872,16 +942,15 @@ function renderGridView(el) {
   }).join('') + '</div>';
 }
 
-function renderSpineView(el) {
-  const spineData = library.map((b, i) => {
+function renderSpineView(el, books) {
+  updateSpineScale();
+  const spineData = books.map((b, i) => {
     const w = spineWidth(b);
     const h = spineHeight(b);
-    // Seed a band position from title for variety
     let seed = 0;
     for (let j = 0; j < b.title.length; j++) seed += b.title.charCodeAt(j);
     const bandTop = 15 + (seed % 25);
     const bandBottom = 65 + ((seed * 7) % 20);
-    // Use persisted color or fallback immediately — no extraction at render time
     const color = b.spineColor || strColor(b.title);
     return { book: b, index: i, width: w, height: h,
       color, progress: b.progress || 0, bandTop, bandBottom };
@@ -890,7 +959,7 @@ function renderSpineView(el) {
   el.innerHTML = '<div class="view-spine-wrap"><div class="view-spine" id="spine-row">' +
     spineData.map(s => {
       const ts = spineTextStyle(s.width, s.book.title.length, s.height);
-      return `<div class="spine" id="spine-${s.index}" style="width:${s.width}px;height:${s.height}%;background:linear-gradient(180deg,${s.color[0]},${s.color[1]})" onclick="openBook(${s.index})" title="${esc(s.book.title)}">
+      return `<div class="spine" id="spine-${s.index}" style="width:${s.width}px;height:${s.height}%;background:linear-gradient(180deg,${s.color[0]},${s.color[1]})" onclick="openBookById('${s.book.id}')" title="${esc(s.book.title)}">
         <div class="spine-pages"></div>
         <div class="spine-band" style="top:${s.bandTop}%"></div>
         <div class="spine-band" style="top:${s.bandBottom}%"></div>
@@ -899,7 +968,6 @@ function renderSpineView(el) {
       </div>`;
     }).join('') + '</div></div>';
 
-  // Backfill missing colors in background — non-blocking
   backfillSpineColors();
 }
 
@@ -1176,8 +1244,9 @@ function blobToDataURL(blob) {
 }
 
 // ===== READER =====
-async function openBook(index) {
-  const meta = library[index];
+async function openBookById(id) {
+  const meta = library.find(b => b.id === id);
+  if (!meta) return;
   showLoading(true, 'Opening book…');
   try {
     const content = await loadBookContent(meta.id);
@@ -1358,6 +1427,9 @@ function editName() {
   } catch (err) {
     console.error('Storage init failed:', err);
   }
+
+  // Restore sort
+  $('sort-select').value = currentSort;
 
   setView(currentView);
 })();
