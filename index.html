@@ -78,9 +78,14 @@ html, body {
 }
 
 .lib-brand {
-  font-family: var(--font-read); font-size: 28px; font-weight: 400;
-  letter-spacing: -0.5px; color: var(--ink);
+  font-family: var(--font-read); font-size: 24px; font-weight: 400;
+  letter-spacing: -0.3px; color: var(--ink); line-height: 1.2;
 }
+.lib-brand .greeting-name {
+  color: var(--ember); cursor: pointer;
+  border-bottom: 1px dashed transparent;
+}
+.lib-brand .greeting-name:hover { border-bottom-color: var(--ember); }
 
 .lib-controls { display: flex; align-items: center; gap: 4px; }
 
@@ -121,7 +126,8 @@ html, body {
 .view-switch .icon-btn.active { background: var(--card); }
 
 /* Library body */
-.lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 28px 28px; }
+.lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 28px 28px; min-height: 0; }
+.lib-body.spine-active { overflow-y: hidden; padding-bottom: 12px; }
 .lib-body::-webkit-scrollbar { width: 4px; }
 .lib-body::-webkit-scrollbar-thumb { background: var(--fog); border-radius: 2px; opacity: 0.3; }
 
@@ -192,10 +198,11 @@ html, body {
   overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 12px;
+  height: 100%;
 }
 .view-spine-wrap::-webkit-scrollbar { height: 0; }
 .view-spine {
-  display: flex; gap: 3px; height: 260px; min-width: min-content;
+  display: flex; gap: 3px; height: 100%; min-width: min-content;
   padding-right: 40px;
 }
 .spine {
@@ -389,7 +396,6 @@ html, body {
 }
 @media (min-width: 768px) {
   .view-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-  .view-spine { height: 300px; }
 }
 </style>
 </head>
@@ -399,7 +405,7 @@ html, body {
 <div class="screen active" id="screen-lib">
   <div class="lib-header">
     <div class="lib-top">
-      <span class="lib-brand">Tomen</span>
+      <span class="lib-brand" id="lib-greeting"></span>
       <div class="lib-controls">
         <div class="view-switch" id="view-switch">
           <button class="icon-btn active" data-view="text" onclick="setView('text')" title="Text view">
@@ -552,6 +558,7 @@ function setView(v) {
   document.querySelectorAll('#view-switch .icon-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.view === v);
   });
+  $('lib-body').classList.toggle('spine-active', v === 'spine');
   renderLibrary();
 }
 
@@ -921,6 +928,33 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'Escape') showLibrary();
 });
 
+// ===== GREETING =====
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function renderGreeting() {
+  const name = localStorage.getItem('tomen_name') || '';
+  const el = $('lib-greeting');
+  if (name) {
+    el.innerHTML = `${getGreeting()}, <span class="greeting-name" onclick="editName()" title="Click to change name">${esc(name)}</span>`;
+  } else {
+    el.innerHTML = `${getGreeting()}`;
+  }
+}
+
+function editName() {
+  const current = localStorage.getItem('tomen_name') || '';
+  const name = prompt('What should Tomen call you?', current);
+  if (name !== null) {
+    localStorage.setItem('tomen_name', name.trim());
+    renderGreeting();
+  }
+}
+
 // ===== INIT =====
 (function init() {
   const t = localStorage.getItem('tomen_theme') || '';
@@ -929,6 +963,17 @@ document.addEventListener('keydown', e => {
   if (fs) { setFontSize(fs); $('sl-fontsize').value = fs; }
   const lh = localStorage.getItem('tomen_lineHeight');
   if (lh) { setLineHeight(lh); $('sl-lineheight').value = lh; }
+  renderGreeting();
+  // Prompt for name on first visit
+  if (!localStorage.getItem('tomen_name')) {
+    setTimeout(() => {
+      const name = prompt('Welcome to Tomen! What should we call you?');
+      if (name && name.trim()) {
+        localStorage.setItem('tomen_name', name.trim());
+        renderGreeting();
+      }
+    }, 500);
+  }
   setView(currentView);
 })();
 </script>
