@@ -253,11 +253,14 @@ html, body {
 .spine-text {
   writing-mode: vertical-rl; text-orientation: mixed;
   font-family: var(--font-read);
-  color: white; line-height: 0.95;
-  padding: 24px 0; overflow: hidden;
-  max-height: calc(100% - 40px);
+  color: white; line-height: 1.05;
+  padding: 20px 4px; overflow: hidden;
+  max-height: calc(100% - 32px);
+  max-width: calc(100% - 4px);
   text-shadow: 0 1px 3px rgba(0,0,0,0.4);
   z-index: 1;
+  word-break: break-word;
+  hyphens: auto;
 }
 .spine-prog {
   position: absolute; bottom: 0; left: 0; right: 0;
@@ -824,40 +827,74 @@ function spineHeight(book) {
   return Math.max(72, Math.min(100, pct));
 }
 
-// Compute spine text style — fills the spine but stays refined
-function spineTextStyle(width, titleLen, heightPct) {
-  // Available height in pixels (approximate from percentage of ~600px container)
-  const availHeight = (heightPct / 100) * 550;
+// Compute spine text style — fill the available space as much as possible
+function spineTextStyle(width, title, heightPct) {
+  const titleLen = title.length;
+  // Word count matters for wrapping — titles with spaces can wrap
+  const words = title.split(/\s+/).length;
+  const longestWord = Math.max(...title.split(/\s+/).map(w => w.length));
 
-  // Max size constrained by spine width — text shouldn't overflow sideways
-  const maxFromWidth = Math.round(width * 0.45);
+  // Available dimensions
+  const availHeight = (heightPct / 100) * 550; // vertical text = this is the "width" for text flow
+  const availWidth = width - 8; // horizontal = this is the "line height" direction
 
-  // Size needed to fill the height nicely (each char ~0.7x font-size tall)
-  const fillSize = Math.round(availHeight / (titleLen * 0.7));
+  // In vertical-rl writing mode:
+  //   font-size determines character height (which flows along the spine height)
+  //   line wrapping happens in the width direction (across the spine width)
 
-  // Use whichever is smaller, with a floor
-  let size = Math.min(maxFromWidth, fillSize);
-  size = Math.max(9, Math.min(40, size));
+  // Strategy: find the largest font size where the text fits
+  // Single-line fit: all chars in one column, each char ~0.75x font-size tall
+  const singleLineSize = Math.round(availHeight / (titleLen * 0.72));
 
-  // Short titles (<=12 chars): go uppercase but only slightly smaller
-  let transform = '';
-  if (titleLen <= 12 && size >= 16) {
-    transform = 'text-transform:uppercase;';
-    size = Math.round(size * 0.8); // gentle reduction, not dramatic
+  // Multi-line fit: for long titles, allow wrapping into 2-3 columns
+  // Each line can be ~availWidth / (fontSize * lineHeight) lines
+  // With wrapping, we can use a larger font
+  let size;
+  if (titleLen <= 6) {
+    // Very short titles: go big, single line
+    size = Math.min(Math.round(width * 0.6), singleLineSize);
+    size = Math.max(size, 24); // minimum big for tiny titles
+  } else if (titleLen <= 15) {
+    // Short-medium: fill aggressively
+    size = Math.min(Math.round(width * 0.5), singleLineSize);
+  } else if (titleLen <= 30) {
+    // Medium: allow 2 columns of text
+    const charsPerCol = Math.round(availHeight / (longestWord * 0.72));
+    const colsNeeded = Math.ceil(titleLen / Math.max(1, charsPerCol));
+    const sizeFromWidth = Math.round(availWidth / (Math.min(colsNeeded, 3) * 1.1));
+    size = Math.min(sizeFromWidth, Math.round(availHeight / (longestWord * 0.72)));
+    size = Math.max(size, singleLineSize); // at least as big as single line
+  } else {
+    // Long titles: allow 2-3 columns, size to fit
+    const targetCols = words >= 6 ? 3 : 2;
+    const charsPerCol = Math.ceil(titleLen / targetCols);
+    const sizeFromHeight = Math.round(availHeight / (charsPerCol * 0.65));
+    const sizeFromWidth = Math.round(availWidth / (targetCols * 1.1));
+    size = Math.min(sizeFromHeight, sizeFromWidth);
   }
 
-  // Weight scales with size
+  // Clamp
+  size = Math.max(9, Math.min(48, size));
+
+  // Short titles: uppercase with slightly reduced size
+  let transform = '';
+  if (titleLen <= 12 && size >= 14) {
+    transform = 'text-transform:uppercase;';
+    size = Math.round(size * 0.85);
+  }
+
+  // Weight
   let weight;
-  if (size >= 24) weight = 600;
-  else if (size >= 16) weight = 500;
+  if (size >= 28) weight = 600;
+  else if (size >= 18) weight = 500;
   else weight = 400;
 
   // Letter-spacing
   let spacing;
-  if (transform) spacing = '2.5px';
-  else if (size >= 20) spacing = '-0.3px';
-  else if (size >= 14) spacing = '0.3px';
-  else spacing = '0.8px';
+  if (transform) spacing = '2px';
+  else if (size >= 24) spacing = '-0.3px';
+  else if (size >= 14) spacing = '0.2px';
+  else spacing = '0.5px';
 
   return `font-size:${size}px;font-weight:${weight};letter-spacing:${spacing};${transform}`;
 }
@@ -963,7 +1000,7 @@ function renderSpineView(el, books) {
 
   el.innerHTML = '<div class="view-spine-wrap"><div class="view-spine" id="spine-row">' +
     spineData.map(s => {
-      const ts = spineTextStyle(s.width, s.book.title.length, s.height);
+      const ts = spineTextStyle(s.width, s.book.title, s.height);
       return `<div class="spine" id="spine-${s.index}" style="width:${s.width}px;height:${s.height}%;background:linear-gradient(180deg,${s.color[0]},${s.color[1]})" onclick="openBookById('${s.book.id}')" title="${esc(s.book.title)}">
         <div class="spine-pages"></div>
         <div class="spine-band" style="top:${s.bandTop}%"></div>
