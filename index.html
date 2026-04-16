@@ -830,54 +830,80 @@ function spineHeight(book) {
   return Math.max(72, Math.min(100, pct));
 }
 
-// Compute spine text style — scale off height, width, and character count
+// Compute spine text style — binary search for largest size that fits
+// Rule: text should grow as large as possible without exceeding 80% of height or 60% of width
 function spineTextStyle(width, title, heightPct) {
   const len = title.length;
-  const words = title.split(/\s+/).length;
+  const maxH = (heightPct / 100) * 550 * 0.80; // 80% of spine height
+  const maxW = width * 0.60; // 60% of spine width
 
-  // Available space in pixels
-  const H = (heightPct / 100) * 550; // height of spine in px
-  const W = width - 8; // usable width in px
+  // Create a hidden measurement element
+  const probe = document.createElement('span');
+  probe.style.cssText = `
+    position:absolute; visibility:hidden; pointer-events:none;
+    writing-mode:vertical-rl; text-orientation:mixed;
+    font-family:var(--font-read); line-height:1.1;
+    word-break:break-word; hyphens:auto;
+    max-height:${maxH}px; width:auto; white-space:normal;
+  `;
+  probe.textContent = title;
+  document.body.appendChild(probe);
 
-  // Three constraints on font size:
-  // 1. Height constraint: chars must fit vertically (single column)
-  const fromH = H / (len * 0.7);
-  // 2. Width constraint: text shouldn't be wider than spine
-  const fromW = W * 0.42;
-  // 3. Combined: use whichever is smaller as baseline
-  let size = Math.min(fromH, fromW);
+  // Binary search: find the largest font size where text fits in bounds
+  let lo = 8, hi = 52, best = 10;
+  for (let i = 0; i < 10; i++) {
+    const mid = Math.round((lo + hi) / 2);
+    probe.style.fontSize = mid + 'px';
+    probe.style.fontWeight = mid >= 26 ? '600' : mid >= 16 ? '500' : '400';
 
-  // For very short titles (1-6 chars), push size up — they should dominate
-  if (len <= 4) {
-    size = Math.min(W * 0.65, H / (len * 0.6));
-    size = Math.max(size, 28);
-  } else if (len <= 8) {
-    size = Math.min(W * 0.52, H / (len * 0.65));
-    size = Math.max(size, 20);
-  }
+    const textH = probe.scrollHeight;
+    const textW = probe.scrollWidth;
 
-  // For longer titles that would be tiny single-column, allow multi-line
-  // In vertical-rl, "lines" wrap horizontally across the spine width
-  if (len > 15 && size < 12) {
-    // How many columns can we fit?
-    const cols = Math.min(3, Math.floor(W / 14)); // each col needs ~14px min
-    if (cols >= 2) {
-      const charsPerCol = Math.ceil(len / cols);
-      const fromHMulti = H / (charsPerCol * 0.7);
-      const fromWMulti = W / (cols * 1.15);
-      size = Math.min(fromHMulti, fromWMulti);
+    if (textH <= maxH && textW <= maxW) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
     }
   }
 
-  // Clamp: slightly lower max than before
-  size = Math.round(Math.max(9, Math.min(42, size)));
+  document.body.removeChild(probe);
 
-  // Uppercase for short titles — reduce less for very short
+  let size = best;
+
+  // Uppercase for short titles
   let transform = '';
   if (len <= 12 && size >= 13) {
-    transform = 'text-transform:uppercase;';
-    if (len <= 6) size = Math.round(size * 0.9);
-    else size = Math.round(size * 0.82);
+    // Re-measure with uppercase
+    const probe2 = document.createElement('span');
+    probe2.style.cssText = `
+      position:absolute; visibility:hidden; pointer-events:none;
+      writing-mode:vertical-rl; text-orientation:mixed;
+      font-family:var(--font-read); line-height:1.1;
+      word-break:break-word; hyphens:auto; text-transform:uppercase;
+      max-height:${maxH}px;
+    `;
+    probe2.textContent = title;
+    document.body.appendChild(probe2);
+
+    // Find best size for uppercase (uppercase chars are wider, so size may differ)
+    lo = 8; hi = 52; let bestUpper = 10;
+    for (let i = 0; i < 10; i++) {
+      const mid = Math.round((lo + hi) / 2);
+      probe2.style.fontSize = mid + 'px';
+      probe2.style.fontWeight = mid >= 26 ? '600' : mid >= 16 ? '500' : '400';
+      const tH = probe2.scrollHeight;
+      const tW = probe2.scrollWidth;
+      if (tH <= maxH && tW <= maxW) { bestUpper = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    document.body.removeChild(probe2);
+
+    // Use uppercase if it's still a reasonable size
+    if (bestUpper >= 12) {
+      size = bestUpper;
+      transform = 'text-transform:uppercase;';
+    }
   }
 
   // Weight
@@ -892,7 +918,7 @@ function spineTextStyle(width, title, heightPct) {
   else if (transform) spacing = '1.5px';
   else if (size >= 20) spacing = '-0.2px';
   else if (size >= 13) spacing = '0.2px';
-  else spacing = '0.5px';
+  else spacing = '0.4px';
 
   return `font-size:${size}px;font-weight:${weight};letter-spacing:${spacing};${transform}`;
 }
