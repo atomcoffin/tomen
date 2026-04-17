@@ -288,12 +288,25 @@ html, body {
 }
 .spine-prog-fill { height: 100%; background: var(--ember); }
 
+/* Debug: character count at bottom of spine */
+.spine-chars {
+  position: absolute;
+  bottom: 6px; left: 0; right: 0;
+  font-family: var(--font-mono);
+  font-size: 7px;
+  color: rgba(255,255,255,0.4);
+  text-align: center;
+  z-index: 3;
+  writing-mode: horizontal-tb;
+  letter-spacing: 0;
+}
+
 /* Bookmark ribbon — hangs from top of spine */
 .spine-bookmark {
   position: absolute;
   top: -2px;
-  left: 10%;
-  width: 80%;
+  left: 17.5%;
+  width: 65%;
   height: 110px;
   z-index: 2;
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%);
@@ -907,14 +920,47 @@ async function getSpineColor(book) {
   return fallback;
 }
 
-// Estimate "thickness" from total text content
-function spineWidth(book) {
-  const total = book.contentSize || (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
-  const log = Math.log10(Math.max(1000, total));
-  const w = Math.round(((log - 4.5) / 2) * 76 + 44);
-  const base = Math.max(44, Math.min(120, w));
-  return Math.round(base * spineScale);
+// ===== SPINE DIMENSIONS =====
+// Each book has a "volume" (from content size) and a "format" (seeded from title/author).
+// Format determines how the volume is distributed between height and width.
+// Tall/slim books are like paperbacks. Short/thick books are like hardcovers.
+
+function hashBook(book) {
+  let h = 0;
+  const s = (book.title || '') + '|' + (book.author || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
 }
+
+function spineDimensions(book) {
+  const total = book.contentSize || (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
+  const hash = hashBook(book);
+
+  // Volume: log-scaled content size → 0.0 (tiny) to 1.0 (massive)
+  const log = Math.log10(Math.max(1000, total));
+  const volume = Math.max(0, Math.min(1, (log - 4.0) / 2.5)); // 4.0–6.5 → 0–1
+
+  // Format: hash-seeded ratio of height vs width
+  // 0.0 = very tall/slim, 1.0 = very short/thick
+  const formatSeed = (hash % 100) / 100; // 0.0 to 0.99
+
+  // Height: 65–98%, influenced by volume (bigger = taller) and format (tall format = taller)
+  const tallness = 1.0 - formatSeed; // invert: low seed = tall
+  const heightBase = 65 + volume * 20 + tallness * 13;
+  const heightPct = Math.max(60, Math.min(98, Math.round(heightBase)));
+
+  // Width: 40–120px, influenced by volume (bigger = wider) and format (thick format = wider)
+  const thickness = formatSeed; // high seed = thick
+  const widthBase = 40 + volume * 50 + thickness * 30;
+  const widthPx = Math.max(40, Math.min(120, Math.round(widthBase)));
+
+  // Apply responsive scale to width
+  return { heightPct, widthPx: Math.round(widthPx * spineScale) };
+}
+
+// Keep these as wrappers for backward compatibility
+function spineWidth(book) { return spineDimensions(book).widthPx; }
+function spineHeight(book) { return spineDimensions(book).heightPct; }
 
 // Get the current spine scale from CSS (responsive)
 let spineScale = 1;
@@ -926,29 +972,6 @@ function updateSpineScale() {
   const val = getComputedStyle(test).getPropertyValue('--spine-scale');
   document.body.removeChild(test);
   spineScale = parseFloat(val) || 1;
-}
-
-// Estimate height — varies from 65% to 100% of container
-function spineHeight(book) {
-  const total = book.contentSize || (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
-
-  // Use multiple seed sources for more variation
-  let seed1 = 0, seed2 = 0;
-  for (let i = 0; i < book.title.length; i++) {
-    seed1 += book.title.charCodeAt(i);
-    seed2 = seed2 * 31 + book.title.charCodeAt(i);
-  }
-  // Author adds variation too
-  const author = book.author || '';
-  for (let i = 0; i < author.length; i++) seed2 += author.charCodeAt(i) * 7;
-
-  const jitter = (Math.abs(seed1 * 13 + seed2) % 16) - 8; // -8 to +7 percent
-
-  const log = Math.log10(Math.max(1000, total));
-  // Map log range 4.5–6.5 to 65%–95%, then add jitter
-  const base = ((log - 4.5) / 2) * 30 + 65;
-  const pct = Math.round(base + jitter);
-  return Math.max(60, Math.min(100, pct));
 }
 
 // Shorten a title for spine display — truncate at first colon or dash subtitle
@@ -1149,7 +1172,7 @@ function renderSpineView(el, books) {
   const spineData = books.map((b, i) => {
     const w = spineWidth(b);
     const hPct = spineHeight(b);
-    const hPx = Math.round((hPct / 100) * usableH); // actual pixel height
+    const hPx = Math.round((hPct / 100) * usableH);
     let seed = 0;
     for (let j = 0; j < b.title.length; j++) seed += b.title.charCodeAt(j);
     const bandTop = 15 + (seed % 25);
@@ -1157,20 +1180,25 @@ function renderSpineView(el, books) {
     const color = b.spineColor || strColor(b.title);
     const hasProgress = (b.progress || 0) > 0 && (b.progress || 0) < 100;
     const isLastRead = b.id === lastId;
+    const contentSize = b.contentSize || 0;
     return { book: b, index: i, width: w, heightPct: hPct, heightPx: hPx,
-      color, progress: b.progress || 0, bandTop, bandBottom, hasProgress, isLastRead };
+      color, progress: b.progress || 0, bandTop, bandBottom, hasProgress, isLastRead, contentSize };
   });
 
   el.innerHTML = '<div class="view-spine-wrap"><div class="view-spine" id="spine-row">' +
     spineData.map((s, i) => {
       const { style: ts, displayTitle } = spineTextStyle(s.width, s.book.title, s.heightPx);
       const pinnedClass = s.isLastRead ? ' pinned' : '';
+      const charLabel = s.contentSize > 1000000 ? (s.contentSize / 1000000).toFixed(1) + 'M' :
+                        s.contentSize > 1000 ? Math.round(s.contentSize / 1000) + 'k' :
+                        s.contentSize;
       const spineHtml = `<div class="spine${pinnedClass}" id="spine-${s.index}" style="width:${s.width}px;height:${s.heightPct}%;background:linear-gradient(180deg,${s.color[0]},${s.color[1]})" onclick="openBookById('${s.book.id}')" title="${esc(s.book.title)}">
         <div class="spine-pages"></div>
         <div class="spine-band" style="top:${s.bandTop}%"></div>
         <div class="spine-band" style="top:${s.bandBottom}%"></div>
         ${s.hasProgress ? '<div class="spine-bookmark"></div>' : ''}
         <span class="spine-text" style="${ts}">${esc(displayTitle)}</span>
+        <span class="spine-chars">${charLabel}</span>
         ${s.progress > 0 ? '<div class="spine-prog"><div class="spine-prog-fill" style="width:' + s.progress + '%"></div></div>' : ''}
       </div>`;
       const spacer = (s.isLastRead && spineData.length > 1) ?
