@@ -261,23 +261,23 @@ html, body {
   display: flex; align-items: flex-end; gap: 3px; height: 100%;
   width: max-content;
   min-width: 100%;
-  padding: 40px 40px 14px 28px;
+  padding: 40px 40px 28px 28px;
   position: relative;
-  /* Only the wood plank — no back wall, let page background show above */
+  /* Wood plank — no back wall, let page background show above */
   background:
     /* Plank top highlight — thin glint of light on the front edge (the shelf's front lip) */
-    linear-gradient(180deg, transparent calc(100% - 42px), rgba(255,255,255,0.05) calc(100% - 42px), rgba(255,255,255,0.05) calc(100% - 41px), transparent calc(100% - 41px)),
+    linear-gradient(180deg, transparent calc(100% - 66px), rgba(255,255,255,0.05) calc(100% - 66px), rgba(255,255,255,0.05) calc(100% - 65px), transparent calc(100% - 65px)),
     /* Plank cast shadow — where the shelf's recessed area meets the front lip */
-    linear-gradient(180deg, transparent calc(100% - 44px), rgba(0,0,0,0.28) calc(100% - 44px), rgba(0,0,0,0.12) calc(100% - 40px), transparent calc(100% - 36px)),
-    /* Wood plank — warm bottom band, now 42px tall so it reads past the books' feet */
-    linear-gradient(180deg, transparent 0, transparent calc(100% - 42px), var(--shelf-wood-top) calc(100% - 42px), var(--shelf-wood-bot) 100%);
+    linear-gradient(180deg, transparent calc(100% - 68px), rgba(0,0,0,0.28) calc(100% - 68px), rgba(0,0,0,0.12) calc(100% - 64px), transparent calc(100% - 60px)),
+    /* Wood plank — 66px tall, deeper shelf for more room */
+    linear-gradient(180deg, transparent 0, transparent calc(100% - 66px), var(--shelf-wood-top) calc(100% - 66px), var(--shelf-wood-bot) 100%);
 }
 
 /* Fine wood grain on the plank — irregular spacing so it doesn't read as a pattern */
 .view-spine::before {
   content: '';
   position: absolute;
-  left: 0; right: 0; bottom: 0; height: 42px;
+  left: 0; right: 0; bottom: 0; height: 66px;
   background:
     repeating-linear-gradient(90deg,
       transparent 0 23px,
@@ -308,36 +308,13 @@ html, body {
   margin-right: 4px;
 }
 
-/* Layered lighting + cloth texture. Values tuned per theme via CSS vars. */
+/* Single subtle shadow at the bottom — just enough to ground the book. No top highlight, no cloth weave. */
 .spine::before {
   content: '';
   position: absolute; inset: 0;
-  background:
-    /* Top highlight — light from above */
-    linear-gradient(180deg, rgba(255,255,255,var(--spine-light-top)) 0%, rgba(255,255,255,var(--spine-light-mid)) 14%, transparent 32%),
-    /* Bottom weight — stronger on light themes where shelf contrast is weaker */
-    linear-gradient(0deg, rgba(0,0,0,var(--spine-dark-base)) 0%, rgba(0,0,0,var(--spine-dark-mid)) 12%, transparent 35%),
-    /* Cloth / linen weave texture — fine horizontal + vertical threads */
-    repeating-linear-gradient(90deg, transparent 0 1px, rgba(0,0,0,0.035) 1px 2px),
-    repeating-linear-gradient(0deg, transparent 0 1px, rgba(255,255,255,0.025) 1px 2px);
+  background: linear-gradient(0deg, rgba(0,0,0,var(--spine-dark-base)) 0%, rgba(0,0,0,var(--spine-dark-mid)) 10%, transparent 28%);
   pointer-events: none;
   border-radius: inherit;
-}
-
-/* Grain overlay for depth — film-grain-style noise via layered radial gradients */
-.spine::after {
-  content: '';
-  position: absolute; inset: 0;
-  background-image:
-    radial-gradient(circle at 23% 17%, rgba(255,255,255,0.04) 0.5px, transparent 1px),
-    radial-gradient(circle at 71% 43%, rgba(0,0,0,0.05) 0.5px, transparent 1px),
-    radial-gradient(circle at 41% 79%, rgba(255,255,255,0.03) 0.5px, transparent 1px),
-    radial-gradient(circle at 87% 91%, rgba(0,0,0,0.04) 0.5px, transparent 1px);
-  background-size: 4px 4px, 5px 5px, 3px 3px, 6px 6px;
-  pointer-events: none;
-  border-radius: inherit;
-  opacity: 0.6;
-  z-index: 0;
 }
 
 /* Page edge — crisp paper sliver running the full left edge, following the corner radius */
@@ -403,15 +380,14 @@ html, body {
 /* Bookmark ribbon — thin fabric strip hanging over the spine */
 .spine-bookmark {
   position: absolute;
-  top: -3px;
-  left: 17.5%;
-  width: 65%;
-  height: 110px;
+  top: -2px;
+  left: 30%;
+  width: 40%;
+  height: 60px;
   background: var(--brand);
   z-index: 2;
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%);
-  /* Soft drop shadow on the spine surface — this is what makes it feel like it's hanging on top */
-  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.3));
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25));
 }
 
 /* Last-read separator */
