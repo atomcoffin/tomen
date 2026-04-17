@@ -59,7 +59,7 @@
 
 html, body {
   height: 100%; overflow: hidden;
-  background: linear-gradient(180deg, var(--paper) 0%, var(--linen) 100%);
+  background: linear-gradient(180deg, var(--paper) 0%, var(--linen) 60%, color-mix(in srgb, var(--linen), black 15%) 100%);
   color: var(--ink);
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
@@ -245,13 +245,13 @@ html, body {
   margin-right: 4px;
 }
 
-/* Use a single pseudo-element for both top+bottom edge effects */
+/* Use a single pseudo-element for top highlight + bottom shadow (lighting from above) */
 .spine::before {
   content: '';
   position: absolute; inset: 0;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.12) 0%, transparent 8px),
-    linear-gradient(0deg, rgba(0,0,0,0.18) 0%, transparent 8px);
+    linear-gradient(0deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.1) 30%, transparent 60%);
   pointer-events: none;
   border-radius: inherit;
 }
@@ -276,7 +276,7 @@ html, body {
   padding: 0 4px; overflow: hidden;
   max-height: calc(100% - 24px);
   max-width: calc(100% - 4px);
-  text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
   z-index: 1;
   word-break: break-word;
   hyphens: auto;
@@ -982,11 +982,13 @@ function spineTitle(title) {
 function spineTextStyle(width, title, spineHeightPx) {
   const displayTitle = spineTitle(title);
   const len = displayTitle.length;
-  const maxH = Math.round(spineHeightPx * 0.65); // 65% of height
-  const maxW = Math.round(width * 0.40); // 40% of width — primary constraint
+  const maxH = Math.round(spineHeightPx * 0.70); // 70% of height
+  const maxW = Math.round(width * 0.45); // 45% of width
 
-  // Very short titles (<=5 chars) get a wider allowance so they can be bigger
-  const effectiveMaxW = len <= 5 ? Math.round(width * 0.55) : maxW;
+  // Short titles get progressively wider allowance
+  const effectiveMaxW = len <= 3 ? Math.round(width * 0.65) :
+                        len <= 5 ? Math.round(width * 0.60) :
+                        len <= 8 ? Math.round(width * 0.50) : maxW;
 
   function measure(text, fontSize, fontWeight) {
     const el = document.createElement('span');
@@ -1006,7 +1008,7 @@ function spineTextStyle(width, title, spineHeightPx) {
     return { w, h };
   }
 
-  let lo = 8, hi = len <= 5 ? 36 : 28, best = 8;
+  let lo = 8, hi = len <= 3 ? 44 : len <= 5 ? 40 : 32, best = 8;
   for (let i = 0; i < 12; i++) {
     const mid = Math.round((lo + hi) / 2);
     if (lo > hi) break;
