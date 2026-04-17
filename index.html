@@ -258,8 +258,7 @@ html, body {
 .view-spine {
   display: flex; align-items: flex-end; gap: 3px; height: 100%;
   width: max-content;
-  /* Bottom padding reduced so books sit deeper — their bottoms get occluded by the plank's front lip,
-     which sells the "books are planted in the shelf" perspective. */
+  min-width: 100%;
   padding: 40px 40px 14px 28px;
   position: relative;
   /* Only the wood plank — no back wall, let page background show above */
