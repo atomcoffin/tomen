@@ -235,7 +235,12 @@ html, body {
   border-radius: 2px 5px 5px 2px;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; position: relative; overflow: hidden;
-  box-shadow: inset -3px 0 6px rgba(0,0,0,0.2), 2px 0 6px rgba(0,0,0,0.12);
+  box-shadow:
+    inset 1px 0 0 rgba(255,255,255,0.06),           /* subtle left-edge page glint */
+    inset -3px 0 6px rgba(0,0,0,0.22),              /* right-edge curvature shadow */
+    inset 0 -1px 0 rgba(0,0,0,0.5),                 /* crisp bottom contact line */
+    0 3px 8px rgba(0,0,0,0.35),                     /* shelf drop shadow */
+    2px 0 5px rgba(0,0,0,0.15);                     /* neighbor separation */
   will-change: transform;
 }
 .spine:hover { filter: brightness(1.08); }
@@ -245,44 +250,73 @@ html, body {
   margin-right: 4px;
 }
 
-/* Use a single pseudo-element for top highlight + bottom shadow (lighting from above) */
+/* Layered lighting + cloth texture. Light from above, weight at the bottom. */
 .spine::before {
   content: '';
   position: absolute; inset: 0;
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.12) 0%, transparent 8px),
-    linear-gradient(0deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.1) 30%, transparent 60%);
+    /* Top highlight — soft light wash on the upper portion */
+    linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 14%, transparent 32%),
+    /* Bottom weight — deeper, sharper shadow at the base, as if sitting on a shelf */
+    linear-gradient(0deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.28) 8%, rgba(0,0,0,0.08) 22%, transparent 45%),
+    /* Cloth / linen weave texture — fine horizontal + vertical threads */
+    repeating-linear-gradient(90deg, transparent 0 1px, rgba(0,0,0,0.035) 1px 2px),
+    repeating-linear-gradient(0deg, transparent 0 1px, rgba(255,255,255,0.025) 1px 2px);
   pointer-events: none;
   border-radius: inherit;
+  mix-blend-mode: normal;
 }
 
-/* Page edge — simpler gradient */
+/* Grain overlay for depth — film-grain-style noise via layered radial gradients */
+.spine::after {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(circle at 23% 17%, rgba(255,255,255,0.04) 0.5px, transparent 1px),
+    radial-gradient(circle at 71% 43%, rgba(0,0,0,0.05) 0.5px, transparent 1px),
+    radial-gradient(circle at 41% 79%, rgba(255,255,255,0.03) 0.5px, transparent 1px),
+    radial-gradient(circle at 87% 91%, rgba(0,0,0,0.04) 0.5px, transparent 1px);
+  background-size: 4px 4px, 5px 5px, 3px 3px, 6px 6px;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0.6;
+  z-index: 0;
+}
+
+/* Page edge — crisp paper sliver on the left */
 .spine-pages {
   position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px;
-  background: rgba(255,255,255,0.08);
+  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.08));
   border-radius: 1px 0 0 1px;
+  z-index: 1;
 }
 
 .spine-band {
   position: absolute; left: 0; right: 0;
   height: 1px;
-  background: rgba(0,0,0,0.12);
+  background: rgba(0,0,0,0.18);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.05);
+  z-index: 1;
 }
 
 .spine-text {
   writing-mode: vertical-rl; text-orientation: mixed;
   font-family: var(--font-read);
-  color: white; line-height: 1.1;
+  color: rgba(255,255,255,0.94); line-height: 1.1;
   padding: 0 4px; overflow: hidden;
   max-height: calc(100% - 24px);
   max-width: calc(100% - 4px);
-  text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
-  z-index: 1;
+  text-shadow:
+    0 1px 1.5px rgba(0,0,0,0.55),
+    0 0 2px rgba(0,0,0,0.35),
+    0 0 8px rgba(0,0,0,0.2);
+  z-index: 2;
   word-break: break-word;
   hyphens: auto;
   text-wrap: balance;
   display: flex;
   align-items: center;
+  letter-spacing: 0.01em;
 }
 .spine-prog {
   position: absolute; bottom: 0; left: 0; right: 0;
@@ -303,25 +337,36 @@ html, body {
   letter-spacing: 0;
 }
 
-/* Bookmark ribbon — flat 2D, brand color */
+/* Bookmark ribbon — fabric sitting on top of the spine */
 .spine-bookmark {
   position: absolute;
-  top: -2px;
+  top: -3px;
   left: 17.5%;
   width: 65%;
   height: 110px;
-  background: var(--brand);
+  background:
+    linear-gradient(90deg,
+      rgba(0,0,0,0.18) 0%,
+      rgba(0,0,0,0) 12%,
+      rgba(255,255,255,0.1) 50%,
+      rgba(0,0,0,0) 88%,
+      rgba(0,0,0,0.22) 100%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--brand), white 8%) 0%,
+      var(--brand) 30%,
+      color-mix(in srgb, var(--brand), black 12%) 100%);
   z-index: 2;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%);
+  filter: drop-shadow(1px 2px 2px rgba(0,0,0,0.45)) drop-shadow(0 1px 0 rgba(0,0,0,0.2));
 }
-/* Fold crease near top */
+/* Fold crease near top — subtle fabric fold where it wraps over the spine */
 .spine-bookmark::after {
   content: '';
   position: absolute;
-  top: 8px; left: 0; right: 0;
-  height: 1px;
-  background: rgba(0,0,0,0.12);
-  box-shadow: 0 1px 0 rgba(255,255,255,0.08);
+  top: 4px; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.08) 60%, transparent 100%);
+  box-shadow: 0 2px 0 rgba(255,255,255,0.14);
 }
 
 /* Last-read separator */
