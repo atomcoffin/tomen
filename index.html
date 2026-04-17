@@ -15,6 +15,7 @@
 @font-face { font-family: 'Thow'; src: url('fonts/Thow0.3-SemiBold.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
 @font-face { font-family: 'Thow Mono'; src: url('fonts/ThowMono0.3-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
 @font-face { font-family: 'Siche Text'; src: url('fonts/Siche-Text-v.0.3-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Siche Text'; src: url('fonts/Siche-Text-v.0.3-Regular-Italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -365,7 +366,7 @@ html, body {
 
 .spine-text {
   writing-mode: vertical-rl; text-orientation: mixed;
-  font-family: 'Siche Text', var(--font-read);
+  font-family: var(--font-read);
   color: rgba(248,240,228,0.82); line-height: 1.1;
   padding: 0 4px; overflow: hidden;
   max-height: calc(100% - 24px);
@@ -459,7 +460,7 @@ html, body {
 
 .r-inner {
   max-width: var(--reading-width); margin: 0 auto;
-  font-family: var(--font-read); font-size: var(--font-size);
+  font-family: 'Siche Text', var(--font-read); font-size: var(--font-size);
   line-height: var(--line-height); color: var(--ink);
 }
 .r-inner h1, .r-inner h2, .r-inner h3 {
