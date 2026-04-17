@@ -140,7 +140,7 @@ html, body {
 .view-switch .icon-btn.active { background: var(--card); }
 
 /* Library body */
-.lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 28px 28px; min-height: 0; }
+.lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 12px 28px 28px; min-height: 0; }
 .lib-body.spine-active {
   overflow: hidden;
   padding: 0;
@@ -294,11 +294,31 @@ html, body {
   top: -2px;
   left: 10%;
   width: 80%;
-  height: 56px;
-  background: var(--ember);
+  height: 110px;
   z-index: 2;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%);
+  filter: drop-shadow(0 3px 4px rgba(0,0,0,0.3));
+  /* 3D ribbon effect — highlight on left edge, shadow on right */
+  background:
+    linear-gradient(90deg,
+      rgba(255,255,255,0.15) 0%,
+      transparent 20%,
+      transparent 70%,
+      rgba(0,0,0,0.1) 100%
+    ),
+    linear-gradient(180deg,
+      var(--ember) 0%,
+      var(--clay) 100%
+    );
+}
+/* Fold crease near top */
+.spine-bookmark::after {
+  content: '';
+  position: absolute;
+  top: 8px; left: 0; right: 0;
+  height: 1px;
+  background: rgba(0,0,0,0.12);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.08);
 }
 
 /* Last-read separator */
@@ -908,18 +928,27 @@ function updateSpineScale() {
   spineScale = parseFloat(val) || 1;
 }
 
-// Estimate height — varies from 75% to 100% of container
+// Estimate height — varies from 65% to 100% of container
 function spineHeight(book) {
   const total = book.contentSize || (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
-  // Also use a title-seeded offset so books of similar length still differ slightly
-  let titleSeed = 0;
-  for (let i = 0; i < book.title.length; i++) titleSeed += book.title.charCodeAt(i);
-  const jitter = (titleSeed % 8) - 4; // -4 to +3 percent
+
+  // Use multiple seed sources for more variation
+  let seed1 = 0, seed2 = 0;
+  for (let i = 0; i < book.title.length; i++) {
+    seed1 += book.title.charCodeAt(i);
+    seed2 = seed2 * 31 + book.title.charCodeAt(i);
+  }
+  // Author adds variation too
+  const author = book.author || '';
+  for (let i = 0; i < author.length; i++) seed2 += author.charCodeAt(i) * 7;
+
+  const jitter = (Math.abs(seed1 * 13 + seed2) % 16) - 8; // -8 to +7 percent
 
   const log = Math.log10(Math.max(1000, total));
-  // Map log range 4.5–6.5 to 75%–100%
-  const pct = Math.round(((log - 4.5) / 2) * 25 + 75) + jitter;
-  return Math.max(72, Math.min(100, pct));
+  // Map log range 4.5–6.5 to 65%–95%, then add jitter
+  const base = ((log - 4.5) / 2) * 30 + 65;
+  const pct = Math.round(base + jitter);
+  return Math.max(60, Math.min(100, pct));
 }
 
 // Shorten a title for spine display — truncate at first colon or dash subtitle
