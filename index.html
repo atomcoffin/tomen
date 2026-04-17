@@ -26,6 +26,7 @@
   --fog: #B8AFA7;
   --ember: #C45D3E;
   --clay: #A94E33;
+  --brand: #D4654A;
   --border: rgba(44, 36, 32, 0.06);
   --shadow-cover: 0 4px 16px rgba(44, 36, 32, 0.08);
   --shadow-float: 0 8px 32px rgba(44, 36, 32, 0.12);
@@ -43,7 +44,7 @@
 .dark {
   --paper: #1A1614; --linen: #121010; --card: #242020;
   --ink: #E8E0D8; --stone: #9A8E86; --fog: #6A5E56;
-  --ember: #E07050; --clay: #F08060;
+  --ember: #E07050; --clay: #F08060; --brand: #E07050;
   --border: rgba(232, 224, 216, 0.06);
   --shadow-cover: 0 4px 16px rgba(0,0,0,0.25);
   --shadow-float: 0 8px 32px rgba(0,0,0,0.4);
@@ -52,13 +53,14 @@
 .sepia {
   --paper: #F4ECD8; --linen: #EBE1C8; --card: #FAF4E4;
   --ink: #3E3228; --stone: #7A6E5E; --fog: #A89880;
-  --ember: #B85A3A; --clay: #9A4C2E;
+  --ember: #B85A3A; --clay: #9A4C2E; --brand: #C4604A;
   --border: rgba(62, 50, 40, 0.06);
 }
 
 html, body {
   height: 100%; overflow: hidden;
-  background: var(--paper); color: var(--ink);
+  background: linear-gradient(180deg, var(--paper) 0%, var(--linen) 100%);
+  color: var(--ink);
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
 }
@@ -79,10 +81,10 @@ html, body {
   white-space: nowrap; margin-right: auto;
 }
 .lib-brand .greeting-name {
-  color: var(--ember); cursor: pointer;
+  color: var(--brand); cursor: pointer;
   border-bottom: 1px dashed transparent;
 }
-.lib-brand .greeting-name:hover { border-bottom-color: var(--ember); }
+.lib-brand .greeting-name:hover { border-bottom-color: var(--brand); }
 
 .lib-toolbar { display: flex; align-items: center; gap: 6px; }
 
@@ -115,7 +117,7 @@ html, body {
 }
 
 .btn-primary {
-  background: var(--ember); color: white;
+  background: var(--brand); color: white;
 }
 .btn-primary:hover { background: var(--clay); }
 
@@ -301,28 +303,16 @@ html, body {
   letter-spacing: 0;
 }
 
-/* Bookmark ribbon — hangs from top of spine */
+/* Bookmark ribbon — flat 2D, brand color */
 .spine-bookmark {
   position: absolute;
   top: -2px;
   left: 17.5%;
   width: 65%;
   height: 110px;
+  background: var(--brand);
   z-index: 2;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%);
-  filter: drop-shadow(0 3px 4px rgba(0,0,0,0.3));
-  /* 3D ribbon effect — highlight on left edge, shadow on right */
-  background:
-    linear-gradient(90deg,
-      rgba(255,255,255,0.15) 0%,
-      transparent 20%,
-      transparent 70%,
-      rgba(0,0,0,0.1) 100%
-    ),
-    linear-gradient(180deg,
-      var(--ember) 0%,
-      var(--clay) 100%
-    );
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%);
 }
 /* Fold crease near top */
 .spine-bookmark::after {
@@ -991,8 +981,12 @@ function spineTitle(title) {
 // Primary constraint: spine width. Text should not dominate the spine.
 function spineTextStyle(width, title, spineHeightPx) {
   const displayTitle = spineTitle(title);
-  const maxH = Math.round(spineHeightPx * 0.70); // 70% of height
-  const maxW = Math.round(width * 0.45); // 45% of width — this is the main constraint
+  const len = displayTitle.length;
+  const maxH = Math.round(spineHeightPx * 0.65); // 65% of height
+  const maxW = Math.round(width * 0.40); // 40% of width — primary constraint
+
+  // Very short titles (<=5 chars) get a wider allowance so they can be bigger
+  const effectiveMaxW = len <= 5 ? Math.round(width * 0.55) : maxW;
 
   function measure(text, fontSize, fontWeight) {
     const el = document.createElement('span');
@@ -1012,14 +1006,13 @@ function spineTextStyle(width, title, spineHeightPx) {
     return { w, h };
   }
 
-  // Binary search for largest fitting size
-  let lo = 8, hi = 36, best = 8;
+  let lo = 8, hi = len <= 5 ? 36 : 28, best = 8;
   for (let i = 0; i < 12; i++) {
     const mid = Math.round((lo + hi) / 2);
     if (lo > hi) break;
     const fw = mid >= 22 ? 500 : 400;
     const m = measure(displayTitle, mid, fw);
-    if (m.w <= maxW && m.h <= maxH) {
+    if (m.w <= effectiveMaxW && m.h <= maxH) {
       best = mid;
       lo = mid + 1;
     } else {
@@ -1028,11 +1021,7 @@ function spineTextStyle(width, title, spineHeightPx) {
   }
 
   let size = best;
-
-  // Weight — lighter overall
   let weight = size >= 22 ? 500 : 400;
-
-  // Letter-spacing
   let spacing = size >= 18 ? '-0.2px' : size >= 12 ? '0.2px' : '0.4px';
 
   return { style: `font-size:${size}px;font-weight:${weight};letter-spacing:${spacing}`, displayTitle };
