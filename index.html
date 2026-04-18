@@ -320,13 +320,14 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 }
 .spine-top.center { align-items: center; }
 
-/* Author zone — small strip near bottom of spine, above the bottom band */
+/* Author zone — small strip near bottom, ending just before bottom band */
 .spine-bot {
   position: absolute;
-  top: 82%; left: 0; right: 0; height: 6%;
+  top: 84%; left: 0; right: 0; height: 6%;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
+  padding-bottom: 1%;
   z-index: 2;
   pointer-events: none;
 }
@@ -1160,20 +1161,27 @@ function spineLayout(book, widthPx, heightPx) {
   const titleMaxW = Math.round(widthPx * widthFactor);
   const titleMaxH = topZoneH;
 
-  // Title size caps — generous upper bounds. Binary search will shrink to fit
-  // the actual zone; these just prevent ridiculous oversizing on very tall spines.
-  // For a ~1100px-tall spine with ~750px title zone, a short title can be HUGE.
-  const titleCap = parsed.primary.length <= 4  ? 80 :
-                   parsed.primary.length <= 8  ? 60 :
-                   parsed.primary.length <= 16 ? 44 :
-                   parsed.primary.length <= 30 ? 32 : 26;
+  // Title caps scale with spine height so the same text feels right on
+  // 500px mobile spines and 1200px desktop spines. Calibrated against a
+  // reference spine height of 1100px: a 4-char title caps at ~80px there,
+  // scaling down proportionally on shorter spines (min 18px cap).
+  // Scale factor: clamped between 0.5 (short) and 1.0 (tall).
+  const hScale = Math.max(0.5, Math.min(1.0, heightPx / 1100));
+  const len = parsed.primary.length;
+  const baseCap = len <= 4  ? 80 :
+                  len <= 8  ? 60 :
+                  len <= 16 ? 44 :
+                  len <= 30 ? 32 : 26;
+  const titleCap = Math.max(14, Math.round(baseCap * hScale));
 
   let title = fitVertical(parsed.primary, titleMaxW, titleMaxH, 10, titleCap);
 
-  // If single-column forced an unreadable size on a long title, try wrapping.
-  if (title.size < 14 && parsed.primary.length > 18) {
-    const wideW = Math.round(widthPx * (hasSecondary ? 0.55 : 0.80));
-    const wrapped = fitVertical(parsed.primary, wideW, titleMaxH, title.size + 1, Math.max(title.size + 4, 22));
+  // If a long title ended up well below its cap AND well under the zone height,
+  // it's because single-column physically can't get bigger. Try wrapping.
+  // This happens when the title is height-constrained by char count, not width.
+  if (parsed.primary.length > 18 && title.size < titleCap * 0.75) {
+    const wideW = Math.round(widthPx * (hasSecondary ? 0.55 : 0.85));
+    const wrapped = fitVertical(parsed.primary, wideW, titleMaxH, title.size + 1, titleCap);
     if (wrapped.size > title.size) title = wrapped;
   }
 
@@ -1192,10 +1200,13 @@ function spineLayout(book, widthPx, heightPx) {
   if (parsed.author) {
     const full = parsed.author;
     const init = parsed.authorInitials;
-    author = fitHorizontal(full, authorMaxW, authorMaxH, 1, 15, 10);
-    if (!author && full.includes(' ')) author = fitHorizontal(full, authorMaxW, authorMaxH, 2, 14, 10);
-    if (!author && init && init !== full) author = fitHorizontal(init, authorMaxW, authorMaxH, 1, 15, 10);
-    if (!author && init) author = fitHorizontal(init, authorMaxW, authorMaxH, 1, 14, 8);
+    // Author sizes grow with big spines but have a hard legibility floor.
+    const authorCap = heightPx > 900 ? 16 : heightPx > 600 ? 14 : 12;
+    const authorFloor = 9;
+    author = fitHorizontal(full, authorMaxW, authorMaxH, 1, authorCap, authorFloor);
+    if (!author && full.includes(' ')) author = fitHorizontal(full, authorMaxW, authorMaxH, 2, authorCap - 1, authorFloor);
+    if (!author && init && init !== full) author = fitHorizontal(init, authorMaxW, authorMaxH, 1, authorCap, authorFloor);
+    if (!author && init) author = fitHorizontal(init, authorMaxW, authorMaxH, 1, authorCap, 7);
   }
 
   return {
