@@ -277,41 +277,61 @@ html, body {
   pointer-events: none;
 }
 
-.spine-text {
-  writing-mode: vertical-rl; text-orientation: mixed;
-  font-family: var(--font-read);
-  color: rgba(248,240,228,0.82); line-height: 1.1;
-  padding: 0 4px; overflow: hidden;
-  max-height: calc(100% - 24px);
-  max-width: calc(100% - 4px);
-  /* Debossed into fabric: single tight dark shadow suggests the recess edge */
-  text-shadow: 0 1px 0 rgba(0,0,0,0.45);
+/* Title zone — lives in the upper portion of the spine, below the top band.
+   Holds the primary title and an optional secondary (subtitle or volume number) beside it. */
+.spine-top-zone {
+  position: absolute;
+  top: 12%; left: 0; right: 0;
+  height: 62%;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 3px;
   z-index: 2;
+  pointer-events: none;
+}
+
+/* Author zone — lives in the lower portion of the spine, above the bottom band. */
+.spine-bot-zone {
+  position: absolute;
+  bottom: 12%; left: 0; right: 0;
+  height: 18%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 3px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.spine-title, .spine-secondary, .spine-author {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-family: var(--font-read);
+  line-height: 1.1;
   word-break: break-word;
   hyphens: auto;
   text-wrap: balance;
-  display: flex;
-  align-items: center;
-  letter-spacing: 0.01em;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.45);
 }
+.spine-title {
+  color: rgba(248,240,228,0.88);
+}
+.spine-secondary {
+  color: rgba(248,240,228,0.62);
+  font-style: italic;
+}
+.spine-author {
+  color: rgba(248,240,228,0.68);
+}
+
 .spine-prog {
   position: absolute; bottom: 0; left: 0; right: 0;
   height: 3px; background: rgba(0,0,0,0.15);
 }
 .spine-prog-fill { height: 100%; background: var(--ember); }
-
-/* Debug: character count at bottom of spine */
-.spine-chars {
-  position: absolute;
-  bottom: 6px; left: 0; right: 0;
-  font-family: var(--font-mono);
-  font-size: 7px;
-  color: rgba(255,255,255,0.4);
-  text-align: center;
-  z-index: 3;
-  writing-mode: horizontal-tb;
-  letter-spacing: 0;
-}
 
 /* Bookmark ribbon — thin fabric strip hanging over the spine */
 .spine-bookmark {
@@ -966,69 +986,183 @@ function updateSpineScale() {
   spineScale = parseFloat(val) || 1;
 }
 
-// Shorten a title for spine display — truncate at first colon or dash subtitle
-function spineTitle(title) {
-  // Truncate at ": " or " — " or " - " (subtitle separators)
-  const separators = [': ', ' — ', ' - '];
-  for (const sep of separators) {
-    const idx = title.indexOf(sep);
-    if (idx > 0 && idx < title.length - 3) {
-      return title.substring(0, idx);
+// ===== SPINE COMPOSITION =====
+// Parse a book's title and author into layout-ready pieces.
+// Returns: { primary, secondary, author, authorInitials }
+//   primary   = the main title (e.g. "The Lord of the Rings", "Deltora Quest")
+//   secondary = subtitle or volume number (e.g. "Illustrated Edition", "#3"), or null
+//   author    = author's full name or null
+//   authorInitials = shortened author (e.g. "Philip K. Dick" → "P.K.D.", "Sartre" → "S.")
+
+function parseSpineContent(book) {
+  const rawTitle = book.title || '';
+  const author = book.author || null;
+
+  // Detect volume/book/vol pattern: "<series> #3", "<series> Vol. 3", "<series> Book III"
+  // Must have at least one word before the volume marker.
+  const volMatch = rawTitle.match(/^(.+?)\s+(#\d+|Vol\.?\s*\d+|Book\s+[IVXLCDM\d]+|Part\s+[IVXLCDM\d]+)\s*$/i);
+  // Detect subtitle separator: ": ", " — ", " - "
+  const subSep = [': ', ' — ', ' - '];
+  let subIdx = -1, subSepUsed = null;
+  for (const sep of subSep) {
+    const idx = rawTitle.indexOf(sep);
+    if (idx > 0 && idx < rawTitle.length - 3) { subIdx = idx; subSepUsed = sep; break; }
+  }
+
+  let primary, secondary = null;
+  if (volMatch) {
+    primary = volMatch[1].trim();
+    secondary = volMatch[2].trim();
+  } else if (subIdx > 0) {
+    primary = rawTitle.substring(0, subIdx).trim();
+    secondary = rawTitle.substring(subIdx + subSepUsed.length).trim();
+  } else {
+    primary = rawTitle;
+  }
+
+  // Build author initials
+  let authorInitials = null;
+  if (author) {
+    const words = author.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 1) {
+      authorInitials = words[0][0].toUpperCase() + '.';
+    } else {
+      authorInitials = words.map(w => w[0].toUpperCase()).join('.') + '.';
     }
   }
-  return title;
+
+  return { primary, secondary, author, authorInitials };
 }
 
-// Compute spine text style — binary search for largest size that fits
-// Primary constraint: spine width. Text should not dominate the spine.
-function spineTextStyle(width, title, spineHeightPx) {
-  const displayTitle = spineTitle(title);
-  const len = displayTitle.length;
-  const maxH = Math.round(spineHeightPx * 0.70); // 70% of height
-  const maxW = Math.round(width * 0.45); // 45% of width
+// Legacy wrapper — some callers still want just the display title string
+function spineTitle(title) {
+  return parseSpineContent({ title }).primary;
+}
 
-  // Short titles get progressively wider allowance
-  const effectiveMaxW = len <= 3 ? Math.round(width * 0.65) :
-                        len <= 5 ? Math.round(width * 0.60) :
-                        len <= 8 ? Math.round(width * 0.50) : maxW;
+// Measure vertical text dimensions at a given size.
+// Reusable helper for all spine text sizing.
+function measureVertical(text, fontSize, fontWeight, maxHeightPx) {
+  const el = document.createElement('span');
+  el.style.cssText = `
+    position:absolute;top:-9999px;left:-9999px;visibility:hidden;
+    writing-mode:vertical-rl;text-orientation:mixed;
+    font-family:Thow,Georgia,serif;line-height:1.1;
+    word-break:break-word;hyphens:auto;white-space:normal;
+    font-size:${fontSize}px;font-weight:${fontWeight};
+    max-height:${maxHeightPx}px;
+  `;
+  el.textContent = text;
+  document.body.appendChild(el);
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  document.body.removeChild(el);
+  return { w, h };
+}
 
-  function measure(text, fontSize, fontWeight) {
-    const el = document.createElement('span');
-    el.style.cssText = `
-      position:absolute;top:-9999px;left:-9999px;visibility:hidden;
-      writing-mode:vertical-rl;text-orientation:mixed;
-      font-family:Thow,Georgia,serif;line-height:1.1;
-      word-break:break-word;hyphens:auto;white-space:normal;
-      font-size:${fontSize}px;font-weight:${fontWeight};
-      max-height:${maxH}px;
-    `;
-    el.textContent = text;
-    document.body.appendChild(el);
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    document.body.removeChild(el);
-    return { w, h };
-  }
-
-  let lo = 8, hi = len <= 3 ? 44 : len <= 5 ? 40 : 32, best = 8;
+// Binary-search the largest font size that fits the given text within (maxWidth, maxHeight).
+// Returns { size, weight, width, height }.
+function fitVertical(text, maxWidth, maxHeight, sizeLo, sizeHi) {
+  let lo = sizeLo, hi = sizeHi, best = sizeLo, bestW = 0, bestH = 0;
   for (let i = 0; i < 12; i++) {
-    const mid = Math.round((lo + hi) / 2);
     if (lo > hi) break;
+    const mid = Math.round((lo + hi) / 2);
     const fw = mid >= 22 ? 500 : 400;
-    const m = measure(displayTitle, mid, fw);
-    if (m.w <= effectiveMaxW && m.h <= maxH) {
-      best = mid;
+    const m = measureVertical(text, mid, fw, maxHeight);
+    if (m.w <= maxWidth && m.h <= maxHeight) {
+      best = mid; bestW = m.w; bestH = m.h;
       lo = mid + 1;
     } else {
       hi = mid - 1;
     }
   }
+  return { size: best, weight: best >= 22 ? 500 : 400, width: bestW, height: bestH };
+}
 
-  let size = best;
-  let weight = size >= 22 ? 500 : 400;
-  let spacing = size >= 18 ? '-0.2px' : size >= 12 ? '0.2px' : '0.4px';
+// Compute the full spine layout for a book.
+// Returns a layout object describing what to render and how.
+function spineLayout(book, widthPx, heightPx) {
+  const parsed = parseSpineContent(book);
+  const isNarrow = widthPx < 42;
 
-  return { style: `font-size:${size}px;font-weight:${weight};letter-spacing:${spacing}`, displayTitle };
+  // Height budget: 9% headband top, 9% headband bottom, leaving 82% for content.
+  // We divide that into a title zone (top) and an author zone (bottom) with padding between.
+  const headTop = Math.round(heightPx * 0.09);
+  const headBot = Math.round(heightPx * 0.09);
+  const contentH = heightPx - headTop - headBot;
+
+  // Author display: pick the form that fits. Narrow spine always uses initials.
+  // Try full name first. If author is multi-word and wide-ish spine, fall back to initials for compactness.
+  let authorDisplay = null;
+  if (parsed.author) {
+    authorDisplay = isNarrow ? (parsed.authorInitials || parsed.author) : parsed.author;
+  }
+
+  // Allocate heights: author gets up to 25% of content height (or its natural size, whichever is smaller).
+  // Title gets the rest, minus a 15% gap.
+  const authorMaxH = authorDisplay ? Math.round(contentH * 0.22) : 0;
+  const gapH = authorDisplay ? Math.round(contentH * 0.08) : 0;
+  const titleMaxH = contentH - authorMaxH - gapH;
+
+  // Width allocation: text never uses more than ~55% of spine width (leaves margin on both sides).
+  // Short primary titles are allowed to use more width (up to 65%) so they feel bigger.
+  const shortTitle = parsed.primary.length <= 6;
+  const titleMaxW = Math.round(widthPx * (shortTitle ? 0.62 : 0.50));
+  const authorMaxW = Math.round(widthPx * 0.40);
+
+  // Primary title sizing
+  const titleMaxSize = shortTitle ? 40 : parsed.primary.length <= 14 ? 28 : 22;
+  const title = fitVertical(parsed.primary, titleMaxW, titleMaxH, 9, titleMaxSize);
+
+  // Secondary title (subtitle or volume): ~75% of primary size, sits next to it.
+  // Only show if there's horizontal room for it beside the primary.
+  let secondary = null;
+  if (parsed.secondary) {
+    // Budget for secondary width: remaining horizontal space after primary
+    const secondaryMaxW = Math.max(0, widthPx - title.width - 6 /* gutter */ - 4 /* margin */);
+    // Only attempt if there's at least 10px of horizontal room
+    if (secondaryMaxW >= 10) {
+      const secTargetMax = Math.max(9, Math.round(title.size * 0.75));
+      const sec = fitVertical(parsed.secondary, secondaryMaxW, titleMaxH, 8, secTargetMax);
+      if (sec.size >= 8) secondary = sec;
+    }
+  }
+
+  // Author sizing
+  let author = null;
+  if (authorDisplay) {
+    const a = fitVertical(authorDisplay, authorMaxW, authorMaxH, 8, 14);
+    // If the full name didn't fit at a legible size (≥9px) and we tried the full form,
+    // fall back to initials.
+    if (a.size < 9 && !isNarrow && parsed.authorInitials && authorDisplay !== parsed.authorInitials) {
+      const init = fitVertical(parsed.authorInitials, authorMaxW, authorMaxH, 8, 14);
+      if (init.size > a.size) {
+        authorDisplay = parsed.authorInitials;
+        author = init;
+      } else {
+        author = a;
+      }
+    } else {
+      author = a;
+    }
+  }
+
+  return {
+    primary: { text: parsed.primary, ...title },
+    secondary: secondary ? { text: parsed.secondary, ...secondary } : null,
+    author: author ? { text: authorDisplay, ...author } : null,
+    zones: { headTop, headBot, titleMaxH, authorMaxH }
+  };
+}
+
+// Legacy wrapper kept so nothing else breaks if it still calls this
+function spineTextStyle(width, title, spineHeightPx) {
+  const layout = spineLayout({ title, author: null }, width, spineHeightPx);
+  const p = layout.primary;
+  const spacing = p.size >= 18 ? '-0.2px' : p.size >= 12 ? '0.2px' : '0.4px';
+  return {
+    style: `font-size:${p.size}px;font-weight:${p.weight};letter-spacing:${spacing}`,
+    displayTitle: p.text
+  };
 }
 
 // ===== LIBRARY RENDERING =====
@@ -1160,18 +1294,34 @@ function renderSpineView(el, books) {
 
   el.innerHTML = '<div class="view-spine-wrap"><div class="view-spine" id="spine-row">' +
     spineData.map((s, i) => {
-      const { style: ts, displayTitle } = spineTextStyle(s.width, s.book.title, s.heightPx);
+      const layout = spineLayout(s.book, s.width, s.heightPx);
       const pinnedClass = s.isLastRead ? ' pinned' : '';
-      const charLabel = s.contentSize > 1000000 ? (s.contentSize / 1000000).toFixed(1) + 'M' :
-                        s.contentSize > 1000 ? Math.round(s.contentSize / 1000) + 'k' :
-                        s.contentSize;
+
+      const p = layout.primary;
+      const primaryStyle = `font-size:${p.size}px;font-weight:${p.weight};letter-spacing:${p.size >= 18 ? '-0.2px' : p.size >= 12 ? '0.2px' : '0.4px'}`;
+      const primaryHtml = `<span class="spine-title" style="${primaryStyle}">${esc(p.text)}</span>`;
+
+      let secondaryHtml = '';
+      if (layout.secondary) {
+        const sec = layout.secondary;
+        const secStyle = `font-size:${sec.size}px;font-weight:${sec.weight};letter-spacing:${sec.size >= 12 ? '0.1px' : '0.3px'}`;
+        secondaryHtml = `<span class="spine-secondary" style="${secStyle}">${esc(sec.text)}</span>`;
+      }
+
+      let authorHtml = '';
+      if (layout.author) {
+        const a = layout.author;
+        const authStyle = `font-size:${a.size}px;font-weight:${a.weight};letter-spacing:${a.size >= 11 ? '0.2px' : '0.4px'}`;
+        authorHtml = `<span class="spine-author" style="${authStyle}">${esc(a.text)}</span>`;
+      }
+
       const spineHtml = `<div class="spine${pinnedClass}" id="spine-${s.index}" style="width:${s.width}px;height:${s.heightPct}%;background:linear-gradient(180deg,${s.color[0]},${s.color[1]})" onclick="openBookById('${s.book.id}')" title="${esc(s.book.title)}">
         <div class="spine-pages"></div>
         <div class="spine-band" style="top:${s.bandTop}%"></div>
         <div class="spine-band" style="top:${s.bandBottom}%"></div>
         ${s.hasProgress ? '<div class="spine-bookmark"></div>' : ''}
-        <span class="spine-text" style="${ts}">${esc(displayTitle)}</span>
-        <span class="spine-chars">${charLabel}</span>
+        <div class="spine-top-zone">${primaryHtml}${secondaryHtml}</div>
+        ${authorHtml ? `<div class="spine-bot-zone">${authorHtml}</div>` : ''}
         ${s.progress > 0 ? '<div class="spine-prog"><div class="spine-prog-fill" style="width:' + s.progress + '%"></div></div>' : ''}
       </div>`;
       const spacer = (s.isLastRead && spineData.length > 1) ?
