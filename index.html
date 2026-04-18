@@ -149,7 +149,10 @@ html, body {
   overflow: hidden;
   padding: 0;
   display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   min-height: 0;
+  max-height: 66vh;
 }
 .lib-body.spine-active > .view-spine-wrap { flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; }
 .lib-body::-webkit-scrollbar { width: 4px; }
@@ -306,7 +309,7 @@ html, body {
   pointer-events: none;
 }
 
-.spine-title, .spine-secondary, .spine-author {
+.spine-title, .spine-secondary {
   writing-mode: vertical-rl;
   text-orientation: mixed;
   font-family: var(--font-read);
@@ -324,7 +327,13 @@ html, body {
   font-style: italic;
 }
 .spine-author {
-  color: rgba(248,240,228,0.68);
+  writing-mode: horizontal-tb;
+  font-family: var(--font-read);
+  line-height: 1.1;
+  color: rgba(248,240,228,0.72);
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.45);
+  max-width: 100%;
 }
 
 .spine-prog {
@@ -1059,6 +1068,31 @@ function measureVertical(text, fontSize, fontWeight, maxHeightPx) {
   return { w, h };
 }
 
+// Measure horizontal text dimensions at a given size, allowing word-wrap within maxWidth.
+function measureHorizontal(text, fontSize, fontWeight, maxWidthPx) {
+  const el = document.createElement('span');
+  el.style.cssText = `
+    position:absolute;top:-9999px;left:-9999px;visibility:hidden;
+    font-family:Thow,Georgia,serif;line-height:1.1;
+    word-break:normal;white-space:normal;
+    font-size:${fontSize}px;font-weight:${fontWeight};
+    display:inline-block;
+    max-width:${maxWidthPx}px;
+  `;
+  el.textContent = text;
+  document.body.appendChild(el);
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  document.body.removeChild(el);
+  return { w, h };
+}
+
+// Count lines of horizontal text by measuring height against single-line height.
+function horizontalLineCount(fontSize, totalHeight) {
+  // line-height: 1.1 → one line is ~fontSize * 1.1
+  return Math.round(totalHeight / (fontSize * 1.1));
+}
+
 // Binary-search the largest font size that fits the given text within (maxWidth, maxHeight).
 // Returns { size, weight, width, height }.
 function fitVertical(text, maxWidth, maxHeight, sizeLo, sizeHi) {
@@ -1090,17 +1124,15 @@ function spineLayout(book, widthPx, heightPx) {
   const headBot = Math.round(heightPx * 0.09);
   const contentH = heightPx - headTop - headBot;
 
-  // Author display: pick the form that fits. Narrow spine always uses initials.
-  // Try full name first. If author is multi-word and wide-ish spine, fall back to initials for compactness.
-  let authorDisplay = null;
-  if (parsed.author) {
-    authorDisplay = isNarrow ? (parsed.authorInitials || parsed.author) : parsed.author;
-  }
+  // Author display: choose full name vs initials only matters for fallback logic below.
+  // The actual text we render is determined by fitting (see Author sizing block).
+  const hasAuthor = !!parsed.author;
 
-  // Allocate heights: author gets up to 25% of content height (or its natural size, whichever is smaller).
-  // Title gets the rest, minus a 15% gap.
-  const authorMaxH = authorDisplay ? Math.round(contentH * 0.22) : 0;
-  const gapH = authorDisplay ? Math.round(contentH * 0.08) : 0;
+  // Allocate heights: author zone is small because upright (horizontal) text is compact —
+  // even 2 lines of 13px text at line-height 1.1 = ~29px, which fits easily.
+  // Title gets the rest, with a modest gap above the author.
+  const authorMaxH = hasAuthor ? Math.min(40, Math.round(contentH * 0.15)) : 0;
+  const gapH = hasAuthor ? Math.round(contentH * 0.04) : 0;
   const titleMaxH = contentH - authorMaxH - gapH;
 
   // Width allocation: text never uses more than ~55% of spine width (leaves margin on both sides).
@@ -1109,8 +1141,9 @@ function spineLayout(book, widthPx, heightPx) {
   const titleMaxW = Math.round(widthPx * (shortTitle ? 0.62 : 0.50));
   const authorMaxW = Math.round(widthPx * 0.40);
 
-  // Primary title sizing
-  const titleMaxSize = shortTitle ? 40 : parsed.primary.length <= 14 ? 28 : 22;
+  // Primary title sizing — let it grow to fill the available zone.
+  // Upper cap is generous; the actual limit is what fits in (titleMaxW, titleMaxH).
+  const titleMaxSize = 48;
   const title = fitVertical(parsed.primary, titleMaxW, titleMaxH, 9, titleMaxSize);
 
   // Secondary title (subtitle or volume): ~75% of primary size, sits next to it.
@@ -1127,29 +1160,54 @@ function spineLayout(book, widthPx, heightPx) {
     }
   }
 
-  // Author sizing
+  // Author sizing — UPRIGHT (horizontal) by default.
+  // Try in order: full name one line → full name wrapped to 2 lines → initials one line.
+  // Pick the first form that fits legibly.
   let author = null;
-  if (authorDisplay) {
-    const a = fitVertical(authorDisplay, authorMaxW, authorMaxH, 8, 14);
-    // If the full name didn't fit at a legible size (≥9px) and we tried the full form,
-    // fall back to initials.
-    if (a.size < 9 && !isNarrow && parsed.authorInitials && authorDisplay !== parsed.authorInitials) {
-      const init = fitVertical(parsed.authorInitials, authorMaxW, authorMaxH, 8, 14);
-      if (init.size > a.size) {
-        authorDisplay = parsed.authorInitials;
-        author = init;
-      } else {
-        author = a;
+  if (hasAuthor) {
+    const fullName = parsed.author;
+    const initials = parsed.authorInitials;
+    const authorAreaW = widthPx - 6;  // spine width minus small margin on each side
+    const authorAreaH = authorMaxH;
+
+    // Helper: try a text string at progressively smaller sizes until it fits
+    // in (maxW, maxH) with at most `maxLines` lines. Returns null if nothing fits at >= 9px.
+    function tryHorizontal(text, maxW, maxH, maxLines, sizeHi, sizeLo) {
+      for (let size = sizeHi; size >= sizeLo; size--) {
+        const m = measureHorizontal(text, size, 400, maxW);
+        const lines = horizontalLineCount(size, m.h);
+        if (m.h <= maxH && lines <= maxLines && m.w <= maxW) {
+          return { text, size, weight: 400, width: m.w, height: m.h, lines, orientation: 'horizontal' };
+        }
       }
-    } else {
-      author = a;
+      return null;
     }
+
+    // 1. Try full name on ONE line at legible size
+    let fit = tryHorizontal(fullName, authorAreaW, authorAreaH, 1, 14, 9);
+
+    // 2. Try full name wrapped to TWO lines if multi-word
+    if (!fit && fullName.includes(' ')) {
+      fit = tryHorizontal(fullName, authorAreaW, authorAreaH, 2, 13, 9);
+    }
+
+    // 3. Fall back to initials, one line
+    if (!fit && initials && initials !== fullName) {
+      fit = tryHorizontal(initials, authorAreaW, authorAreaH, 1, 14, 9);
+    }
+
+    // 4. Last resort: initials at minimum size, accept whatever fits
+    if (!fit && initials) {
+      fit = tryHorizontal(initials, authorAreaW, authorAreaH, 1, 14, 7);
+    }
+
+    author = fit;
   }
 
   return {
     primary: { text: parsed.primary, ...title },
     secondary: secondary ? { text: parsed.secondary, ...secondary } : null,
-    author: author ? { text: authorDisplay, ...author } : null,
+    author: author,
     zones: { headTop, headBot, titleMaxH, authorMaxH }
   };
 }
