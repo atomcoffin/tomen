@@ -1182,6 +1182,11 @@ function spineLayout(book, widthPx, heightPx) {
     }
   }
 
+  // DEBUG — remove after diagnosis
+  if (window._spineDebug !== false) {
+    console.log(`[spine] "${parsed.primary}" w=${widthPx} h=${heightPx} | titleMaxW=${titleMaxW} titleMaxH=${titleMaxH} cap=${titleCap} → size=${title.size} measuredW=${title.width} measuredH=${title.height}`);
+  }
+
   const titleCenter = title.height < titleMaxH * 0.55;
 
   let author = null;
