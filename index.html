@@ -308,7 +308,7 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 /* Title zone — upper area, holds primary + optional secondary side by side */
 .spine-top {
   position: absolute;
-  top: 10%; left: 0; right: 0; height: 64%;
+  top: 12%; left: 0; right: 0; height: 68%;
   display: flex;
   flex-direction: row;
   gap: 4px;
@@ -320,10 +320,10 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 }
 .spine-top.center { align-items: center; }
 
-/* Author zone — lower area, horizontal text */
+/* Author zone — small strip near bottom of spine, above the bottom band */
 .spine-bot {
   position: absolute;
-  top: 76%; left: 0; right: 0; height: 12%;
+  top: 82%; left: 0; right: 0; height: 6%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1143,17 +1143,21 @@ function spineLayout(book, widthPx, heightPx) {
   const parsed = parseSpineContent(book);
 
   // Zone heights — must match CSS percentages exactly.
-  // CSS: .spine-top  top:10% height:64%  (spine pixel range 10-74%)
-  // CSS: .spine-bot  top:76% height:12%  (spine pixel range 76-88%)
-  const topZoneH = Math.round(heightPx * 0.64);
-  const botZoneH = Math.round(heightPx * 0.12);
+  // CSS: .spine-top  top:12% height:68%  (pixel range 12-80%)
+  // CSS: .spine-bot  top:82% height:6%   (pixel range 82-88%)
+  const topZoneH = Math.round(heightPx * 0.68);
+  const botZoneH = Math.round(heightPx * 0.06);
 
   const sidePad = Math.max(6, Math.round(widthPx * 0.10));
   const authorMaxW = Math.max(10, widthPx - sidePad * 2);
   const authorMaxH = botZoneH;
 
   const hasSecondary = !!parsed.secondary;
-  const titleMaxW = Math.round(widthPx * (hasSecondary ? 0.40 : 0.55));
+  // Title width budget — short titles get more width so they can go large.
+  const isShort = parsed.primary.length <= 8;
+  const widthFactor = hasSecondary ? 0.40 :
+                      isShort ? 0.70 : 0.55;
+  const titleMaxW = Math.round(widthPx * widthFactor);
   const titleMaxH = topZoneH;
 
   const titleCap = parsed.primary.length <= 4  ? 44 :
@@ -1369,8 +1373,21 @@ function renderSpineView(el, books) {
     });
   };
 
-  if (document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(paintText);
+  // Wait for Thow to actually load, then measure and fill in text.
+  // document.fonts.load() forces a fetch+load of the named font — unlike
+  // document.fonts.ready which only waits for already-requested fonts.
+  const loadAndPaint = async () => {
+    try {
+      await Promise.all([
+        document.fonts.load('14px Thow'),
+        document.fonts.load('bold 14px Thow'),
+      ]);
+    } catch {}
+    paintText();
+  };
+
+  if (document.fonts && document.fonts.load) {
+    loadAndPaint();
   } else {
     requestAnimationFrame(paintText);
   }
