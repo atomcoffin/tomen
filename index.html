@@ -437,7 +437,7 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
   flex: 1;
   overflow: hidden;
   position: relative;
-  padding: 72px 56px 68px;
+  padding: 72px 48px 68px;
   display: flex;
   align-items: stretch;
 }
@@ -481,7 +481,7 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 .r-click-zone.next { right: 40px; }
 
 /* Vertical edge strips — swipe up/down to change font size (left) or line height (right).
-   Visual: flat paper-edge color. Swap background to a url() later for image assets. */
+   Invisible by default; becomes a visible zone only in debug mode. */
 .r-edge-strip {
   position: absolute;
   top: 0; bottom: 0;
@@ -492,30 +492,19 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
-  background: var(--paper-edge);
+  background: transparent;
 }
 .r-edge-strip.left { left: 0; }
 .r-edge-strip.right { right: 0; }
 
-/* Decorative top paper-edge band — purely visual, no interaction. */
-.r-edge-top {
-  position: absolute;
-  left: 0; right: 0; top: 0;
-  height: 16px;
-  z-index: 4;
-  pointer-events: none;
-  background: var(--paper-edge);
-}
-
-/* Bottom width strip — horizontal swipe adjusts reading width.
-   Flat paper-edge color, same as the side strips and top band. */
+/* Bottom width strip — horizontal swipe adjusts reading width. Invisible by default. */
 .r-width-strip {
   position: absolute;
   left: 0; right: 0; bottom: 0;
   height: 40px;
   z-index: 5;
   cursor: ew-resize;
-  background: var(--paper-edge);
+  background: transparent;
   touch-action: none;
 }
 
@@ -892,7 +881,6 @@ body.r-debug .r-book {
     </div>
   </div>
   <div class="r-content" id="r-content">
-    <div class="r-edge-top" aria-hidden="true"></div>
     <div class="r-edge-strip left" data-strip="font" aria-label="Swipe up/down to change font size"></div>
     <div class="r-click-zone prev" data-dir="prev"></div>
     <div class="r-book" id="r-book" onclick="toggleReaderUI()">
