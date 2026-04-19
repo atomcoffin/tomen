@@ -469,13 +469,12 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 }
 .r-pages.fade { opacity: 0; }
 
-/* Click zones for pagination — inset from the edges to leave room for the
-   side gesture strips. Cursor hides when over the zone so the hover-ring
-   stands in for it. */
+/* Click zones for pagination. Cursor hides when over the zone so the
+   hover-ring stands in for it. */
 .r-click-zone {
   position: absolute;
-  top: 0; bottom: 52px;
-  width: calc(22% - 52px);
+  top: 0; bottom: 0;
+  width: 22%;
   cursor: none;
   z-index: 3;
   background: transparent;
@@ -483,99 +482,86 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
   -webkit-user-select: none;
   user-select: none;
 }
-.r-click-zone.prev { left: 52px; }
-.r-click-zone.next { right: 52px; }
+.r-click-zone.prev { left: 0; }
+.r-click-zone.next { right: 0; }
 
-/* Vertical edge strips — swipe up/down to change font size (left) or line height (right).
-   Wider than click zones for comfortable thumb reach. */
-.r-edge-strip {
+/* Quick controls cluster — three drag pills grouped at bottom center, only
+   visible when the reader UI (toolbar) is showing. Each pill is both a
+   touch-start target and a visual preview of its control's range. Once a drag
+   starts, the gesture is free to travel anywhere on screen. */
+.r-quick {
   position: absolute;
-  top: 0; bottom: 0;
-  width: 52px;
-  z-index: 4;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%) translateY(8px);
+  display: flex;
+  gap: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+  z-index: 10;
+}
+body.r-ui-visible .r-quick {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+
+/* Shared pill shape */
+.r-quick-pill {
+  background: color-mix(in srgb, var(--paper) 82%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+  color: var(--fog);
+  font-family: var(--font-ui);
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   cursor: ns-resize;
   touch-action: none;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  transition: background 140ms ease, color 140ms ease;
 }
-.r-edge-strip.left { left: 0; }
-.r-edge-strip.right { right: 0; }
+.r-quick-pill:hover { color: var(--ink); background: color-mix(in srgb, var(--paper) 95%, transparent); }
 
-/* Pill-shaped glyph containers. Size-preview icons at the extremes flank a
-   static pointing-finger hint at the center. Only visible when UI is showing. */
-.r-edge-glyph {
-  color: var(--fog);
-  opacity: 0;
-  transition: opacity 200ms ease;
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--ink) 5%, transparent);
-  border-radius: 999px;
-  gap: 10px;
-}
-body.r-ui-visible .r-edge-glyph { opacity: 1; }
-
-.r-edge-glyph-v {
+/* Vertical pill: font size, line height */
+.r-quick-pill:not(.r-quick-pill-h) {
   flex-direction: column;
-  padding: 12px 0;
-  width: 36px;
-  font-family: var(--font-ui);
-  line-height: 1;
+  padding: 10px 0;
+  width: 40px;
 }
 
-.r-edge-glyph-h {
+/* Horizontal pill: width */
+.r-quick-pill-h {
   flex-direction: row;
   padding: 0 14px;
-  height: 36px;
+  height: 40px;
+  cursor: ew-resize;
 }
 
 /* Font-size glyph extremes */
-.r-glyph-big   { font-size: 20px; font-weight: 500; }
-.r-glyph-small { font-size: 11px; font-weight: 500; }
+.r-glyph-big   { font-size: 18px; font-weight: 500; }
+.r-glyph-small { font-size: 10px; font-weight: 500; }
 
 /* Line-height glyph extremes */
 .r-glyph-lines-loose, .r-glyph-lines-tight {
   display: flex; flex-direction: column; align-items: center;
 }
 .r-glyph-lines-loose span, .r-glyph-lines-tight span {
-  width: 16px; height: 1px; background: currentColor;
+  width: 14px; height: 1px; background: currentColor;
 }
-.r-glyph-lines-loose { gap: 6px; }
-.r-glyph-lines-tight { gap: 2px; }
+.r-glyph-lines-loose { gap: 5px; }
+.r-glyph-lines-tight { gap: 1.5px; }
 
 /* Width glyph extremes */
-.r-glyph-bar-short { width: 12px; height: 2px; background: currentColor; border-radius: 1px; }
-.r-glyph-bar-long  { width: 40px; height: 2px; background: currentColor; border-radius: 1px; }
-
-/* Pointing-finger hint icon — same on desktop and touch, no animation. */
-.r-glyph-hint {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ember);
-}
-.r-glyph-hint .ph { font-size: 18px; line-height: 1; }
-
-/* Bottom width strip — horizontal swipe adjusts reading width. */
-.r-width-strip {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: 52px;
-  z-index: 5;
-  cursor: ew-resize;
-  background: transparent;
-  touch-action: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+.r-glyph-bar-short { width: 10px; height: 2px; background: currentColor; border-radius: 1px; }
+.r-glyph-bar-long  { width: 32px; height: 2px; background: currentColor; border-radius: 1px; }
 
 /* Hold-to-turn circular indicator. Positioned via inline left/top at cursor.
    Two visible states: 'hover' (empty ring shown at 55% opacity when cursor is
@@ -643,8 +629,6 @@ body.r-ui-visible .r-edge-glyph { opacity: 1; }
 
 /* Debug mode — reveals click/touch interaction zones.
    Toggle with Shift+D while the reader is active. */
-/* Debug mode — reveals click/touch interaction zones.
-   Toggle with Shift+D. */
 body.r-debug .r-click-zone.prev {
   background: rgba(63, 138, 255, 0.18) !important;
   outline: 2px dashed rgba(63, 138, 255, 0.55) !important;
@@ -653,17 +637,8 @@ body.r-debug .r-click-zone.next {
   background: rgba(255, 138, 63, 0.18) !important;
   outline: 2px dashed rgba(255, 138, 63, 0.55) !important;
 }
-body.r-debug .r-edge-strip.left {
-  background: rgba(200, 80, 200, 0.22) !important;
+body.r-debug .r-quick-pill {
   outline: 2px dashed rgba(200, 80, 200, 0.55) !important;
-}
-body.r-debug .r-edge-strip.right {
-  background: rgba(255, 220, 80, 0.22) !important;
-  outline: 2px dashed rgba(255, 220, 80, 0.6) !important;
-}
-body.r-debug .r-width-strip {
-  background: rgba(63, 220, 138, 0.22) !important;
-  outline: 2px dashed rgba(63, 220, 138, 0.6) !important;
 }
 body.r-debug .r-book {
   outline: 1px dashed rgba(100, 100, 100, 0.3) !important;
@@ -945,15 +920,6 @@ body.r-debug .r-book {
     </div>
   </div>
   <div class="r-content" id="r-content">
-    <div class="r-edge-strip left" data-strip="font" aria-label="Swipe up/down to change font size">
-      <div class="r-edge-glyph r-edge-glyph-v">
-        <span class="r-glyph-big" aria-hidden="true">A</span>
-        <span class="r-glyph-hint" aria-hidden="true">
-          <i class="ph ph-hand-pointing"></i>
-        </span>
-        <span class="r-glyph-small" aria-hidden="true">A</span>
-      </div>
-    </div>
     <div class="r-click-zone prev" data-dir="prev"></div>
     <div class="r-book" id="r-book" onclick="toggleReaderUI()">
       <div class="r-pages" id="r-pages">
@@ -961,28 +927,6 @@ body.r-debug .r-book {
       </div>
     </div>
     <div class="r-click-zone next" data-dir="next"></div>
-    <div class="r-edge-strip right" data-strip="line" aria-label="Swipe up/down to change line height">
-      <div class="r-edge-glyph r-edge-glyph-v">
-        <span class="r-glyph-lines-loose" aria-hidden="true">
-          <span></span><span></span><span></span>
-        </span>
-        <span class="r-glyph-hint" aria-hidden="true">
-          <i class="ph ph-hand-pointing"></i>
-        </span>
-        <span class="r-glyph-lines-tight" aria-hidden="true">
-          <span></span><span></span><span></span>
-        </span>
-      </div>
-    </div>
-    <div class="r-width-strip" data-strip="width" aria-label="Swipe left/right to change reading width">
-      <div class="r-edge-glyph r-edge-glyph-h">
-        <span class="r-glyph-bar-short" aria-hidden="true"></span>
-        <span class="r-glyph-hint" aria-hidden="true">
-          <i class="ph ph-hand-pointing"></i>
-        </span>
-        <span class="r-glyph-bar-long" aria-hidden="true"></span>
-      </div>
-    </div>
     <!-- Hold-to-turn circular indicator, positioned at cursor on hover/press -->
     <div class="r-hold-ring" id="r-hold-ring" aria-hidden="true">
       <svg viewBox="0 0 40 40">
@@ -995,6 +939,22 @@ body.r-debug .r-book {
     <!-- Swipe progress line, fixed near the bottom center -->
     <div class="r-swipe-bar" id="r-swipe-bar" aria-hidden="true">
       <div class="r-swipe-fill" id="r-swipe-fill"></div>
+    </div>
+    <!-- Quick controls cluster. Three drag pills (font/line/width) grouped
+         together at the bottom center. Visible only when reader UI is showing. -->
+    <div class="r-quick" id="r-quick" aria-hidden="true">
+      <div class="r-quick-pill" data-strip="font" aria-label="Drag up/down to change font size">
+        <span class="r-glyph-big" aria-hidden="true">A</span>
+        <span class="r-glyph-small" aria-hidden="true">A</span>
+      </div>
+      <div class="r-quick-pill" data-strip="line" aria-label="Drag up/down to change line height">
+        <span class="r-glyph-lines-loose" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="r-glyph-lines-tight" aria-hidden="true"><span></span><span></span><span></span></span>
+      </div>
+      <div class="r-quick-pill r-quick-pill-h" data-strip="width" aria-label="Drag left/right to change reading width">
+        <span class="r-glyph-bar-short" aria-hidden="true"></span>
+        <span class="r-glyph-bar-long" aria-hidden="true"></span>
+      </div>
     </div>
   </div>
 </div>
