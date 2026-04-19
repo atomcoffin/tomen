@@ -434,7 +434,7 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
   flex: 1;
   overflow: hidden;
   position: relative;
-  padding: 36px 24px 28px;
+  padding: 72px 24px 68px;
   display: flex;
   align-items: stretch;
 }
@@ -461,12 +461,13 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 .r-pages.fade { opacity: 0; }
 
 /* Click zones for pagination — positioned absolutely over the book.
-   Shortened at the bottom to leave room for the width-swipe strip. */
+   Shortened at the bottom to leave room for the width-swipe strip.
+   Cursor hides when over the zone so the hover-ring stands in for it. */
 .r-click-zone {
   position: absolute;
   top: 0; bottom: 40px;
   width: 22%;
-  cursor: pointer;
+  cursor: none;
   z-index: 3;
   background: transparent;
 }
@@ -490,7 +491,7 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
    over a click zone) and 'active' (full opacity while pressed, ring fills). */
 .r-hold-ring {
   position: absolute;
-  width: 44px; height: 44px;
+  width: 66px; height: 66px;
   pointer-events: none;
   opacity: 0;
   transition: opacity 140ms ease;
@@ -552,10 +553,23 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 
 /* Debug mode — reveals click/touch interaction zones.
    Toggle with Shift+D while the reader is active. */
-body.r-debug .r-click-zone.prev { background: rgba(63, 138, 255, 0.12); outline: 1px dashed rgba(63, 138, 255, 0.4); }
-body.r-debug .r-click-zone.next { background: rgba(255, 138, 63, 0.12); outline: 1px dashed rgba(255, 138, 63, 0.4); }
-body.r-debug .r-width-strip { background: rgba(63, 220, 138, 0.12); outline: 1px dashed rgba(63, 220, 138, 0.4); }
-body.r-debug .r-book { outline: 1px dashed rgba(200, 80, 200, 0.35); }
+/* Debug mode — reveals click/touch interaction zones.
+   Toggle with Shift+D. */
+body.r-debug .r-click-zone.prev {
+  background: rgba(63, 138, 255, 0.18) !important;
+  outline: 2px dashed rgba(63, 138, 255, 0.55) !important;
+}
+body.r-debug .r-click-zone.next {
+  background: rgba(255, 138, 63, 0.18) !important;
+  outline: 2px dashed rgba(255, 138, 63, 0.55) !important;
+}
+body.r-debug .r-width-strip {
+  background: rgba(63, 220, 138, 0.22) !important;
+  outline: 2px dashed rgba(63, 220, 138, 0.6) !important;
+}
+body.r-debug .r-book {
+  outline: 2px dashed rgba(200, 80, 200, 0.45) !important;
+}
 
 .r-inner {
   font-family: 'Siche Text', var(--font-read);
@@ -2158,6 +2172,14 @@ document.addEventListener('keydown', (e) => {
     tracking = true;
     mode = isWidthStripTarget(e.target) ? 'width' : 'undecided';
     lastStep = 0;
+    // If the touch started on a click zone, kick off the hold timer so
+    // a stationary press turns the page even without swiping. Any motion
+    // beyond a small deadzone cancels the hold and falls through to swipe.
+    const zone = e.target.closest && e.target.closest('.r-click-zone');
+    if (zone) {
+      const dir = zone.dataset.dir;
+      if (dir) startHold(dir, s.x, s.y);
+    }
   }, { passive: true });
 
   rc.addEventListener('touchmove', (e) => {
@@ -2166,6 +2188,12 @@ document.addEventListener('keydown', (e) => {
     const dx = t.clientX - startX;
     const dy = t.clientY - startY;
     const absX = Math.abs(dx), absY = Math.abs(dy);
+
+    // If a hold is armed and motion exceeds a small deadzone, it's no longer
+    // a stationary press — cancel the hold and let swipe logic proceed.
+    if (isHolding() && (absX > 10 || absY > 10)) {
+      cancelHold();
+    }
 
     if (mode === 'undecided') {
       if (absX >= MODE_DECIDE_THRESH && absX > absY * 1.3) mode = 'horizontal';
@@ -2198,6 +2226,9 @@ document.addEventListener('keydown', (e) => {
   rc.addEventListener('touchend', (e) => {
     if (!tracking) return;
     tracking = false;
+    // If a hold was armed and the user lifted before the timer fired,
+    // cancel it — they didn't press long enough.
+    if (isHolding()) cancelHold();
     if (mode === 'horizontal') {
       const t = e.changedTouches[0];
       const dx = t.clientX - startX;
@@ -2214,111 +2245,104 @@ document.addEventListener('keydown', (e) => {
     tracking = false;
     mode = 'undecided';
     hideSwipeProgress();
+    cancelHold();
   }, { passive: true });
 })();
 
-// ===== CLICK-AND-HOLD PAGE TURN =====
-// While the mouse is over a click zone, show an empty ring at the cursor with a
-// directional arrow. Press starts a 400ms fill timer; release before completion
-// cancels, completion turns the page.
+// ===== PAGE-TURN HOLD MACHINERY =====
+// Shared state + helpers for the circular hold-to-turn indicator, used by
+// both mouse (click-and-hold) and touch (press-and-hold).
+const HOLD_MS = 400;
+let _holdTimer = null;
+let _holdDir = null;
+let _hoverDir = null;
+
+function _ring() { return $('r-hold-ring'); }
+function _fill() { return _ring()?.querySelector('.r-hold-fill'); }
+
+function _positionRing(x, y) {
+  const r = _ring();
+  if (!r) return;
+  const rc = $('r-content').getBoundingClientRect();
+  r.style.left = (x - rc.left) + 'px';
+  r.style.top  = (y - rc.top) + 'px';
+}
+function _setDirClass(dir) {
+  const r = _ring();
+  if (!r) return;
+  r.classList.remove('dir-prev', 'dir-next');
+  if (dir) r.classList.add('dir-' + dir);
+}
+function showHover(dir, x, y) {
+  const r = _ring(), f = _fill();
+  if (!r || !f) return;
+  _hoverDir = dir;
+  _setDirClass(dir);
+  _positionRing(x, y);
+  f.style.transition = 'none';
+  f.style.strokeDashoffset = '106.8';
+  r.classList.remove('active');
+  r.classList.add('hover');
+}
+function hideHover() {
+  _hoverDir = null;
+  const r = _ring();
+  if (!r) return;
+  if (!_holdTimer) r.classList.remove('hover', 'active');
+  _setDirClass(null);
+}
+function startHold(dir, x, y) {
+  cancelHold();
+  _holdDir = dir;
+  const r = _ring(), f = _fill();
+  if (!r || !f) return;
+  _setDirClass(dir);
+  _positionRing(x, y);
+  f.style.transition = 'none';
+  f.style.strokeDashoffset = '106.8';
+  f.offsetHeight;  // reflow
+  f.style.transition = `stroke-dashoffset ${HOLD_MS}ms linear`;
+  f.style.strokeDashoffset = '0';
+  r.classList.remove('hover');
+  r.classList.add('active');
+  _holdTimer = setTimeout(() => {
+    _holdTimer = null;
+    if (dir === 'next') readerNext();
+    else if (dir === 'prev') readerPrev();
+    cancelHold(true);
+  }, HOLD_MS);
+}
+function cancelHold(completed) {
+  if (_holdTimer) { clearTimeout(_holdTimer); _holdTimer = null; }
+  _holdDir = null;
+  const r = _ring(), f = _fill();
+  if (!r) return;
+  r.classList.remove('active');
+  if (f && !completed) {
+    f.style.transition = 'none';
+    f.style.strokeDashoffset = '106.8';
+  }
+  if (_hoverDir) r.classList.add('hover');
+  else r.classList.remove('hover');
+}
+function isHolding() { return _holdTimer !== null; }
+
+// ===== MOUSE CLICK-AND-HOLD =====
+// Hover shows empty ring with arrow; press starts the fill timer.
 (() => {
-  const HOLD_MS = 400;
-  let holdTimer = null;
-  let holdDir = null;
-  let hoverDir = null;  // current zone under cursor (for hover state)
-  const ring = () => $('r-hold-ring');
-  const fill = () => ring()?.querySelector('.r-hold-fill');
-
-  function positionRing(x, y) {
-    const r = ring();
-    if (!r) return;
-    const rc = $('r-content').getBoundingClientRect();
-    r.style.left = (x - rc.left) + 'px';
-    r.style.top = (y - rc.top) + 'px';
-  }
-
-  function setDirClass(dir) {
-    const r = ring();
-    if (!r) return;
-    r.classList.remove('dir-prev', 'dir-next');
-    if (dir) r.classList.add('dir-' + dir);
-  }
-
-  function showHover(dir, x, y) {
-    const r = ring(), f = fill();
-    if (!r || !f) return;
-    hoverDir = dir;
-    setDirClass(dir);
-    positionRing(x, y);
-    // Ensure the fill is empty (not mid-animation)
-    f.style.transition = 'none';
-    f.style.strokeDashoffset = '106.8';
-    r.classList.remove('active');
-    r.classList.add('hover');
-  }
-
-  function hideHover() {
-    hoverDir = null;
-    const r = ring();
-    if (!r) return;
-    if (!holdTimer) r.classList.remove('hover', 'active');
-    setDirClass(null);
-  }
-
-  function startHold(dir, x, y) {
-    cancelHold();  // defensive
-    holdDir = dir;
-    const r = ring(), f = fill();
-    if (!r || !f) return;
-    setDirClass(dir);
-    positionRing(x, y);
-    f.style.transition = 'none';
-    f.style.strokeDashoffset = '106.8';
-    f.offsetHeight;  // reflow
-    f.style.transition = `stroke-dashoffset ${HOLD_MS}ms linear`;
-    f.style.strokeDashoffset = '0';
-    r.classList.remove('hover');
-    r.classList.add('active');
-    holdTimer = setTimeout(() => {
-      holdTimer = null;
-      if (dir === 'next') readerNext();
-      else if (dir === 'prev') readerPrev();
-      cancelHold(true);
-    }, HOLD_MS);
-  }
-
-  function cancelHold(completed) {
-    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
-    const wasHolding = holdDir !== null;
-    holdDir = null;
-    const r = ring(), f = fill();
-    if (!r) return;
-    r.classList.remove('active');
-    if (f && !completed) {
-      f.style.transition = 'none';
-      f.style.strokeDashoffset = '106.8';
-    }
-    // If cursor is still over a zone, go back to hover state; otherwise fully hide
-    if (hoverDir) r.classList.add('hover');
-    else r.classList.remove('hover');
-  }
-
-  // Mouse handlers scoped to the document so they work across zones
   document.addEventListener('mousemove', (e) => {
     const zone = e.target.closest && e.target.closest('.r-click-zone');
     if (zone) {
       const dir = zone.dataset.dir;
-      if (dir !== hoverDir) showHover(dir, e.clientX, e.clientY);
-      else positionRing(e.clientX, e.clientY);
-    } else if (hoverDir) {
+      if (dir !== _hoverDir) showHover(dir, e.clientX, e.clientY);
+      else _positionRing(e.clientX, e.clientY);
+    } else if (_hoverDir) {
       hideHover();
     }
   });
-
   document.addEventListener('mousedown', (e) => {
     const zone = e.target.closest && e.target.closest('.r-click-zone');
-    if (!zone) return;
-    if (e.button !== 0) return;
+    if (!zone || e.button !== 0) return;
     const dir = zone.dataset.dir;
     if (!dir) return;
     startHold(dir, e.clientX, e.clientY);
@@ -2330,12 +2354,11 @@ document.addEventListener('keydown', (e) => {
 })();
 
 // ===== DEBUG: reveal interaction zones =====
-// Press Shift+D while the reader is active to toggle visual overlays
-// showing where the click/swipe zones live.
+// Press Shift+D to toggle visual overlays showing click/swipe zones.
 document.addEventListener('keydown', (e) => {
-  if (!$('screen-reader').classList.contains('active')) return;
   if (e.shiftKey && (e.key === 'D' || e.key === 'd')) {
-    document.body.classList.toggle('r-debug');
+    const on = document.body.classList.toggle('r-debug');
+    console.log('[tomen] debug zones', on ? 'ON' : 'OFF');
     e.preventDefault();
   }
 });
