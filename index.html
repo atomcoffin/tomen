@@ -434,7 +434,7 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
   flex: 1;
   overflow: hidden;
   position: relative;
-  padding: 72px 24px 68px;
+  padding: 72px 56px 68px;
   display: flex;
   align-items: stretch;
 }
@@ -477,31 +477,85 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 .r-click-zone.prev { left: 40px; }
 .r-click-zone.next { right: 40px; }
 
-/* Vertical edge strips — swipe up/down to change font size (left) or line height (right). */
+/* Vertical edge strips — swipe up/down to change font size (left) or line height (right).
+   Visually: fine horizontal striations suggest stacked page edges along the book's sides. */
 .r-edge-strip {
   position: absolute;
-  top: 0; bottom: 40px;
+  top: 0; bottom: 0;
   width: 40px;
   z-index: 4;
-  background: transparent;
   cursor: ns-resize;
   touch-action: none;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
+  background-image:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 2px,
+      color-mix(in srgb, var(--ink) 8%, transparent) 2px,
+      color-mix(in srgb, var(--ink) 8%, transparent) 2.5px,
+      transparent 2.5px,
+      transparent 4px,
+      color-mix(in srgb, var(--ink) 5%, transparent) 4px,
+      color-mix(in srgb, var(--ink) 5%, transparent) 4.5px,
+      transparent 4.5px,
+      transparent 7px
+    );
+  background-size: 100% 7px;
 }
 .r-edge-strip.left { left: 0; }
 .r-edge-strip.right { right: 0; }
 
-/* Bottom width strip — horizontal swipe on this adjusts reading width.
-   Invisible by default, becomes subtly visible during/after gesture use. */
+/* Decorative top paper-edge border — purely visual. */
+.r-edge-top {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 16px;
+  z-index: 4;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent 2px,
+      color-mix(in srgb, var(--ink) 8%, transparent) 2px,
+      color-mix(in srgb, var(--ink) 8%, transparent) 2.5px,
+      transparent 2.5px,
+      transparent 4px,
+      color-mix(in srgb, var(--ink) 5%, transparent) 4px,
+      color-mix(in srgb, var(--ink) 5%, transparent) 4.5px,
+      transparent 4.5px,
+      transparent 7px
+    );
+  background-size: 7px 100%;
+}
+
+/* Bottom width strip — horizontal swipe adjusts reading width.
+   Visually reuses the same vertical striations as the top decorative border,
+   so the bottom 40px of swipe area includes the visual book-edge. */
 .r-width-strip {
   position: absolute;
   left: 0; right: 0; bottom: 0;
   height: 40px;
-  z-index: 4;
+  z-index: 5;  /* above the decorative bottom border */
   cursor: ew-resize;
-  background: transparent;
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent 2px,
+      color-mix(in srgb, var(--ink) 8%, transparent) 2px,
+      color-mix(in srgb, var(--ink) 8%, transparent) 2.5px,
+      transparent 2.5px,
+      transparent 4px,
+      color-mix(in srgb, var(--ink) 5%, transparent) 4px,
+      color-mix(in srgb, var(--ink) 5%, transparent) 4.5px,
+      transparent 4.5px,
+      transparent 7px
+    );
+  background-size: 7px 100%;
   touch-action: none;
 }
 
@@ -878,6 +932,7 @@ body.r-debug .r-book {
     </div>
   </div>
   <div class="r-content" id="r-content">
+    <div class="r-edge-top" aria-hidden="true"></div>
     <div class="r-edge-strip left" data-strip="font" aria-label="Swipe up/down to change font size"></div>
     <div class="r-click-zone prev" data-dir="prev"></div>
     <div class="r-book" id="r-book" onclick="toggleReaderUI()">
