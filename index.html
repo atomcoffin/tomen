@@ -500,20 +500,99 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 .r-edge-strip.left { left: 0; }
 .r-edge-strip.right { right: 0; }
 
-/* Glyph inside each strip — hints at what the strip does.
-   Only visible when the reader UI (top toolbar) is visible. */
+/* Edge strip glyphs — size-preview at the extremes plus an animated hint in the middle
+   showing the expected drag motion. Only visible when the reader UI is showing. */
 .r-edge-glyph {
   color: var(--fog);
-  font-family: var(--font-ui);
-  font-size: 13px;
-  line-height: 1;
   opacity: 0;
   transition: opacity 200ms ease;
   pointer-events: none;
-  text-align: center;
-  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-body.r-ui-visible .r-edge-glyph { opacity: 0.65; }
+body.r-ui-visible .r-edge-glyph { opacity: 0.7; }
+
+/* Vertical layout — used on left/right edge strips */
+.r-edge-glyph-v {
+  flex-direction: column;
+  gap: 7px;
+  font-family: var(--font-ui);
+  line-height: 1;
+}
+
+/* Horizontal layout — used on bottom width strip */
+.r-edge-glyph-h {
+  flex-direction: row;
+  gap: 8px;
+}
+
+/* Font-size glyph extremes: large A at top, small A at bottom */
+.r-glyph-big { font-size: 18px; font-weight: 500; }
+.r-glyph-small { font-size: 10px; font-weight: 500; }
+
+/* Line-height glyph extremes — three stacked lines with different gap */
+.r-glyph-lines-loose, .r-glyph-lines-tight {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.r-glyph-lines-loose span, .r-glyph-lines-tight span {
+  width: 14px;
+  height: 1px;
+  background: currentColor;
+}
+.r-glyph-lines-loose { gap: 5px; }
+.r-glyph-lines-tight { gap: 1.5px; }
+
+/* Width glyph extremes — short bar then long bar */
+.r-glyph-bar-short { width: 10px; height: 2px; background: currentColor; border-radius: 1px; }
+.r-glyph-bar-long  { width: 36px; height: 2px; background: currentColor; border-radius: 1px; }
+
+/* Connector lines between the glyphs and the hint */
+.r-glyph-line {
+  width: 1px;
+  height: 14px;
+  background: currentColor;
+  opacity: 0.35;
+}
+.r-glyph-line-h {
+  width: 14px;
+  height: 1px;
+}
+
+/* Animated hint icon — cursor for pointer devices, fingerprint for touch */
+.r-glyph-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ember);
+  opacity: 0.85;
+}
+.r-hint-cursor { display: none; }
+.r-hint-finger { display: none; }
+
+/* Pointer-based input (desktop) — show the cursor */
+@media (hover: hover) and (pointer: fine) {
+  .r-hint-cursor { display: block; }
+  .r-edge-glyph-v .r-glyph-hint { animation: r-hint-bob-v 2.4s ease-in-out infinite; }
+  .r-edge-glyph-h .r-glyph-hint { animation: r-hint-bob-h 2.4s ease-in-out infinite; }
+}
+/* Touch-based input — show the fingerprint */
+@media (hover: none) and (pointer: coarse) {
+  .r-hint-finger { display: block; }
+  .r-edge-glyph-v .r-glyph-hint { animation: r-hint-bob-v 2.4s ease-in-out infinite; }
+  .r-edge-glyph-h .r-glyph-hint { animation: r-hint-bob-h 2.4s ease-in-out infinite; }
+}
+
+@keyframes r-hint-bob-v {
+  0%, 100% { transform: translateY(-4px); opacity: 0.5; }
+  50%      { transform: translateY(4px);  opacity: 1; }
+}
+@keyframes r-hint-bob-h {
+  0%, 100% { transform: translateX(-4px); opacity: 0.5; }
+  50%      { transform: translateX(4px);  opacity: 1; }
+}
 
 /* Bottom width strip — horizontal swipe adjusts reading width. Invisible by default. */
 .r-width-strip {
@@ -897,12 +976,20 @@ body.r-debug .r-book {
   </div>
   <div class="r-content" id="r-content">
     <div class="r-edge-strip left" data-strip="font" aria-label="Swipe up/down to change font size">
-      <div class="r-edge-glyph">
-        <svg width="16" height="44" viewBox="0 0 16 44" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M8 3 l-3 6 M8 3 l3 6"/>
-          <text x="8" y="27" font-family="inherit" font-size="14" fill="currentColor" stroke="none" text-anchor="middle">A</text>
-          <path d="M8 41 l-3 -6 M8 41 l3 -6"/>
-        </svg>
+      <div class="r-edge-glyph r-edge-glyph-v">
+        <span class="r-glyph-big" aria-hidden="true">A</span>
+        <span class="r-glyph-line" aria-hidden="true"></span>
+        <span class="r-glyph-hint" aria-hidden="true">
+          <svg class="r-hint-cursor" width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true">
+            <path d="M1 1 L1 12 L4 9 L6 14 L8 13 L6 8 L10 8 Z"/>
+          </svg>
+          <svg class="r-hint-finger" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="7" cy="7" r="3.2"/>
+            <circle cx="7" cy="7" r="5.6"/>
+          </svg>
+        </span>
+        <span class="r-glyph-line" aria-hidden="true"></span>
+        <span class="r-glyph-small" aria-hidden="true">A</span>
       </div>
     </div>
     <div class="r-click-zone prev" data-dir="prev"></div>
@@ -913,23 +1000,41 @@ body.r-debug .r-book {
     </div>
     <div class="r-click-zone next" data-dir="next"></div>
     <div class="r-edge-strip right" data-strip="line" aria-label="Swipe up/down to change line height">
-      <div class="r-edge-glyph">
-        <svg width="16" height="44" viewBox="0 0 16 44" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M8 3 l-3 6 M8 3 l3 6"/>
-          <line x1="3" y1="18" x2="13" y2="18"/>
-          <line x1="3" y1="22" x2="13" y2="22"/>
-          <line x1="3" y1="26" x2="13" y2="26"/>
-          <path d="M8 41 l-3 -6 M8 41 l3 -6"/>
-        </svg>
+      <div class="r-edge-glyph r-edge-glyph-v">
+        <span class="r-glyph-lines-loose" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </span>
+        <span class="r-glyph-line" aria-hidden="true"></span>
+        <span class="r-glyph-hint" aria-hidden="true">
+          <svg class="r-hint-cursor" width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true">
+            <path d="M1 1 L1 12 L4 9 L6 14 L8 13 L6 8 L10 8 Z"/>
+          </svg>
+          <svg class="r-hint-finger" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="7" cy="7" r="3.2"/>
+            <circle cx="7" cy="7" r="5.6"/>
+          </svg>
+        </span>
+        <span class="r-glyph-line" aria-hidden="true"></span>
+        <span class="r-glyph-lines-tight" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </span>
       </div>
     </div>
     <div class="r-width-strip" data-strip="width" aria-label="Swipe left/right to change reading width">
-      <div class="r-edge-glyph">
-        <svg width="56" height="16" viewBox="0 0 56 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M4 8 l6 -3 M4 8 l6 3"/>
-          <line x1="4" y1="8" x2="52" y2="8"/>
-          <path d="M52 8 l-6 -3 M52 8 l-6 3"/>
-        </svg>
+      <div class="r-edge-glyph r-edge-glyph-h">
+        <span class="r-glyph-bar-short" aria-hidden="true"></span>
+        <span class="r-glyph-line r-glyph-line-h" aria-hidden="true"></span>
+        <span class="r-glyph-hint r-glyph-hint-h" aria-hidden="true">
+          <svg class="r-hint-cursor" width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true">
+            <path d="M1 1 L1 12 L4 9 L6 14 L8 13 L6 8 L10 8 Z"/>
+          </svg>
+          <svg class="r-hint-finger" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="7" cy="7" r="3.2"/>
+            <circle cx="7" cy="7" r="5.6"/>
+          </svg>
+        </span>
+        <span class="r-glyph-line r-glyph-line-h" aria-hidden="true"></span>
+        <span class="r-glyph-bar-long" aria-hidden="true"></span>
       </div>
     </div>
     <!-- Hold-to-turn circular indicator, positioned at cursor on hover/press -->
