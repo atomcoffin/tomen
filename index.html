@@ -460,19 +460,38 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 }
 .r-pages.fade { opacity: 0; }
 
-/* Click zones for pagination — positioned absolutely over the book.
-   Shortened at the bottom to leave room for the width-swipe strip.
-   Cursor hides when over the zone so the hover-ring stands in for it. */
+/* Click zones for pagination — inset from the edges to leave room for the
+   side gesture strips. Cursor hides when over the zone so the hover-ring
+   stands in for it. */
 .r-click-zone {
   position: absolute;
   top: 0; bottom: 40px;
-  width: 22%;
+  width: calc(22% - 40px);
   cursor: none;
   z-index: 3;
   background: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
-.r-click-zone.prev { left: 0; }
-.r-click-zone.next { right: 0; }
+.r-click-zone.prev { left: 40px; }
+.r-click-zone.next { right: 40px; }
+
+/* Vertical edge strips — swipe up/down to change font size (left) or line height (right). */
+.r-edge-strip {
+  position: absolute;
+  top: 0; bottom: 40px;
+  width: 40px;
+  z-index: 4;
+  background: transparent;
+  cursor: ns-resize;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.r-edge-strip.left { left: 0; }
+.r-edge-strip.right { right: 0; }
 
 /* Bottom width strip — horizontal swipe on this adjusts reading width.
    Invisible by default, becomes subtly visible during/after gesture use. */
@@ -563,12 +582,20 @@ body.r-debug .r-click-zone.next {
   background: rgba(255, 138, 63, 0.18) !important;
   outline: 2px dashed rgba(255, 138, 63, 0.55) !important;
 }
+body.r-debug .r-edge-strip.left {
+  background: rgba(200, 80, 200, 0.22) !important;
+  outline: 2px dashed rgba(200, 80, 200, 0.55) !important;
+}
+body.r-debug .r-edge-strip.right {
+  background: rgba(255, 220, 80, 0.22) !important;
+  outline: 2px dashed rgba(255, 220, 80, 0.6) !important;
+}
 body.r-debug .r-width-strip {
   background: rgba(63, 220, 138, 0.22) !important;
   outline: 2px dashed rgba(63, 220, 138, 0.6) !important;
 }
 body.r-debug .r-book {
-  outline: 2px dashed rgba(200, 80, 200, 0.45) !important;
+  outline: 1px dashed rgba(100, 100, 100, 0.3) !important;
 }
 
 .r-inner {
@@ -851,6 +878,7 @@ body.r-debug .r-book {
     </div>
   </div>
   <div class="r-content" id="r-content">
+    <div class="r-edge-strip left" data-strip="font" aria-label="Swipe up/down to change font size"></div>
     <div class="r-click-zone prev" data-dir="prev"></div>
     <div class="r-book" id="r-book" onclick="toggleReaderUI()">
       <div class="r-pages" id="r-pages">
@@ -858,7 +886,8 @@ body.r-debug .r-book {
       </div>
     </div>
     <div class="r-click-zone next" data-dir="next"></div>
-    <div class="r-width-strip" aria-label="Swipe left/right to change reading width"></div>
+    <div class="r-edge-strip right" data-strip="line" aria-label="Swipe up/down to change line height"></div>
+    <div class="r-width-strip" data-strip="width" aria-label="Swipe left/right to change reading width"></div>
     <!-- Hold-to-turn circular indicator, positioned at cursor on hover/press -->
     <div class="r-hold-ring" id="r-hold-ring" aria-hidden="true">
       <svg viewBox="0 0 40 40">
@@ -2101,22 +2130,19 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Swipe navigation, gesture-based settings, and hold-to-turn clicks.
-//
-// HORIZONTAL SWIPE on book = page turn (requires crossing threshold with progress bar feedback).
-// VERTICAL SWIPE on left half = font size (real-time, 40px/step).
-// VERTICAL SWIPE on right half = line height (real-time, 40px/step).
-// HORIZONTAL SWIPE on bottom strip = reading width (real-time, 20px/step).
-// CLICK+HOLD on left/right click zones = page turn (requires 400ms hold with circular progress).
+// Swipe navigation and gesture-based settings (real-time).
+// PAGE TURN:    horizontal swipe anywhere on the book area (crosses 15% width threshold).
+// FONT SIZE:    vertical swipe on the LEFT edge strip (40px wide).
+// LINE HEIGHT:  vertical swipe on the RIGHT edge strip (40px wide).
+// READING WIDTH: horizontal swipe on the BOTTOM strip (full-width).
 (() => {
   const V_STEP = 40;
   const W_STEP = 20;
-  const MODE_DECIDE_THRESH = 24;  // minimum motion to lock in a gesture direction
+  const MODE_DECIDE_THRESH = 24;
 
   let startX = 0, startY = 0;
-  let startedOnLeft = true;
   let tracking = false;
-  // 'undecided' | 'horizontal' | 'vertical' | 'width'
+  // 'undecided' | 'horizontal' | 'vertical-font' | 'vertical-line' | 'width'
   let mode = 'undecided';
   let lastStep = 0;
 
@@ -2125,17 +2151,17 @@ document.addEventListener('keydown', (e) => {
   const swipeFill = () => $('r-swipe-fill');
   if (!rc) return;
 
-  // Commit distance for horizontal swipe: 15% of viewport width.
   function swipeThreshold() {
     return Math.max(60, window.innerWidth * 0.15);
   }
-
   function pickStart(e) {
     if (e.touches.length !== 1) return null;
     return { x: e.touches[0].clientX, y: e.touches[0].clientY };
   }
-  function isWidthStripTarget(target) {
-    return target && target.closest && target.closest('.r-width-strip');
+  function stripAt(target) {
+    if (!target || !target.closest) return null;
+    const el = target.closest('[data-strip]');
+    return el ? el.dataset.strip : null;  // 'font' | 'line' | 'width'
   }
 
   function showSwipeProgress(dx, thresh) {
@@ -2143,11 +2169,9 @@ document.addEventListener('keydown', (e) => {
     if (!bar || !fill) return;
     bar.classList.add('active');
     const ratio = Math.min(1, Math.abs(dx) / thresh);
-    // Fill grows from center outward in the direction of the swipe
-    const halfWidth = 60;  // matches CSS width: 120px / 2
+    const halfWidth = 60;
     const fillWidth = halfWidth * ratio;
     if (dx < 0) {
-      // Swiping left (next page) — fill extends leftward from center
       fill.style.left = `calc(50% - ${fillWidth}px)`;
       fill.style.width = `${fillWidth}px`;
     } else {
@@ -2166,20 +2190,14 @@ document.addEventListener('keydown', (e) => {
     if (!s) return;
     startX = s.x;
     startY = s.y;
-    const bookEl = $('r-book');
-    const rect = bookEl.getBoundingClientRect();
-    startedOnLeft = startX < rect.left + rect.width / 2;
     tracking = true;
-    mode = isWidthStripTarget(e.target) ? 'width' : 'undecided';
     lastStep = 0;
-    // If the touch started on a click zone, kick off the hold timer so
-    // a stationary press turns the page even without swiping. Any motion
-    // beyond a small deadzone cancels the hold and falls through to swipe.
-    const zone = e.target.closest && e.target.closest('.r-click-zone');
-    if (zone) {
-      const dir = zone.dataset.dir;
-      if (dir) startHold(dir, s.x, s.y);
-    }
+    // Route to a dedicated strip if the touch started on one.
+    const strip = stripAt(e.target);
+    if (strip === 'font')  mode = 'vertical-font';
+    else if (strip === 'line')  mode = 'vertical-line';
+    else if (strip === 'width') mode = 'width';
+    else                        mode = 'undecided';  // book area — decide between page-turn and nothing
   }, { passive: true });
 
   rc.addEventListener('touchmove', (e) => {
@@ -2189,26 +2207,21 @@ document.addEventListener('keydown', (e) => {
     const dy = t.clientY - startY;
     const absX = Math.abs(dx), absY = Math.abs(dy);
 
-    // If a hold is armed and motion exceeds a small deadzone, it's no longer
-    // a stationary press — cancel the hold and let swipe logic proceed.
-    if (isHolding() && (absX > 10 || absY > 10)) {
-      cancelHold();
-    }
-
+    // Book-area gesture: only horizontal page-turn is allowed here.
+    // Vertical drag on book does nothing (no more accidental font changes).
     if (mode === 'undecided') {
       if (absX >= MODE_DECIDE_THRESH && absX > absY * 1.3) mode = 'horizontal';
-      else if (absY >= MODE_DECIDE_THRESH && absY > absX * 1.3) mode = 'vertical';
       else return;
     }
 
     if (mode === 'horizontal') {
       showSwipeProgress(dx, swipeThreshold());
-    } else if (mode === 'vertical') {
+    } else if (mode === 'vertical-font' || mode === 'vertical-line') {
       const targetStep = Math.trunc(-dy / V_STEP);
       if (targetStep !== lastStep) {
         const delta = targetStep - lastStep;
         lastStep = targetStep;
-        if (startedOnLeft) adjustFontSize(delta);
+        if (mode === 'vertical-font') adjustFontSize(delta);
         else adjustLineHeight(delta);
       }
       if (e.cancelable) e.preventDefault();
@@ -2226,9 +2239,6 @@ document.addEventListener('keydown', (e) => {
   rc.addEventListener('touchend', (e) => {
     if (!tracking) return;
     tracking = false;
-    // If a hold was armed and the user lifted before the timer fired,
-    // cancel it — they didn't press long enough.
-    if (isHolding()) cancelHold();
     if (mode === 'horizontal') {
       const t = e.changedTouches[0];
       const dx = t.clientX - startX;
@@ -2245,8 +2255,47 @@ document.addEventListener('keydown', (e) => {
     tracking = false;
     mode = 'undecided';
     hideSwipeProgress();
-    cancelHold();
   }, { passive: true });
+
+  // Desktop: also handle mouse drags on the edge/bottom strips so users with
+  // a mouse can adjust settings the same way. Page-turn for desktop stays on click-and-hold.
+  let mdActive = false;
+  let mdMode = null;
+  let mdStartX = 0, mdStartY = 0, mdLastStep = 0;
+
+  rc.addEventListener('mousedown', (e) => {
+    const strip = stripAt(e.target);
+    if (!strip) return;
+    mdActive = true;
+    mdMode = strip === 'font' ? 'vertical-font' :
+             strip === 'line' ? 'vertical-line' : 'width';
+    mdStartX = e.clientX;
+    mdStartY = e.clientY;
+    mdLastStep = 0;
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!mdActive) return;
+    const dx = e.clientX - mdStartX;
+    const dy = e.clientY - mdStartY;
+    if (mdMode === 'vertical-font' || mdMode === 'vertical-line') {
+      const targetStep = Math.trunc(-dy / V_STEP);
+      if (targetStep !== mdLastStep) {
+        const delta = targetStep - mdLastStep;
+        mdLastStep = targetStep;
+        if (mdMode === 'vertical-font') adjustFontSize(delta);
+        else adjustLineHeight(delta);
+      }
+    } else if (mdMode === 'width') {
+      const targetStep = Math.trunc(dx / W_STEP);
+      if (targetStep !== mdLastStep) {
+        const delta = targetStep - mdLastStep;
+        mdLastStep = targetStep;
+        adjustReadingWidth(delta);
+      }
+    }
+  });
+  window.addEventListener('mouseup', () => { mdActive = false; mdMode = null; });
 })();
 
 // ===== PAGE-TURN HOLD MACHINERY =====
