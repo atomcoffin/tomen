@@ -453,10 +453,11 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 }
 .r-pages.fade { opacity: 0; }
 
-/* Click zones for pagination — positioned absolutely over the book */
+/* Click zones for pagination — positioned absolutely over the book.
+   Shortened at the bottom to leave room for the width-swipe strip. */
 .r-click-zone {
   position: absolute;
-  top: 0; bottom: 0;
+  top: 0; bottom: 40px;
   width: 22%;
   cursor: pointer;
   z-index: 3;
@@ -464,6 +465,18 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 }
 .r-click-zone.prev { left: 0; }
 .r-click-zone.next { right: 0; }
+
+/* Bottom width strip — horizontal swipe on this adjusts reading width.
+   Invisible by default, becomes subtly visible during/after gesture use. */
+.r-width-strip {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 40px;
+  z-index: 4;
+  cursor: ew-resize;
+  background: transparent;
+  touch-action: none;
+}
 
 .r-inner {
   font-family: 'Siche Text', var(--font-read);
@@ -745,6 +758,7 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
       </div>
     </div>
     <div class="r-click-zone next" onclick="readerNext()"></div>
+    <div class="r-width-strip" aria-label="Swipe left/right to change reading width"></div>
   </div>
   <div class="r-bottom" id="r-bottom">
     <div class="r-bottom-nav">
@@ -1974,61 +1988,115 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Swipe navigation and gesture-based settings.
-// Horizontal swipe = page turn.
-// Vertical swipe on LEFT page = font size (up = bigger, down = smaller).
-// Vertical swipe on RIGHT page = line height (up = taller, down = tighter).
+// Swipe navigation and gesture-based settings (real-time).
+// Horizontal swipe on book = page turn.
+// Vertical swipe on LEFT half = font size (real-time, every 40px = 1 step).
+// Vertical swipe on RIGHT half = line height (real-time, every 40px = 1 step).
+// Horizontal swipe on bottom strip = reading width (real-time, every 20px = 1 step of 50px).
 (() => {
-  const STEP = 40;        // px per step
-  const H_THRESH = 50;    // px minimum to register horizontal swipe
-  const V_THRESH = 40;    // px minimum to register vertical swipe
-  let startX = 0, startY = 0, startedOnLeft = true, tracking = false;
+  const V_STEP = 40;     // vertical px per font/line-height step
+  const W_STEP = 20;     // horizontal px per width step
+  const H_THRESH = 30;   // commit threshold for horizontal page-turn gesture
+  const V_THRESH = 24;   // commit threshold for vertical settings gesture
+
+  let startX = 0, startY = 0;
+  let startedOnLeft = true;
+  let tracking = false;
+  // Gesture mode is decided after the first few pixels of motion, then locked in.
+  // 'undecided' | 'horizontal' | 'vertical' | 'width'
+  let mode = 'undecided';
+  // Baseline values captured at gesture start for real-time stepping
+  let baseFont = 0, baseLine = 0, baseWidth = 0;
+  let lastStep = 0;
+
   const rc = $('r-content');
   if (!rc) return;
 
+  function pickStart(e) {
+    if (e.touches.length !== 1) return null;
+    return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+
+  function isWidthStripTarget(target) {
+    return target && target.closest && target.closest('.r-width-strip');
+  }
+
   rc.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 1) return;
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-    // Determine which page the gesture started on (relative to the book center)
+    const s = pickStart(e);
+    if (!s) return;
+    startX = s.x;
+    startY = s.y;
     const bookEl = $('r-book');
     const rect = bookEl.getBoundingClientRect();
-    const midX = rect.left + rect.width / 2;
-    startedOnLeft = startX < midX;
+    startedOnLeft = startX < rect.left + rect.width / 2;
     tracking = true;
+    mode = isWidthStripTarget(e.target) ? 'width' : 'undecided';
+    baseFont = parseInt($('sl-fontsize').value);
+    baseLine = parseInt($('sl-lineheight').value);
+    baseWidth = parseInt($('sl-width').value);
+    lastStep = 0;
   }, { passive: true });
 
-  rc.addEventListener('touchend', (e) => {
+  rc.addEventListener('touchmove', (e) => {
     if (!tracking) return;
-    tracking = false;
-    const t = e.changedTouches[0];
+    const t = e.touches[0];
     const dx = t.clientX - startX;
     const dy = t.clientY - startY;
     const absX = Math.abs(dx);
     const absY = Math.abs(dy);
 
-    if (absX >= H_THRESH && absX > absY) {
-      // Horizontal — page turn
+    // Decide mode once we've moved enough in a clear direction
+    if (mode === 'undecided') {
+      if (absX >= H_THRESH && absX > absY * 1.3) mode = 'horizontal';
+      else if (absY >= V_THRESH && absY > absX * 1.3) mode = 'vertical';
+      else return;
+    }
+
+    if (mode === 'vertical') {
+      // Real-time: compute target step count, apply delta from last.
+      // Up (dy < 0) = increase, down = decrease.
+      const targetStep = Math.trunc(-dy / V_STEP);
+      if (targetStep !== lastStep) {
+        const delta = targetStep - lastStep;
+        lastStep = targetStep;
+        if (startedOnLeft) {
+          adjustFontSize(delta);
+        } else {
+          adjustLineHeight(delta);
+        }
+      }
+      // Don't let the browser try to scroll the page during vertical settings
+      if (e.cancelable) e.preventDefault();
+    } else if (mode === 'width') {
+      // Right = wider, left = narrower.
+      const targetStep = Math.trunc(dx / W_STEP);
+      if (targetStep !== lastStep) {
+        const delta = targetStep - lastStep;
+        lastStep = targetStep;
+        adjustReadingWidth(delta);
+      }
+      if (e.cancelable) e.preventDefault();
+    }
+    // Horizontal page-turn mode does nothing on move — commits at touchend
+  }, { passive: false });
+
+  rc.addEventListener('touchend', (e) => {
+    if (!tracking) return;
+    tracking = false;
+    if (mode === 'horizontal') {
+      const t = e.changedTouches[0];
+      const dx = t.clientX - startX;
       if (dx < 0) readerNext();
       else readerPrev();
-    } else if (absY >= V_THRESH && absY > absX) {
-      // Vertical — settings. Up (dy < 0) = increase, down = decrease.
-      const steps = Math.floor(absY / STEP);
-      if (steps === 0) return;
-      const direction = dy < 0 ? 1 : -1;
-      if (startedOnLeft) {
-        adjustFontSize(direction * steps);
-      } else {
-        adjustLineHeight(direction * steps);
-      }
     }
+    mode = 'undecided';
   }, { passive: true });
 })();
 
-// Adjust font size by N steps, clamped to slider range.
+// Adjust font size by N steps (each = 1px), clamped to slider range.
 function adjustFontSize(delta) {
   const sl = $('sl-fontsize');
-  if (!sl) return;
+  if (!sl || delta === 0) return;
   const min = parseInt(sl.min), max = parseInt(sl.max);
   const cur = parseInt(sl.value);
   const next = Math.max(min, Math.min(max, cur + delta));
@@ -2041,7 +2109,7 @@ function adjustFontSize(delta) {
 // Adjust line height by N steps, clamped to slider range.
 function adjustLineHeight(delta) {
   const sl = $('sl-lineheight');
-  if (!sl) return;
+  if (!sl || delta === 0) return;
   const min = parseInt(sl.min), max = parseInt(sl.max);
   const cur = parseInt(sl.value);
   const next = Math.max(min, Math.min(max, cur + delta));
@@ -2049,6 +2117,20 @@ function adjustLineHeight(delta) {
   sl.value = next;
   setLineHeight(next);
   showGestureToast(`Line height: ${(next / 10).toFixed(1)}`);
+}
+
+// Adjust reading width by N steps of 50px each, clamped to slider range.
+function adjustReadingWidth(delta) {
+  const sl = $('sl-width');
+  if (!sl || delta === 0) return;
+  const step = parseInt(sl.step) || 50;
+  const min = parseInt(sl.min), max = parseInt(sl.max);
+  const cur = parseInt(sl.value);
+  const next = Math.max(min, Math.min(max, cur + delta * step));
+  if (next === cur) return;
+  sl.value = next;
+  setReadingWidth(next);
+  showGestureToast(`Width: ${next}px`);
 }
 
 // Brief floating indicator during gesture-based settings changes.
