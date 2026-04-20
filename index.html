@@ -617,7 +617,7 @@ body.r-ui-visible .r-quick {
 .r-swipe-ring.dir-prev {
   left: 0;
   background: radial-gradient(
-    ellipse 65% 70% at left center,
+    ellipse 65% 45% at left center,
     rgba(212, 101, 74, 0.92) 0%,
     rgba(212, 101, 74, 0.6)  16%,
     rgba(212, 101, 74, 0.28) 38%,
@@ -628,7 +628,7 @@ body.r-ui-visible .r-quick {
 .r-swipe-ring.dir-next {
   right: 0;
   background: radial-gradient(
-    ellipse 65% 70% at right center,
+    ellipse 65% 45% at right center,
     rgba(212, 101, 74, 0.92) 0%,
     rgba(212, 101, 74, 0.6)  16%,
     rgba(212, 101, 74, 0.28) 38%,
@@ -763,6 +763,45 @@ body.r-debug .r-book {
 }
 .toc-item:hover { background: var(--linen); color: var(--ink); }
 .toc-item.active { color: var(--ember); font-weight: 600; }
+
+/* Bookmark list items — title (page label) above, chapter context below.
+   Trailing delete button revealed on hover/focus. */
+.bm-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  width: 100%; padding: 11px 24px; border: none; background: transparent;
+  font-family: var(--font-ui); cursor: pointer; text-align: left;
+  color: var(--stone);
+}
+.bm-item:hover { background: var(--linen); color: var(--ink); }
+.bm-item-body { flex: 1; min-width: 0; }
+.bm-item-label {
+  font-size: 13px; line-height: 1.4; color: inherit;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bm-item-meta {
+  margin-top: 3px;
+  font-size: 11px; color: var(--fog);
+  font-family: var(--font-mono);
+}
+.bm-item-delete {
+  flex-shrink: 0;
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--fog);
+  border-radius: 4px; cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+}
+.bm-item:hover .bm-item-delete { opacity: 1; }
+.bm-item-delete:hover { background: var(--linen); color: var(--ember); }
+.bm-item-delete .ph { font-size: 14px; line-height: 1; }
+.bm-empty {
+  padding: 40px 24px; text-align: center; font-size: 13px; color: var(--fog);
+  font-family: var(--font-ui); line-height: 1.5;
+}
+
+/* Filled state for the bookmark toggle button when current spread is bookmarked */
+.icon-btn.bm-active { color: var(--ember); }
 
 /* Loading */
 .loading {
@@ -920,9 +959,11 @@ body.r-debug .r-book {
     <div class="r-toolbar-left">
       <button class="icon-btn" onclick="showLibrary()" title="Back to library"><i class="ph ph-arrow-left"></i></button>
       <button class="icon-btn" onclick="toggleTOC()" title="Contents"><i class="ph ph-list"></i></button>
+      <button class="icon-btn" id="bm-list-btn" onclick="toggleBookmarksList()" title="Bookmarks"><i class="ph ph-bookmarks-simple"></i></button>
       <span class="r-title" id="r-title"></span>
     </div>
     <div class="r-toolbar-right">
+      <button class="icon-btn" id="bm-toggle-btn" onclick="toggleBookmark()" title="Bookmark this page"><i class="ph ph-bookmark-simple"></i></button>
       <button class="icon-btn" onclick="readerPrev()" title="Previous page"><i class="ph ph-caret-left"></i></button>
       <button class="icon-btn" onclick="readerNext()" title="Next page"><i class="ph ph-caret-right"></i></button>
       <span class="r-pct" id="r-pct">0%</span>
@@ -1012,6 +1053,14 @@ body.r-debug .r-book {
   <div class="toc-panel" onclick="event.stopPropagation()">
     <div class="toc-header">Contents</div>
     <div class="toc-list" id="toc-list"></div>
+  </div>
+</div>
+
+<!-- Bookmarks overlay -->
+<div class="overlay" id="ov-bookmarks" onclick="toggleBookmarksList()">
+  <div class="toc-panel" onclick="event.stopPropagation()">
+    <div class="toc-header">Bookmarks</div>
+    <div class="toc-list" id="bm-list"></div>
   </div>
 </div>
 
@@ -1147,9 +1196,11 @@ async function saveBookMeta(book) {
   const meta = {
     id: book.id, title: book.title, author: book.author, cover: book.cover,
     progress: book.progress || 0, chapterIndex: book.chapterIndex || 0,
+    spreadIndex: book.spreadIndex || 0,
     scrollPos: book.scrollPos || 0, chapterCount: (book.chapters || []).length,
     contentSize: (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0),
-    spineColor: book.spineColor || null  // persist the extracted cover color
+    spineColor: book.spineColor || null,
+    bookmarks: book.bookmarks || []
   };
   await dbPut('books', meta);
 }
@@ -1167,7 +1218,9 @@ async function saveLibrary() {
     if (idx >= 0) {
       library[idx].progress = currentBook.progress;
       library[idx].chapterIndex = currentBook.chapterIndex;
+      library[idx].spreadIndex = currentBook.spreadIndex;
       library[idx].scrollPos = currentBook.scrollPos;
+      library[idx].bookmarks = currentBook.bookmarks;
       await saveBookMeta(library[idx]);
     }
   }
@@ -2012,6 +2065,7 @@ async function openBookById(id) {
   try {
     const content = await loadBookContent(meta.id);
     currentBook = { ...meta, chapters: content.chapters, toc: content.toc };
+    if (!Array.isArray(currentBook.bookmarks)) currentBook.bookmarks = [];
     chapters = currentBook.chapters;
     toc = currentBook.toc;
     currentChapterIndex = currentBook.chapterIndex || 0;
@@ -2024,6 +2078,7 @@ async function openBookById(id) {
     document.body.classList.add('r-ui-visible');
     renderChapter();
     buildTOC();
+    updateBookmarkBtn();
   } catch (err) {
     console.error('Failed to open book:', err);
     alert('Could not open this book.');
@@ -2173,6 +2228,7 @@ function saveProgress() {
   const idx = library.findIndex(b => b.id === currentBook.id);
   if (idx >= 0) library[idx] = currentBook;
   saveLibrary();
+  updateBookmarkBtn();
 }
 
 // Keyboard navigation
@@ -2550,6 +2606,119 @@ function buildTOC() {
   ).join('');
 }
 function toggleTOC() { $('ov-toc').classList.toggle('open'); }
+
+// ===== BOOKMARKS =====
+// A bookmark = { chapterIndex, spreadIndex, label, createdAt }.
+// Stored as an array on currentBook.bookmarks, persisted via saveBookMeta.
+
+// Find the bookmark for the current spread (or -1).
+function currentBookmarkIndex() {
+  if (!currentBook || !currentBook.bookmarks) return -1;
+  return currentBook.bookmarks.findIndex(b =>
+    b.chapterIndex === currentChapterIndex && b.spreadIndex === currentSpread
+  );
+}
+
+// Pull a short label for the current spread — first chunk of visible text in
+// the current pages container, falling back to the chapter title.
+function currentPageLabel() {
+  const inner = $('r-inner');
+  let text = '';
+  if (inner) {
+    text = (inner.innerText || inner.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+  if (text.length > 60) text = text.slice(0, 60).trim() + '…';
+  if (!text) {
+    const chapter = toc.find(t => t.index === currentChapterIndex);
+    text = chapter ? chapter.title : `Chapter ${currentChapterIndex + 1}`;
+  }
+  return text;
+}
+
+// Add or remove a bookmark at the current spread.
+function toggleBookmark() {
+  if (!currentBook) return;
+  if (!Array.isArray(currentBook.bookmarks)) currentBook.bookmarks = [];
+  const existing = currentBookmarkIndex();
+  if (existing >= 0) {
+    currentBook.bookmarks.splice(existing, 1);
+  } else {
+    currentBook.bookmarks.push({
+      chapterIndex: currentChapterIndex,
+      spreadIndex: currentSpread,
+      label: currentPageLabel(),
+      createdAt: Date.now()
+    });
+  }
+  saveLibrary();
+  updateBookmarkBtn();
+  // Re-render the list if the overlay is open
+  if ($('ov-bookmarks').classList.contains('open')) renderBookmarksList();
+}
+
+// Sync the toggle button's filled/empty state to whether the current spread
+// is bookmarked.
+function updateBookmarkBtn() {
+  const btn = $('bm-toggle-btn');
+  if (!btn) return;
+  const isBookmarked = currentBookmarkIndex() >= 0;
+  btn.classList.toggle('bm-active', isBookmarked);
+  btn.title = isBookmarked ? 'Remove bookmark' : 'Bookmark this page';
+}
+
+function toggleBookmarksList() {
+  const overlay = $('ov-bookmarks');
+  const opening = !overlay.classList.contains('open');
+  if (opening) renderBookmarksList();
+  overlay.classList.toggle('open');
+}
+
+function renderBookmarksList() {
+  const list = $('bm-list');
+  if (!currentBook || !currentBook.bookmarks || currentBook.bookmarks.length === 0) {
+    list.innerHTML = `<div class="bm-empty">No bookmarks yet.<br>Tap the bookmark icon to save your place.</div>`;
+    return;
+  }
+  // Sort by reading position so the list reads top-to-bottom like the book itself
+  const sorted = currentBook.bookmarks
+    .map((b, i) => ({ ...b, _idx: i }))
+    .sort((a, b) =>
+      a.chapterIndex - b.chapterIndex || a.spreadIndex - b.spreadIndex
+    );
+  list.innerHTML = sorted.map(b => {
+    const chapterTitle = (toc.find(t => t.index === b.chapterIndex) || {}).title || `Chapter ${b.chapterIndex + 1}`;
+    return `
+      <div class="bm-item" onclick="goToBookmark(${b._idx})">
+        <div class="bm-item-body">
+          <div class="bm-item-label">${esc(b.label)}</div>
+          <div class="bm-item-meta">${esc(chapterTitle)}</div>
+        </div>
+        <button class="bm-item-delete" onclick="event.stopPropagation(); removeBookmark(${b._idx})" title="Delete bookmark">
+          <i class="ph ph-x"></i>
+        </button>
+      </div>`;
+  }).join('');
+}
+
+function goToBookmark(idx) {
+  if (!currentBook || !currentBook.bookmarks[idx]) return;
+  const bm = currentBook.bookmarks[idx];
+  toggleBookmarksList();
+  fadeSwap(() => {
+    currentChapterIndex = bm.chapterIndex;
+    currentSpread = bm.spreadIndex;
+    renderChapter();
+    saveProgress();
+  });
+}
+
+function removeBookmark(idx) {
+  if (!currentBook || !currentBook.bookmarks) return;
+  currentBook.bookmarks.splice(idx, 1);
+  saveLibrary();
+  updateBookmarkBtn();
+  renderBookmarksList();
+}
 
 // ===== UI TOGGLE =====
 function toggleReaderUI() {
