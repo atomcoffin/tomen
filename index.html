@@ -485,17 +485,18 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 .r-click-zone.prev { left: 0; }
 .r-click-zone.next { right: 0; }
 
-/* Quick controls cluster — three drag pills grouped at bottom center, only
-   visible when the reader UI (toolbar) is showing. Each pill is both a
-   touch-start target and a visual preview of its control's range. Once a drag
-   starts, the gesture is free to travel anywhere on screen. */
+/* Quick controls cluster — three horizontal-slider bars stacked vertically at
+   the bottom center. Visible only when reader UI is showing. Backdrop blur so
+   the text behind is obfuscated; the cluster floats over the page. */
 .r-quick {
   position: absolute;
   left: 50%;
-  bottom: 20px;
+  bottom: 28px;
   transform: translateX(-50%) translateY(8px);
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
+  width: min(80vw, 600px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 200ms ease, transform 200ms ease;
@@ -507,61 +508,61 @@ body.r-ui-visible .r-quick {
   pointer-events: auto;
 }
 
-/* Shared pill shape */
-.r-quick-pill {
-  background: color-mix(in srgb, var(--paper) 82%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+/* Each slider bar: small glyph on the left, drag-body in the middle, big
+   glyph on the right. Drag is horizontal for all three. */
+.r-quick-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  height: 44px;
+  background: color-mix(in srgb, var(--paper) 78%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 0.5px solid var(--border);
   border-radius: 999px;
   color: var(--fog);
   font-family: var(--font-ui);
   line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  cursor: ns-resize;
+  cursor: ew-resize;
   touch-action: none;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
-  transition: background 140ms ease, color 140ms ease;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
 }
-.r-quick-pill:hover { color: var(--ink); background: color-mix(in srgb, var(--paper) 95%, transparent); }
-
-/* Vertical pill: font size, line height */
-.r-quick-pill:not(.r-quick-pill-h) {
-  flex-direction: column;
-  padding: 10px 0;
-  width: 40px;
+.r-quick-bar:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--paper) 90%, transparent);
+  border-color: color-mix(in srgb, var(--ink) 18%, transparent);
 }
 
-/* Horizontal pill: width */
-.r-quick-pill-h {
-  flex-direction: row;
-  padding: 0 14px;
-  height: 40px;
-  cursor: ew-resize;
+/* The flex-growing middle — this is the drag surface. A faint midline
+   shows it's a slider track without being a full horizontal line. */
+.r-quick-body {
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, currentColor 40%, transparent);
+  border-radius: 1px;
 }
 
 /* Font-size glyph extremes */
-.r-glyph-big   { font-size: 18px; font-weight: 500; }
-.r-glyph-small { font-size: 10px; font-weight: 500; }
+.r-glyph-big   { font-size: 20px; font-weight: 500; }
+.r-glyph-small { font-size: 12px; font-weight: 500; }
 
-/* Line-height glyph extremes */
+/* Line-height glyph extremes — three stacked lines with different gap */
 .r-glyph-lines-loose, .r-glyph-lines-tight {
   display: flex; flex-direction: column; align-items: center;
 }
 .r-glyph-lines-loose span, .r-glyph-lines-tight span {
-  width: 14px; height: 1px; background: currentColor;
+  width: 16px; height: 1px; background: currentColor;
 }
 .r-glyph-lines-loose { gap: 5px; }
 .r-glyph-lines-tight { gap: 1.5px; }
 
 /* Width glyph extremes */
-.r-glyph-bar-short { width: 10px; height: 2px; background: currentColor; border-radius: 1px; }
-.r-glyph-bar-long  { width: 32px; height: 2px; background: currentColor; border-radius: 1px; }
+.r-glyph-bar-short { width: 12px; height: 2px; background: currentColor; border-radius: 1px; }
+.r-glyph-bar-long  { width: 42px; height: 2px; background: currentColor; border-radius: 1px; }
 
 /* Hold-to-turn circular indicator. Positioned via inline left/top at cursor.
    Two visible states: 'hover' (empty ring shown at 55% opacity when cursor is
@@ -647,7 +648,7 @@ body.r-debug .r-click-zone.next {
   background: rgba(255, 138, 63, 0.18) !important;
   outline: 2px dashed rgba(255, 138, 63, 0.55) !important;
 }
-body.r-debug .r-quick-pill {
+body.r-debug .r-quick-bar {
   outline: 2px dashed rgba(200, 80, 200, 0.55) !important;
 }
 body.r-debug .r-book {
@@ -949,19 +950,23 @@ body.r-debug .r-book {
     <!-- Swipe-to-turn edge glow. Tall narrow ember bloom on whichever side
          the user is swiping toward. Opacity scales with swipe progress. -->
     <div class="r-swipe-ring" id="r-swipe-ring" aria-hidden="true"></div>
-    <!-- Quick controls cluster. Three drag pills (font/line/width) grouped
-         together at the bottom center. Visible only when reader UI is showing. -->
+    <!-- Quick controls cluster. Three horizontal sliders (font/line/width)
+         stacked at the bottom center. Visible only when reader UI is showing.
+         All three use horizontal drag: left decreases, right increases. -->
     <div class="r-quick" id="r-quick" aria-hidden="true">
-      <div class="r-quick-pill" data-strip="font" aria-label="Drag up/down to change font size">
-        <span class="r-glyph-big" aria-hidden="true">A</span>
+      <div class="r-quick-bar" data-strip="font" aria-label="Drag left or right to change font size">
         <span class="r-glyph-small" aria-hidden="true">A</span>
+        <span class="r-quick-body" aria-hidden="true"></span>
+        <span class="r-glyph-big" aria-hidden="true">A</span>
       </div>
-      <div class="r-quick-pill" data-strip="line" aria-label="Drag up/down to change line height">
-        <span class="r-glyph-lines-loose" aria-hidden="true"><span></span><span></span><span></span></span>
+      <div class="r-quick-bar" data-strip="line" aria-label="Drag left or right to change line height">
         <span class="r-glyph-lines-tight" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="r-quick-body" aria-hidden="true"></span>
+        <span class="r-glyph-lines-loose" aria-hidden="true"><span></span><span></span><span></span></span>
       </div>
-      <div class="r-quick-pill r-quick-pill-h" data-strip="width" aria-label="Drag left/right to change reading width">
+      <div class="r-quick-bar" data-strip="width" aria-label="Drag left or right to change reading width">
         <span class="r-glyph-bar-short" aria-hidden="true"></span>
+        <span class="r-quick-body" aria-hidden="true"></span>
         <span class="r-glyph-bar-long" aria-hidden="true"></span>
       </div>
     </div>
@@ -2199,17 +2204,18 @@ document.addEventListener('keydown', (e) => {
 
 // Swipe navigation and gesture-based settings (real-time).
 // PAGE TURN:    horizontal swipe anywhere on the book area (crosses 15% width threshold).
-// FONT SIZE:    vertical swipe on the LEFT edge strip (40px wide).
-// LINE HEIGHT:  vertical swipe on the RIGHT edge strip (40px wide).
-// READING WIDTH: horizontal swipe on the BOTTOM strip (full-width).
+// FONT SIZE:    horizontal drag on the font-size quick bar.
+// LINE HEIGHT:  horizontal drag on the line-height quick bar.
+// READING WIDTH: horizontal drag on the width quick bar.
 (() => {
-  const V_STEP = 40;
-  const W_STEP = 20;
+  const H_STEP_FONT = 20;   // px per 1-pt change
+  const H_STEP_LINE = 20;   // px per 1-tenth change
+  const H_STEP_WIDTH = 20;  // px per 50-unit change
   const MODE_DECIDE_THRESH = 24;
 
   let startX = 0, startY = 0;
   let tracking = false;
-  // 'undecided' | 'horizontal' | 'vertical-font' | 'vertical-line' | 'width'
+  // 'undecided' | 'horizontal' | 'h-font' | 'h-line' | 'width'
   let mode = 'undecided';
   let lastStep = 0;
 
@@ -2234,14 +2240,9 @@ document.addEventListener('keydown', (e) => {
   function showSwipeProgress(dx, thresh) {
     const ring = swipeRing();
     if (!ring) return;
-    // Direction class — pick whichever side the user is swiping toward.
-    // Negative dx means swiping left (turning to next page) → show on right.
-    // Positive dx means swiping right (turning to prev page) → show on left.
     const dir = dx < 0 ? 'next' : 'prev';
     ring.classList.toggle('dir-prev', dir === 'prev');
     ring.classList.toggle('dir-next', dir === 'next');
-    // Opacity ramps with swipe progress; eased to bias visibility earlier
-    // in the gesture so the user gets feedback even on small drags.
     const ratio = Math.min(1, Math.abs(dx) / thresh);
     ring.style.opacity = Math.pow(ratio, 0.7).toFixed(3);
   }
@@ -2257,12 +2258,11 @@ document.addEventListener('keydown', (e) => {
     startY = s.y;
     tracking = true;
     lastStep = 0;
-    // Route to a dedicated strip if the touch started on one.
     const strip = stripAt(e.target);
-    if (strip === 'font')  mode = 'vertical-font';
-    else if (strip === 'line')  mode = 'vertical-line';
+    if (strip === 'font')       mode = 'h-font';
+    else if (strip === 'line')  mode = 'h-line';
     else if (strip === 'width') mode = 'width';
-    else                        mode = 'undecided';  // book area — decide between page-turn and nothing
+    else                        mode = 'undecided';
   }, { passive: true });
 
   rc.addEventListener('touchmove', (e) => {
@@ -2272,8 +2272,6 @@ document.addEventListener('keydown', (e) => {
     const dy = t.clientY - startY;
     const absX = Math.abs(dx), absY = Math.abs(dy);
 
-    // Book-area gesture: only horizontal page-turn is allowed here.
-    // Vertical drag on book does nothing (no more accidental font changes).
     if (mode === 'undecided') {
       if (absX >= MODE_DECIDE_THRESH && absX > absY * 1.3) mode = 'horizontal';
       else return;
@@ -2281,21 +2279,17 @@ document.addEventListener('keydown', (e) => {
 
     if (mode === 'horizontal') {
       showSwipeProgress(dx, swipeThreshold());
-    } else if (mode === 'vertical-font' || mode === 'vertical-line') {
-      const targetStep = Math.trunc(-dy / V_STEP);
+    } else if (mode === 'h-font' || mode === 'h-line' || mode === 'width') {
+      const step = mode === 'h-font' ? H_STEP_FONT
+                 : mode === 'h-line' ? H_STEP_LINE
+                 : H_STEP_WIDTH;
+      const targetStep = Math.trunc(dx / step);
       if (targetStep !== lastStep) {
         const delta = targetStep - lastStep;
         lastStep = targetStep;
-        if (mode === 'vertical-font') adjustFontSize(delta);
-        else adjustLineHeight(delta);
-      }
-      if (e.cancelable) e.preventDefault();
-    } else if (mode === 'width') {
-      const targetStep = Math.trunc(dx / W_STEP);
-      if (targetStep !== lastStep) {
-        const delta = targetStep - lastStep;
-        lastStep = targetStep;
-        adjustReadingWidth(delta);
+        if (mode === 'h-font')      adjustFontSize(delta);
+        else if (mode === 'h-line') adjustLineHeight(delta);
+        else                         adjustReadingWidth(delta);
       }
       if (e.cancelable) e.preventDefault();
     }
@@ -2332,8 +2326,8 @@ document.addEventListener('keydown', (e) => {
     const strip = stripAt(e.target);
     if (!strip) return;
     mdActive = true;
-    mdMode = strip === 'font' ? 'vertical-font' :
-             strip === 'line' ? 'vertical-line' : 'width';
+    mdMode = strip === 'font' ? 'h-font' :
+             strip === 'line' ? 'h-line' : 'width';
     mdStartX = e.clientX;
     mdStartY = e.clientY;
     mdLastStep = 0;
@@ -2342,22 +2336,16 @@ document.addEventListener('keydown', (e) => {
   window.addEventListener('mousemove', (e) => {
     if (!mdActive) return;
     const dx = e.clientX - mdStartX;
-    const dy = e.clientY - mdStartY;
-    if (mdMode === 'vertical-font' || mdMode === 'vertical-line') {
-      const targetStep = Math.trunc(-dy / V_STEP);
-      if (targetStep !== mdLastStep) {
-        const delta = targetStep - mdLastStep;
-        mdLastStep = targetStep;
-        if (mdMode === 'vertical-font') adjustFontSize(delta);
-        else adjustLineHeight(delta);
-      }
-    } else if (mdMode === 'width') {
-      const targetStep = Math.trunc(dx / W_STEP);
-      if (targetStep !== mdLastStep) {
-        const delta = targetStep - mdLastStep;
-        mdLastStep = targetStep;
-        adjustReadingWidth(delta);
-      }
+    const step = mdMode === 'h-font' ? H_STEP_FONT
+               : mdMode === 'h-line' ? H_STEP_LINE
+               : H_STEP_WIDTH;
+    const targetStep = Math.trunc(dx / step);
+    if (targetStep !== mdLastStep) {
+      const delta = targetStep - mdLastStep;
+      mdLastStep = targetStep;
+      if (mdMode === 'h-font')      adjustFontSize(delta);
+      else if (mdMode === 'h-line') adjustLineHeight(delta);
+      else                           adjustReadingWidth(delta);
     }
   });
   window.addEventListener('mouseup', () => { mdActive = false; mdMode = null; });
