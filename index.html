@@ -603,52 +603,38 @@ body.r-ui-visible .r-quick {
 .r-hold-ring.dir-prev .r-hold-arrow-prev { display: block; }
 .r-hold-ring.dir-next .r-hold-arrow-next { display: block; }
 
-/* Swipe-to-turn ring. Appears mid-screen on the side the user is swiping
-   toward; fills as the swipe approaches the page-turn threshold. Mirrors
-   the desktop hold-to-turn ring visually. */
+/* Swipe-to-turn edge glow. Tall narrow ember bloom on whichever side the
+   user is swiping toward. Opacity scales with swipe progress. */
 .r-swipe-ring {
   position: absolute;
   top: 50%;
-  width: 56px; height: 56px;
-  transform: translateY(-50%) scale(0.85);
+  height: 70vh;
+  width: 140px;
+  transform: translateY(-50%);
   pointer-events: none;
   opacity: 0;
-  transition: opacity 140ms ease, transform 140ms ease;
+  transition: opacity 80ms linear;
   z-index: 5;
-  color: var(--ember);
 }
-.r-swipe-ring.active {
-  opacity: 1;
-  transform: translateY(-50%) scale(1);
+.r-swipe-ring.dir-prev {
+  left: 0;
+  background: radial-gradient(
+    ellipse 40% 60% at left center,
+    rgba(212, 101, 74, 0.85) 0%,
+    rgba(212, 101, 74, 0.5)  18%,
+    rgba(212, 101, 74, 0.18) 45%,
+    rgba(212, 101, 74, 0)    80%
+  );
 }
-.r-swipe-ring.dir-prev { left: 28px; }
-.r-swipe-ring.dir-next { right: 28px; }
-.r-swipe-ring svg {
-  width: 100%; height: 100%;
-  overflow: visible;
-}
-.r-swipe-track {
-  fill: none;
-  stroke: color-mix(in srgb, var(--ink) 18%, transparent);
-  stroke-width: 1;
-}
-.r-swipe-fill {
-  fill: none;
-  stroke: var(--ember);
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-dasharray: 106.8;  /* 2 * PI * 17 */
-  stroke-dashoffset: 106.8;
-  transform: rotate(-90deg);
-  transform-origin: center;
-}
-.r-swipe-icon {
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 22px;
-  line-height: 1;
-  color: var(--ember);
+.r-swipe-ring.dir-next {
+  right: 0;
+  background: radial-gradient(
+    ellipse 40% 60% at right center,
+    rgba(212, 101, 74, 0.85) 0%,
+    rgba(212, 101, 74, 0.5)  18%,
+    rgba(212, 101, 74, 0.18) 45%,
+    rgba(212, 101, 74, 0)    80%
+  );
 }
 
 /* Debug mode — reveals click/touch interaction zones.
@@ -960,15 +946,9 @@ body.r-debug .r-book {
         <path class="r-hold-arrow r-hold-arrow-next" d="M18 14l6 6-6 6" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
       </svg>
     </div>
-    <!-- Swipe-to-turn ring. Appears mid-screen on the side the user swipes
-         toward, fills as the gesture approaches the page-turn threshold. -->
-    <div class="r-swipe-ring" id="r-swipe-ring" aria-hidden="true">
-      <svg viewBox="0 0 40 40">
-        <circle class="r-swipe-track" cx="20" cy="20" r="17"></circle>
-        <circle class="r-swipe-fill" id="r-swipe-fill" cx="20" cy="20" r="17"></circle>
-      </svg>
-      <i class="ph ph-file r-swipe-icon" aria-hidden="true"></i>
-    </div>
+    <!-- Swipe-to-turn edge glow. Tall narrow ember bloom on whichever side
+         the user is swiping toward. Opacity scales with swipe progress. -->
+    <div class="r-swipe-ring" id="r-swipe-ring" aria-hidden="true"></div>
     <!-- Quick controls cluster. Three drag pills (font/line/width) grouped
          together at the bottom center. Visible only when reader UI is showing. -->
     <div class="r-quick" id="r-quick" aria-hidden="true">
@@ -2240,27 +2220,25 @@ document.addEventListener('keydown', (e) => {
     return el ? el.dataset.strip : null;  // 'font' | 'line' | 'width'
   }
 
-  const RING_CIRC = 106.8;  // 2 * PI * 17 — must match CSS dasharray
   const swipeRing = () => $('r-swipe-ring');
-  const swipeRingFill = () => $('r-swipe-fill');
 
   function showSwipeProgress(dx, thresh) {
-    const ring = swipeRing(), fill = swipeRingFill();
-    if (!ring || !fill) return;
+    const ring = swipeRing();
+    if (!ring) return;
     // Direction class — pick whichever side the user is swiping toward.
     // Negative dx means swiping left (turning to next page) → show on right.
     // Positive dx means swiping right (turning to prev page) → show on left.
     const dir = dx < 0 ? 'next' : 'prev';
     ring.classList.toggle('dir-prev', dir === 'prev');
     ring.classList.toggle('dir-next', dir === 'next');
-    ring.classList.add('active');
+    // Opacity ramps with swipe progress; eased to bias visibility earlier
+    // in the gesture so the user gets feedback even on small drags.
     const ratio = Math.min(1, Math.abs(dx) / thresh);
-    fill.style.strokeDashoffset = (RING_CIRC * (1 - ratio)).toFixed(2);
+    ring.style.opacity = Math.pow(ratio, 0.7).toFixed(3);
   }
   function hideSwipeProgress() {
-    const ring = swipeRing(), fill = swipeRingFill();
-    if (ring) ring.classList.remove('active');
-    if (fill) fill.style.strokeDashoffset = RING_CIRC;
+    const ring = swipeRing();
+    if (ring) ring.style.opacity = '';
   }
 
   rc.addEventListener('touchstart', (e) => {
