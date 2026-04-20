@@ -2720,6 +2720,155 @@ if ('serviceWorker' in navigator) {
 }
 function showUpdateToast(sw) { waitingSW = sw; $('update-toast').classList.add('visible'); }
 function applyUpdate() { if (waitingSW) waitingSW.postMessage('skipWaiting'); }
+
+// ===== SENTENCE SELECTION =====
+// Tap a word, get the whole sentence selected. Native browser selection is
+// the source of truth; we're just offering a faster affordance than the
+// usual long-press-and-drag on touch, and a single-click shortcut on desktop.
+// Drag still works normally (selects an arbitrary range) because we only
+// intercept "clean" taps with minimal movement.
+(() => {
+  // Guard: Intl.Segmenter available on all modern browsers but fall back to
+  // naive regex if not.
+  const hasSegmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function';
+  const sentenceSegmenter = hasSegmenter
+    ? new Intl.Segmenter(undefined, { granularity: 'sentence' })
+    : null;
+
+  // Tap tolerances: how much a pointer can move between down and up before
+  // we treat it as a drag rather than a tap.
+  const TAP_MAX_MOVEMENT = 6;     // px
+  const TAP_MAX_DURATION = 350;   // ms
+
+  let downX = 0, downY = 0, downTime = 0, downed = false;
+
+  function onPointerDown(e) {
+    // Only primary button / primary touch
+    if (e.button !== undefined && e.button !== 0) return;
+    downX = e.clientX;
+    downY = e.clientY;
+    downTime = Date.now();
+    downed = true;
+  }
+
+  function onPointerUp(e) {
+    if (!downed) return;
+    downed = false;
+    const dx = Math.abs(e.clientX - downX);
+    const dy = Math.abs(e.clientY - downY);
+    const dt = Date.now() - downTime;
+    // Native drag selection → let it be. Long press on mobile → let native
+    // selection handle it. We only act on clean quick taps.
+    if (dx > TAP_MAX_MOVEMENT || dy > TAP_MAX_MOVEMENT) return;
+    if (dt > TAP_MAX_DURATION) return;
+
+    // Ignore taps that landed on non-text elements (links, images).
+    const target = e.target;
+    if (!target || target.nodeType !== 1) return;
+    if (target.closest('a, img, code, pre, figure')) return;
+
+    // Find the sentence containing the tap point.
+    const range = sentenceRangeAtPoint(e.clientX, e.clientY);
+    if (!range) return;
+
+    // Programmatically set the browser selection. Browser renders its own
+    // highlight + (on touch) its own drag handles.
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    // Eat the click so the book's onclick=toggleReaderUI() doesn't fire.
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  // Also stop clicks from propagating to r-book's toggle handler when a
+  // selection exists inside r-inner (catches cases where drag-select
+  // finished without passing through our pointerdown/up).
+  function onClickCapture(e) {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && isInsideInner(sel.anchorNode)) {
+      e.stopPropagation();
+    }
+  }
+
+  function isInsideInner(node) {
+    const inner = $('r-inner');
+    if (!inner || !node) return false;
+    const n = node.nodeType === 1 ? node : node.parentElement;
+    return !!(n && inner.contains(n));
+  }
+
+  // Locate the word (or character position) under a screen point, then expand
+  // to the enclosing sentence. Returns a Range, or null if nothing useful.
+  function sentenceRangeAtPoint(x, y) {
+    // caretRangeFromPoint (blink, webkit) or caretPositionFromPoint (gecko).
+    let pos = null;
+    if (document.caretRangeFromPoint) {
+      const r = document.caretRangeFromPoint(x, y);
+      if (r) pos = { node: r.startContainer, offset: r.startOffset };
+    } else if (document.caretPositionFromPoint) {
+      const cp = document.caretPositionFromPoint(x, y);
+      if (cp) pos = { node: cp.offsetNode, offset: cp.offset };
+    }
+    if (!pos || !pos.node || pos.node.nodeType !== 3) return null;
+
+    const textNode = pos.node;
+    const localOffset = pos.offset;
+    const nodeText = textNode.data;
+    if (!nodeText || !nodeText.trim()) return null;
+
+    // Find the sentence boundaries within this text node first. For most
+    // prose this is enough — the tapped sentence is fully in one text node.
+    // Cross-node sentences (e.g. containing <em>) are a Phase 1.1 problem.
+    const bounds = sentenceBoundsAt(nodeText, localOffset);
+    if (!bounds) return null;
+
+    const range = document.createRange();
+    range.setStart(textNode, bounds.start);
+    range.setEnd(textNode, bounds.end);
+    return range;
+  }
+
+  // Given a string and a character offset, return {start, end} of the
+  // sentence that contains that offset. Uses Intl.Segmenter if available.
+  function sentenceBoundsAt(str, offset) {
+    if (sentenceSegmenter) {
+      const segments = [...sentenceSegmenter.segment(str)];
+      for (const s of segments) {
+        const segEnd = s.index + s.segment.length;
+        if (offset >= s.index && offset <= segEnd) {
+          const trimmed = s.segment.replace(/^\s+/, '');
+          const startPad = s.segment.length - trimmed.length;
+          return {
+            start: s.index + startPad,
+            end: s.index + s.segment.length
+          };
+        }
+      }
+      return null;
+    }
+    // Fallback: scan for sentence terminators manually. Not great across
+    // abbreviations but workable.
+    const terminators = /[.!?。！？]\s/g;
+    let start = 0, end = str.length;
+    let m;
+    while ((m = terminators.exec(str)) !== null) {
+      if (m.index < offset) start = m.index + 1;
+      else { end = m.index + 1; break; }
+    }
+    return { start, end };
+  }
+
+  // Wire up — use pointer events (unified mouse/touch). Capture phase so we
+  // can cancel the click bubbling to r-book.
+  const inner = $('r-inner');
+  if (inner) {
+    inner.addEventListener('pointerdown', onPointerDown);
+    inner.addEventListener('pointerup', onPointerUp);
+    inner.addEventListener('click', onClickCapture, true);
+  }
+})();
 </script>
 </body>
 </html>
