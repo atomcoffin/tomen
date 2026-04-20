@@ -556,13 +556,38 @@ body.r-ui-visible .r-quick {
   border-color: color-mix(in srgb, var(--ink) 18%, transparent);
 }
 
-/* The flex-growing middle — this is the drag surface. A faint midline
-   shows it's a slider track without being a full horizontal line. */
+/* The flex-growing middle — drag surface AND slider track. The body holds
+   both the track line (its ::before) and the thumb (absolute child). */
 .r-quick-body {
   flex: 1;
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+.r-quick-body::before {
+  content: '';
+  width: 100%;
   height: 1px;
   background: color-mix(in srgb, currentColor 40%, transparent);
   border-radius: 1px;
+}
+/* Thumb — small ember dot positioned along the track. JS sets its `left`
+   as a percentage reflecting the current slider value. */
+.r-quick-thumb {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ember);
+  transform: translate(-50%, -50%);
+  transition: left 120ms ease, background 140ms ease;
+  pointer-events: none;
+  left: 50%;
+}
+.r-quick-bar:hover .r-quick-thumb {
+  background: color-mix(in srgb, var(--ember) 88%, var(--ink));
 }
 
 /* Font-size glyph extremes */
@@ -1036,17 +1061,17 @@ body.r-debug .r-book {
     <div class="r-quick" id="r-quick" aria-hidden="true">
       <div class="r-quick-bar" data-strip="font" aria-label="Drag left or right to change font size">
         <span class="r-glyph-small" aria-hidden="true">A</span>
-        <span class="r-quick-body" aria-hidden="true"></span>
+        <div class="r-quick-body" aria-hidden="true"><div class="r-quick-thumb"></div></div>
         <span class="r-glyph-big" aria-hidden="true">A</span>
       </div>
       <div class="r-quick-bar" data-strip="line" aria-label="Drag left or right to change line height">
         <span class="r-glyph-lines-tight" aria-hidden="true"><span></span><span></span><span></span></span>
-        <span class="r-quick-body" aria-hidden="true"></span>
+        <div class="r-quick-body" aria-hidden="true"><div class="r-quick-thumb"></div></div>
         <span class="r-glyph-lines-loose" aria-hidden="true"><span></span><span></span><span></span></span>
       </div>
       <div class="r-quick-bar" data-strip="width" aria-label="Drag left or right to change reading width">
         <span class="r-glyph-bar-short" aria-hidden="true"></span>
-        <span class="r-quick-body" aria-hidden="true"></span>
+        <div class="r-quick-body" aria-hidden="true"><div class="r-quick-thumb"></div></div>
         <span class="r-glyph-bar-long" aria-hidden="true"></span>
       </div>
     </div>
@@ -3011,6 +3036,7 @@ function setFontSize(v) {
   if ($('fs-display')) $('fs-display').textContent = v;
   if ($('sl-fontsize')) $('sl-fontsize').value = v;
   savePref('fontSize', v);
+  updateQuickThumbs();
   remeasureReader();
 }
 function setLineHeight(v) {
@@ -3019,6 +3045,7 @@ function setLineHeight(v) {
   if ($('lh-display')) $('lh-display').textContent = lh;
   if ($('sl-lineheight')) $('sl-lineheight').value = v;
   savePref('lineHeight', v);
+  updateQuickThumbs();
   remeasureReader();
 }
 function setReadingWidth(v) {
@@ -3026,7 +3053,31 @@ function setReadingWidth(v) {
   if ($('rw-display')) $('rw-display').textContent = v;
   if ($('sl-width')) $('sl-width').value = v;
   savePref('readingWidth', v);
+  updateQuickThumbs();
   remeasureReader();
+}
+
+// Reposition each quick-bar's thumb to match its slider's current value.
+// The thumb sits at (current - min) / (max - min) along the track.
+function updateQuickThumbs() {
+  const map = [
+    { strip: 'font',  slider: 'sl-fontsize'   },
+    { strip: 'line',  slider: 'sl-lineheight' },
+    { strip: 'width', slider: 'sl-width'      }
+  ];
+  for (const { strip, slider } of map) {
+    const sl = $(slider);
+    if (!sl) continue;
+    const min = parseFloat(sl.min);
+    const max = parseFloat(sl.max);
+    const cur = parseFloat(sl.value);
+    if (isNaN(min) || isNaN(max) || max === min) continue;
+    const pct = Math.max(0, Math.min(1, (cur - min) / (max - min)));
+    const bar = document.querySelector(`.r-quick-bar[data-strip="${strip}"]`);
+    if (!bar) continue;
+    const thumb = bar.querySelector('.r-quick-thumb');
+    if (thumb) thumb.style.left = (pct * 100).toFixed(2) + '%';
+  }
 }
 
 // Apply all three prefs for the current bucket. Called on boot, and again
