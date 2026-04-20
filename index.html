@@ -42,7 +42,7 @@
   --font-read: 'Thow', 'Georgia', serif;
   --font-ui: 'Thow', 'Georgia', serif;
   --font-mono: 'Thow Mono', 'Courier New', monospace;
-  --reading-width: 1400px;
+  --reading-width: 70ch;
   --font-size: 18px;
   --line-height: 1.8;
 }
@@ -471,7 +471,12 @@ body.r-mode-editing .r-toolbar-editing { display: flex; }
   flex: 1;
   position: relative;
   overflow: hidden;
-  max-width: var(--reading-width, 1400px);
+  /* Set font-size so the ch unit below measures against reading typography.
+     The text itself is inside .r-inner which re-declares font-size, but the
+     ch unit on .r-book's max-width calc needs calibration. */
+  font-size: var(--font-size);
+  /* Desktop: 2 columns of var(--reading-width) each, plus the column gap. */
+  max-width: calc(var(--reading-width, 70ch) * 2 + 80px);
   margin: 0 auto;
   width: 100%;
 }
@@ -897,7 +902,8 @@ body.r-debug .r-book {
 @media (max-width: 768px) {
   .r-content { padding: 56px 24px; }
   .r-pages { column-count: 1; column-gap: 40px; }
-  .r-book { max-width: 100%; }
+  /* Mobile single-column: container is one column's worth, no gap. */
+  .r-book { max-width: var(--reading-width, 70ch); }
   .r-click-zone { width: 14%; }
   .r-toolbar { padding: 8px 10px; }
   .r-title { max-width: 120px; font-size: 13px; }
@@ -1086,8 +1092,8 @@ body.r-debug .r-book {
       <div class="settings-label">Reading width</div>
       <div class="range-row">
         <span class="range-label" style="font-size:10px">∣∣</span>
-        <input type="range" min="800" max="2400" step="50" value="1400" id="sl-width" oninput="setReadingWidth(this.value)">
-        <span class="range-label" id="rw-display">1400</span>
+        <input type="range" min="40" max="90" step="1" value="70" id="sl-width" oninput="setReadingWidth(this.value)">
+        <span class="range-label" id="rw-display">70ch</span>
       </div>
     </div>
   </div>
@@ -1120,22 +1126,6 @@ body.r-debug .r-book {
         <button class="theme-btn active" data-theme="" onclick="setTheme('')">Light</button>
         <button class="theme-btn" data-theme="sepia" onclick="setTheme('sepia')">Sepia</button>
         <button class="theme-btn" data-theme="dark" onclick="setTheme('dark')">Dark</button>
-      </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-label">Reading font size</div>
-      <div class="range-row">
-        <span class="range-label" style="font-size:12px">A</span>
-        <input type="range" min="14" max="28" value="18" id="sl-fontsize" oninput="setFontSize(this.value)">
-        <span class="range-label" id="fs-display">18</span>
-      </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-label">Line height</div>
-      <div class="range-row">
-        <span class="range-label">≡</span>
-        <input type="range" min="14" max="24" value="18" id="sl-lineheight" oninput="setLineHeight(this.value)">
-        <span class="range-label" id="lh-display">1.8</span>
       </div>
     </div>
   </div>
@@ -2636,18 +2626,18 @@ function adjustLineHeight(delta) {
   showGestureToast(`Line height: ${(next / 10).toFixed(1)}`);
 }
 
-// Adjust reading width by N steps of 50px each, clamped to slider range.
+// Adjust reading width by N ch each step, clamped to slider range.
 function adjustReadingWidth(delta) {
   const sl = $('sl-width');
   if (!sl || delta === 0) return;
-  const step = parseInt(sl.step) || 50;
+  const step = parseInt(sl.step) || 1;
   const min = parseInt(sl.min), max = parseInt(sl.max);
   const cur = parseInt(sl.value);
   const next = Math.max(min, Math.min(max, cur + delta * step));
   if (next === cur) return;
   sl.value = next;
   setReadingWidth(next);
-  showGestureToast(`Width: ${next}px`);
+  showGestureToast(`Width: ${next}ch`);
 }
 
 // Brief floating indicator during gesture-based settings changes.
@@ -2666,12 +2656,22 @@ function showGestureToast(text) {
   _gestureToastTm = setTimeout(() => el.classList.remove('show'), 900);
 }
 
-// Recompute on window resize (text reflows, spread count changes)
+// Recompute on window resize (text reflows, spread count changes).
+// Also watch for device-bucket transitions (crossing the 768px breakpoint)
+// and reload reader prefs for the new bucket — keeps phone and desktop
+// settings independent as the viewport shifts.
 let _resizeTm = null;
+let _lastBucket = null;
 window.addEventListener('resize', () => {
-  if (!$('screen-reader').classList.contains('active')) return;
   clearTimeout(_resizeTm);
   _resizeTm = setTimeout(() => {
+    const bucket = getDeviceBucket();
+    if (_lastBucket !== null && bucket !== _lastBucket) {
+      applyReaderPrefsForBucket();
+    }
+    _lastBucket = bucket;
+    // Re-measure reader only if it's active
+    if (!$('screen-reader').classList.contains('active')) return;
     measureSpreads();
     if (currentSpread >= totalSpreads) currentSpread = totalSpreads - 1;
     applySpread();
@@ -2942,25 +2942,85 @@ function setTheme(theme) {
   localStorage.setItem('tomen_theme', theme);
 }
 
+// ===== DEVICE-BUCKETED PREFERENCES =====
+// Reading prefs (font/line/width) are stored per-device-bucket so a phone and
+// a desktop can have independent defaults without stepping on each other.
+// Bucket is determined purely by viewport width — CSS media queries use the
+// same 768px breakpoint so layout and prefs always align.
+const _READER_DEFAULTS = {
+  phone:   { fontSize: 16, lineHeight: 15, readingWidth: 55 },
+  desktop: { fontSize: 20, lineHeight: 16, readingWidth: 70 }
+};
+function getDeviceBucket() {
+  return window.matchMedia('(max-width: 768px)').matches ? 'phone' : 'desktop';
+}
+function savePref(name, value) {
+  localStorage.setItem(`tomen_${name}_${getDeviceBucket()}`, value);
+}
+function loadPref(name) {
+  const bucket = getDeviceBucket();
+  const v = localStorage.getItem(`tomen_${name}_${bucket}`);
+  if (v !== null) return v;
+  const def = _READER_DEFAULTS[bucket];
+  return def[name] !== undefined ? String(def[name]) : null;
+}
+
+// One-time migration: earlier versions stored prefs globally under names like
+// `tomen_fontSize`. If we find those, treat them as desktop-bucket values and
+// promote them, then remove the old keys. Safe to call repeatedly.
+function migrateGlobalPrefsToBuckets() {
+  const legacy = ['fontSize', 'lineHeight', 'readingWidth'];
+  for (const name of legacy) {
+    const k = `tomen_${name}`;
+    const v = localStorage.getItem(k);
+    if (v === null) continue;
+    // Only migrate if the desktop-bucket key doesn't already exist (don't
+    // overwrite a value the user set in the new system).
+    if (localStorage.getItem(`tomen_${name}_desktop`) === null) {
+      // Old readingWidth was in pixels (e.g. 1400). If that's what we see,
+      // convert to a reasonable ch default rather than preserving the px number.
+      if (name === 'readingWidth' && parseInt(v, 10) > 200) {
+        localStorage.setItem(`tomen_${name}_desktop`, '70');
+      } else {
+        localStorage.setItem(`tomen_${name}_desktop`, v);
+      }
+    }
+    localStorage.removeItem(k);
+  }
+}
+
 function setFontSize(v) {
   document.documentElement.style.setProperty('--font-size', v + 'px');
-  $('fs-display').textContent = v;
-  localStorage.setItem('tomen_fontSize', v);
+  if ($('fs-display')) $('fs-display').textContent = v;
+  if ($('sl-fontsize')) $('sl-fontsize').value = v;
+  savePref('fontSize', v);
   remeasureReader();
 }
 function setLineHeight(v) {
   const lh = (v / 10).toFixed(1);
   document.documentElement.style.setProperty('--line-height', lh);
-  $('lh-display').textContent = lh;
-  localStorage.setItem('tomen_lineHeight', v);
+  if ($('lh-display')) $('lh-display').textContent = lh;
+  if ($('sl-lineheight')) $('sl-lineheight').value = v;
+  savePref('lineHeight', v);
   remeasureReader();
 }
 function setReadingWidth(v) {
-  document.documentElement.style.setProperty('--reading-width', v + 'px');
-  const disp = $('rw-display');
-  if (disp) disp.textContent = v;
-  localStorage.setItem('tomen_readingWidth', v);
+  document.documentElement.style.setProperty('--reading-width', v + 'ch');
+  if ($('rw-display')) $('rw-display').textContent = v + 'ch';
+  if ($('sl-width')) $('sl-width').value = v;
+  savePref('readingWidth', v);
   remeasureReader();
+}
+
+// Apply all three prefs for the current bucket. Called on boot, and again
+// when the viewport crosses a breakpoint (resize handler).
+function applyReaderPrefsForBucket() {
+  const fs = loadPref('fontSize');
+  const lh = loadPref('lineHeight');
+  const rw = loadPref('readingWidth');
+  if (fs !== null) setFontSize(fs);
+  if (lh !== null) setLineHeight(lh);
+  if (rw !== null) setReadingWidth(rw);
 }
 // Re-measure and reapply spread when the reader's content reflows.
 function remeasureReader() {
@@ -3018,12 +3078,11 @@ function renderGreeting() {
 (async function init() {
   const t = localStorage.getItem('tomen_theme') || '';
   setTheme(t);
-  const fs = localStorage.getItem('tomen_fontSize');
-  if (fs) { setFontSize(fs); $('sl-fontsize').value = fs; }
-  const lh = localStorage.getItem('tomen_lineHeight');
-  if (lh) { setLineHeight(lh); $('sl-lineheight').value = lh; }
-  const rw = localStorage.getItem('tomen_readingWidth');
-  if (rw) { setReadingWidth(rw); if ($('sl-width')) $('sl-width').value = rw; }
+  // Migrate any legacy global reader prefs → desktop bucket, then apply
+  // the current bucket's values (with defaults if unset).
+  migrateGlobalPrefsToBuckets();
+  applyReaderPrefsForBucket();
+  _lastBucket = getDeviceBucket();
   renderGreeting();
 
   // Open IndexedDB and load library
