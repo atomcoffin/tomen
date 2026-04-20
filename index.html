@@ -42,7 +42,7 @@
   --font-read: 'Thow', 'Georgia', serif;
   --font-ui: 'Thow', 'Georgia', serif;
   --font-mono: 'Thow Mono', 'Courier New', monospace;
-  --reading-width: 70ch;
+  --reading-width: 1200px;
   --font-size: 18px;
   --line-height: 1.8;
 }
@@ -471,12 +471,7 @@ body.r-mode-editing .r-toolbar-editing { display: flex; }
   flex: 1;
   position: relative;
   overflow: hidden;
-  /* Set font-size so the ch unit below measures against reading typography.
-     The text itself is inside .r-inner which re-declares font-size, but the
-     ch unit on .r-book's max-width calc needs calibration. */
-  font-size: var(--font-size);
-  /* Desktop: 2 columns of var(--reading-width) each, plus the column gap. */
-  max-width: calc(var(--reading-width, 70ch) * 2 + 80px);
+  max-width: var(--reading-width, 1200px);
   margin: 0 auto;
   width: 100%;
 }
@@ -902,8 +897,6 @@ body.r-debug .r-book {
 @media (max-width: 768px) {
   .r-content { padding: 56px 24px; }
   .r-pages { column-count: 1; column-gap: 40px; }
-  /* Mobile single-column: container is one column's worth, no gap. */
-  .r-book { max-width: var(--reading-width, 70ch); }
   .r-click-zone { width: 14%; }
   .r-toolbar { padding: 8px 10px; }
   .r-title { max-width: 120px; font-size: 13px; }
@@ -1092,8 +1085,8 @@ body.r-debug .r-book {
       <div class="settings-label">Reading width</div>
       <div class="range-row">
         <span class="range-label" style="font-size:10px">∣∣</span>
-        <input type="range" min="40" max="90" step="1" value="70" id="sl-width" oninput="setReadingWidth(this.value)">
-        <span class="range-label" id="rw-display">70ch</span>
+        <input type="range" min="800" max="1600" step="50" value="1200" id="sl-width" oninput="setReadingWidth(this.value)">
+        <span class="range-label" id="rw-display">1200</span>
       </div>
     </div>
   </div>
@@ -2626,18 +2619,19 @@ function adjustLineHeight(delta) {
   showGestureToast(`Line height: ${(next / 10).toFixed(1)}`);
 }
 
-// Adjust reading width by N ch each step, clamped to slider range.
+// Adjust reading width by N slider steps, clamped to slider range.
+// Step size varies per device bucket (10 on phone, 50 on desktop).
 function adjustReadingWidth(delta) {
   const sl = $('sl-width');
   if (!sl || delta === 0) return;
-  const step = parseInt(sl.step) || 1;
+  const step = parseInt(sl.step) || 50;
   const min = parseInt(sl.min), max = parseInt(sl.max);
   const cur = parseInt(sl.value);
   const next = Math.max(min, Math.min(max, cur + delta * step));
   if (next === cur) return;
   sl.value = next;
   setReadingWidth(next);
-  showGestureToast(`Width: ${next}ch`);
+  showGestureToast(`Width: ${next}px`);
 }
 
 // Brief floating indicator during gesture-based settings changes.
@@ -2947,9 +2941,19 @@ function setTheme(theme) {
 // a desktop can have independent defaults without stepping on each other.
 // Bucket is determined purely by viewport width — CSS media queries use the
 // same 768px breakpoint so layout and prefs always align.
-const _READER_DEFAULTS = {
-  phone:   { fontSize: 16, lineHeight: 15, readingWidth: 55 },
-  desktop: { fontSize: 20, lineHeight: 16, readingWidth: 70 }
+//
+// Each bucket defines BOTH a default value and the slider range for the width
+// control. Font and line sliders share a range across buckets but have
+// different defaults (e.g., mobile starts smaller than desktop).
+const _READER_CONFIG = {
+  phone: {
+    defaults: { fontSize: 16, lineHeight: 15, readingWidth: 360 },
+    widthSlider: { min: 280, max: 440, step: 10 }
+  },
+  desktop: {
+    defaults: { fontSize: 20, lineHeight: 16, readingWidth: 1200 },
+    widthSlider: { min: 800, max: 1600, step: 50 }
+  }
 };
 function getDeviceBucket() {
   return window.matchMedia('(max-width: 768px)').matches ? 'phone' : 'desktop';
@@ -2961,31 +2965,44 @@ function loadPref(name) {
   const bucket = getDeviceBucket();
   const v = localStorage.getItem(`tomen_${name}_${bucket}`);
   if (v !== null) return v;
-  const def = _READER_DEFAULTS[bucket];
+  const def = _READER_CONFIG[bucket].defaults;
   return def[name] !== undefined ? String(def[name]) : null;
+}
+
+// Configure the width slider's range + step for the current bucket. Called on
+// init and on bucket transitions. Clamps the current value if it falls outside
+// the new range (e.g. switching from desktop's 1200 to phone's 280-440 range).
+function applyWidthSliderRangeForBucket() {
+  const sl = $('sl-width');
+  if (!sl) return;
+  const { widthSlider } = _READER_CONFIG[getDeviceBucket()];
+  sl.min = widthSlider.min;
+  sl.max = widthSlider.max;
+  sl.step = widthSlider.step;
 }
 
 // One-time migration: earlier versions stored prefs globally under names like
 // `tomen_fontSize`. If we find those, treat them as desktop-bucket values and
-// promote them, then remove the old keys. Safe to call repeatedly.
+// promote them, then remove the old keys. Also fixes values stored during a
+// brief period when readingWidth was a ch number (now a px number).
 function migrateGlobalPrefsToBuckets() {
   const legacy = ['fontSize', 'lineHeight', 'readingWidth'];
   for (const name of legacy) {
     const k = `tomen_${name}`;
     const v = localStorage.getItem(k);
-    if (v === null) continue;
-    // Only migrate if the desktop-bucket key doesn't already exist (don't
-    // overwrite a value the user set in the new system).
-    if (localStorage.getItem(`tomen_${name}_desktop`) === null) {
-      // Old readingWidth was in pixels (e.g. 1400). If that's what we see,
-      // convert to a reasonable ch default rather than preserving the px number.
-      if (name === 'readingWidth' && parseInt(v, 10) > 200) {
-        localStorage.setItem(`tomen_${name}_desktop`, '70');
-      } else {
-        localStorage.setItem(`tomen_${name}_desktop`, v);
-      }
+    if (v !== null && localStorage.getItem(`tomen_${name}_desktop`) === null) {
+      localStorage.setItem(`tomen_${name}_desktop`, v);
     }
-    localStorage.removeItem(k);
+    if (v !== null) localStorage.removeItem(k);
+  }
+  // readingWidth was briefly in ch units (40-90 range). Any small values
+  // stored in either bucket are now invalid under the pixel scheme — clear
+  // them so defaults apply instead.
+  for (const bucket of ['phone', 'desktop']) {
+    const k = `tomen_readingWidth_${bucket}`;
+    const v = parseInt(localStorage.getItem(k), 10);
+    const min = _READER_CONFIG[bucket].widthSlider.min;
+    if (!isNaN(v) && v < min) localStorage.removeItem(k);
   }
 }
 
@@ -3005,16 +3022,18 @@ function setLineHeight(v) {
   remeasureReader();
 }
 function setReadingWidth(v) {
-  document.documentElement.style.setProperty('--reading-width', v + 'ch');
-  if ($('rw-display')) $('rw-display').textContent = v + 'ch';
+  document.documentElement.style.setProperty('--reading-width', v + 'px');
+  if ($('rw-display')) $('rw-display').textContent = v;
   if ($('sl-width')) $('sl-width').value = v;
   savePref('readingWidth', v);
   remeasureReader();
 }
 
 // Apply all three prefs for the current bucket. Called on boot, and again
-// when the viewport crosses a breakpoint (resize handler).
+// when the viewport crosses a breakpoint (resize handler). Also refreshes
+// the width slider's range to match the bucket.
 function applyReaderPrefsForBucket() {
+  applyWidthSliderRangeForBucket();
   const fs = loadPref('fontSize');
   const lh = loadPref('lineHeight');
   const rw = loadPref('readingWidth');
