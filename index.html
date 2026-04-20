@@ -597,8 +597,12 @@ body.r-ui-visible .r-quick {
   /* Transition set inline when the hold starts */
 }
 .r-hold-arrow {
-  stroke: var(--ember);
-  stroke-width: 1.2;
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--ember);
+  font-size: 20px;
+  line-height: 1;
   display: none;
 }
 .r-hold-ring.dir-prev .r-hold-arrow-prev { display: block; }
@@ -938,14 +942,17 @@ body.r-debug .r-book {
       </div>
     </div>
     <div class="r-click-zone next" data-dir="next"></div>
-    <!-- Hold-to-turn circular indicator, positioned at cursor on hover/press -->
+    <!-- Hold-to-turn circular indicator, positioned at cursor on hover/press.
+         The ring is an SVG (needs vector stroke animation for fill progress).
+         The arrow is a Phosphor caret icon layered over it, swapped by
+         direction class. -->
     <div class="r-hold-ring" id="r-hold-ring" aria-hidden="true">
       <svg viewBox="0 0 40 40">
         <circle class="r-hold-track" cx="20" cy="20" r="17"></circle>
         <circle class="r-hold-fill" cx="20" cy="20" r="17"></circle>
-        <path class="r-hold-arrow r-hold-arrow-prev" d="M22 14l-6 6 6 6" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path class="r-hold-arrow r-hold-arrow-next" d="M18 14l6 6-6 6" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
       </svg>
+      <i class="ph ph-caret-left r-hold-arrow r-hold-arrow-prev"></i>
+      <i class="ph ph-caret-right r-hold-arrow r-hold-arrow-next"></i>
     </div>
     <!-- Swipe-to-turn edge glow. Tall narrow ember bloom on whichever side
          the user is swiping toward. Opacity scales with swipe progress. -->
@@ -2193,6 +2200,7 @@ function saveProgress() {
 document.addEventListener('keydown', (e) => {
   if (!$('screen-reader').classList.contains('active')) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (document.querySelector('.overlay.open')) return;
   if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
     readerNext();
     e.preventDefault();
@@ -2221,6 +2229,13 @@ document.addEventListener('keydown', (e) => {
 
   const rc = $('r-content');
   if (!rc) return;
+
+  // Any .overlay.open in the DOM means a modal (settings/TOC/profile) is
+  // visible. Freeze all reader gestures while one is up so dragging a slider
+  // can't accidentally turn a page or fire hover-ring logic.
+  function gesturesBlocked() {
+    return !!document.querySelector('.overlay.open');
+  }
 
   function swipeThreshold() {
     return Math.max(60, window.innerWidth * 0.15);
@@ -2252,6 +2267,7 @@ document.addEventListener('keydown', (e) => {
   }
 
   rc.addEventListener('touchstart', (e) => {
+    if (gesturesBlocked()) { tracking = false; return; }
     const s = pickStart(e);
     if (!s) return;
     startX = s.x;
@@ -2323,6 +2339,7 @@ document.addEventListener('keydown', (e) => {
   let mdStartX = 0, mdStartY = 0, mdLastStep = 0;
 
   rc.addEventListener('mousedown', (e) => {
+    if (gesturesBlocked()) return;
     const strip = stripAt(e.target);
     if (!strip) return;
     mdActive = true;
@@ -2438,7 +2455,11 @@ function isHolding() { return _holdTimer !== null; }
   const hasPointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
   if (!hasPointer) return;
 
+  // Matches the check in the gesture IIFE — overlays freeze reader UI.
+  function overlayOpen() { return !!document.querySelector('.overlay.open'); }
+
   document.addEventListener('mousemove', (e) => {
+    if (overlayOpen()) { if (_hoverDir) hideHover(); return; }
     const zone = e.target.closest && e.target.closest('.r-click-zone');
     if (zone) {
       const dir = zone.dataset.dir;
@@ -2449,6 +2470,7 @@ function isHolding() { return _holdTimer !== null; }
     }
   });
   document.addEventListener('mousedown', (e) => {
+    if (overlayOpen()) return;
     const zone = e.target.closest && e.target.closest('.r-click-zone');
     if (!zone || e.button !== 0) return;
     const dir = zone.dataset.dir;
@@ -2788,49 +2810,121 @@ function applyUpdate() { if (waitingSW) waitingSW.postMessage('skipWaiting'); }
   }
 
   // Locate the word (or character position) under a screen point, then expand
-  // to the enclosing sentence. Returns a Range, or null if nothing useful.
+  // to the enclosing sentence across the containing block (paragraph / heading
+  // / blockquote). This handles sentences that span multiple text nodes —
+  // e.g. "Text <em>with italic</em> and more." is one logical sentence but
+  // three separate text nodes in the DOM.
   function sentenceRangeAtPoint(x, y) {
-    // caretRangeFromPoint (blink, webkit) or caretPositionFromPoint (gecko).
-    let pos = null;
-    if (document.caretRangeFromPoint) {
-      const r = document.caretRangeFromPoint(x, y);
-      if (r) pos = { node: r.startContainer, offset: r.startOffset };
-    } else if (document.caretPositionFromPoint) {
-      const cp = document.caretPositionFromPoint(x, y);
-      if (cp) pos = { node: cp.offsetNode, offset: cp.offset };
-    }
-    if (!pos || !pos.node || pos.node.nodeType !== 3) return null;
+    const pos = caretPosFromPoint(x, y);
+    if (!pos || pos.node.nodeType !== 3) return null;
 
-    const textNode = pos.node;
-    const localOffset = pos.offset;
-    const nodeText = textNode.data;
-    if (!nodeText || !nodeText.trim()) return null;
+    // Walk up to the enclosing block container (paragraph or equivalent).
+    const block = findBlockAncestor(pos.node);
+    if (!block) return null;
 
-    // Find the sentence boundaries within this text node first. For most
-    // prose this is enough — the tapped sentence is fully in one text node.
-    // Cross-node sentences (e.g. containing <em>) are a Phase 1.1 problem.
-    const bounds = sentenceBoundsAt(nodeText, localOffset);
+    // Build the concatenated text of the block plus a per-text-node map so
+    // we can translate global offsets back to DOM positions.
+    const { text, nodes } = flattenBlockText(block);
+    if (!text) return null;
+
+    // Global offset of the tap point in the flattened text.
+    const globalTapOffset = localToGlobal(nodes, pos.node, pos.offset);
+    if (globalTapOffset < 0) return null;
+
+    // Segment the block text into sentences, find the one containing the tap.
+    const bounds = sentenceBoundsAt(text, globalTapOffset);
     if (!bounds) return null;
 
+    // Map the sentence's start/end back to DOM positions.
+    const startPos = globalToLocal(nodes, bounds.start);
+    const endPos   = globalToLocal(nodes, bounds.end);
+    if (!startPos || !endPos) return null;
+
     const range = document.createRange();
-    range.setStart(textNode, bounds.start);
-    range.setEnd(textNode, bounds.end);
+    range.setStart(startPos.node, startPos.offset);
+    range.setEnd(endPos.node, endPos.offset);
     return range;
+  }
+
+  function caretPosFromPoint(x, y) {
+    if (document.caretRangeFromPoint) {
+      const r = document.caretRangeFromPoint(x, y);
+      return r ? { node: r.startContainer, offset: r.startOffset } : null;
+    }
+    if (document.caretPositionFromPoint) {
+      const cp = document.caretPositionFromPoint(x, y);
+      return cp ? { node: cp.offsetNode, offset: cp.offset } : null;
+    }
+    return null;
+  }
+
+  // Walk up to the nearest block-level element we care about. Stop at r-inner
+  // if nothing matches.
+  function findBlockAncestor(node) {
+    const BLOCK_TAGS = new Set(['P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'FIGCAPTION', 'DD', 'DT']);
+    const inner = $('r-inner');
+    let el = node.nodeType === 1 ? node : node.parentElement;
+    while (el && el !== inner) {
+      if (BLOCK_TAGS.has(el.tagName)) return el;
+      el = el.parentElement;
+    }
+    // Fallback: if no block tag found, use r-inner itself (text directly in it).
+    return inner;
+  }
+
+  // Collect all text nodes in document order inside `root`, concatenating their
+  // data and recording (node, startIndex, length) for offset mapping.
+  function flattenBlockText(root) {
+    const nodes = [];
+    let text = '';
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    let n;
+    while ((n = walker.nextNode())) {
+      const data = n.data;
+      if (!data) continue;
+      nodes.push({ node: n, start: text.length, length: data.length });
+      text += data;
+    }
+    return { text, nodes };
+  }
+
+  // Given a text node + local offset, return the global index into the
+  // flattened text, or -1 if the node isn't in our list.
+  function localToGlobal(nodes, node, localOffset) {
+    for (const entry of nodes) {
+      if (entry.node === node) return entry.start + localOffset;
+    }
+    return -1;
+  }
+
+  // Given a global index, find the (node, offset) that corresponds to it.
+  // Clamp to the last node's end if the index is at/past the end.
+  function globalToLocal(nodes, globalOffset) {
+    if (!nodes.length) return null;
+    for (const entry of nodes) {
+      if (globalOffset >= entry.start && globalOffset <= entry.start + entry.length) {
+        return { node: entry.node, offset: globalOffset - entry.start };
+      }
+    }
+    const last = nodes[nodes.length - 1];
+    return { node: last.node, offset: last.length };
   }
 
   // Given a string and a character offset, return {start, end} of the
   // sentence that contains that offset. Uses Intl.Segmenter if available.
+  // Trims leading and trailing whitespace from the returned range.
   function sentenceBoundsAt(str, offset) {
     if (sentenceSegmenter) {
       const segments = [...sentenceSegmenter.segment(str)];
       for (const s of segments) {
         const segEnd = s.index + s.segment.length;
         if (offset >= s.index && offset <= segEnd) {
-          const trimmed = s.segment.replace(/^\s+/, '');
-          const startPad = s.segment.length - trimmed.length;
+          const seg = s.segment;
+          const leading  = seg.match(/^\s*/)[0].length;
+          const trailing = seg.match(/\s*$/)[0].length;
           return {
-            start: s.index + startPad,
-            end: s.index + s.segment.length
+            start: s.index + leading,
+            end: s.index + seg.length - trailing
           };
         }
       }
