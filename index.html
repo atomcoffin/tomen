@@ -427,6 +427,25 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 }
 .r-toolbar.hidden { opacity: 0; pointer-events: none; }
 
+/* Toolbar mode swap. Reading toolbar shown by default; editing toolbar hidden
+   until readerMode === 'editing' (the body gets .r-mode-editing). */
+.r-toolbar-editing { display: none; }
+body.r-mode-editing .r-toolbar-reading { display: none; }
+body.r-mode-editing .r-toolbar-editing { display: flex; }
+
+/* Editing toolbar accent — the accent color hints at "doing something" without
+   being loud. Save/bookmark icons use ember so they stand out. */
+.r-toolbar-editing {
+  border-bottom-color: color-mix(in srgb, var(--ember) 30%, var(--border));
+}
+.r-edit-title {
+  color: var(--ink); font-weight: 500;
+}
+.r-edit-action { color: var(--fog); transition: color 140ms ease; }
+.r-edit-action:hover { color: var(--ember); }
+.r-edit-action:disabled { opacity: 0.35; cursor: not-allowed; }
+.r-edit-action:disabled:hover { color: var(--fog); }
+
 .r-toolbar-left, .r-toolbar-right { display: flex; align-items: center; gap: 4px; }
 
 .r-title {
@@ -468,34 +487,6 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
   opacity: 1;
 }
 .r-pages.fade { opacity: 0; }
-
-/* Spine indicator between the two paginated columns. A thin vertical line
-   is the visible affordance; the actual tap target is wider so it's easy to
-   hit. Tapping anywhere on this zone toggles the reader UI (toolbar/sliders).
-   This replaces the old tap-anywhere-in-book behavior, which conflicted with
-   tap-to-select-sentence. */
-.r-spine {
-  position: absolute;
-  top: 0; bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 28px;                 /* tap target */
-  cursor: pointer;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.r-spine::before {
-  content: '';
-  width: 1px;
-  height: 80%;
-  background: color-mix(in srgb, var(--ink) 8%, transparent);
-  transition: background 180ms ease;
-}
-.r-spine:hover::before {
-  background: color-mix(in srgb, var(--ink) 20%, transparent);
-}
 
 /* Click zones for pagination. Cursor hides when over the zone so the
    hover-ring stands in for it. */
@@ -949,10 +940,12 @@ body.r-debug .r-book {
 <!-- ===== READER SCREEN ===== -->
 <div class="screen" id="screen-reader">
   <div class="r-progress" id="r-progress"></div>
-  <div class="r-toolbar" id="r-toolbar">
+  <!-- Reading toolbar (default) -->
+  <div class="r-toolbar r-toolbar-reading" id="r-toolbar">
     <div class="r-toolbar-left">
       <button class="icon-btn" onclick="showLibrary()" title="Back to library"><i class="ph ph-arrow-left"></i></button>
       <button class="icon-btn" onclick="toggleTOC()" title="Contents"><i class="ph ph-list"></i></button>
+      <button class="icon-btn" onclick="enterEditingMode()" title="Mark text"><i class="ph ph-highlighter"></i></button>
       <span class="r-title" id="r-title"></span>
     </div>
     <div class="r-toolbar-right">
@@ -962,16 +955,24 @@ body.r-debug .r-book {
       <button class="icon-btn" onclick="toggleSettings()" title="Settings"><i class="ph ph-gear-six"></i></button>
     </div>
   </div>
+  <!-- Editing toolbar (shown while readerMode === 'editing'). Replaces the
+       reading toolbar entirely so the mode change is unmissable. -->
+  <div class="r-toolbar r-toolbar-editing" id="r-toolbar-edit">
+    <div class="r-toolbar-left">
+      <button class="icon-btn" onclick="exitEditingMode()" title="Done"><i class="ph ph-x"></i></button>
+      <span class="r-title r-edit-title">Marking text</span>
+    </div>
+    <div class="r-toolbar-right">
+      <button class="icon-btn r-edit-action" id="r-edit-save" onclick="saveEditingMark(false)" title="Save highlight"><i class="ph ph-check"></i></button>
+      <button class="icon-btn r-edit-action" id="r-edit-bookmark" onclick="saveEditingMark(true)" title="Save + bookmark"><i class="ph ph-bookmark-simple"></i></button>
+    </div>
+  </div>
   <div class="r-content" id="r-content">
     <div class="r-click-zone prev" data-dir="prev"></div>
-    <div class="r-book" id="r-book">
+    <div class="r-book" id="r-book" onclick="bookAreaTapped(event)">
       <div class="r-pages" id="r-pages">
         <div class="r-inner" id="r-inner"></div>
       </div>
-      <!-- Spine: thin vertical indicator between the two pages. Tapping it
-           toggles the reader UI. Replaces the previous tap-anywhere-to-toggle
-           behavior on r-book, which was conflicting with tap-to-select-sentence. -->
-      <div class="r-spine" id="r-spine" onclick="toggleReaderUI()" aria-label="Toggle reader UI"></div>
     </div>
     <div class="r-click-zone next" data-dir="next"></div>
     <!-- Hold-to-turn circular indicator, positioned at cursor on hover/press.
@@ -2074,7 +2075,11 @@ async function openBookById(id) {
     $('screen-reader').classList.add('active');
     uiVisible = true;
     $('r-toolbar').classList.remove('hidden');
+    $('r-toolbar-edit').classList.remove('hidden');
     document.body.classList.add('r-ui-visible');
+    // Always start books in reading mode (editing mode is never persisted)
+    readerMode = 'reading';
+    document.body.classList.remove('r-mode-editing');
     renderChapter();
     buildTOC();
   } catch (err) {
@@ -2086,6 +2091,7 @@ async function openBookById(id) {
 }
 
 function showLibrary() {
+  if (typeof exitEditingMode === 'function') exitEditingMode();
   saveProgress();
   $('screen-reader').classList.remove('active');
   $('screen-lib').classList.add('active');
@@ -2151,6 +2157,7 @@ function applySpread() {
 // Navigate one spread forward. Crosses into next chapter at the end.
 function readerNext() {
   if (!currentBook) return;
+  if (!isReading()) return;
   if (document.querySelector('.overlay.open')) return;
   if (currentSpread < totalSpreads - 1) {
     currentSpread++;
@@ -2171,6 +2178,7 @@ function readerNext() {
 // Navigate one spread backward. Crosses into previous chapter at the start.
 function readerPrev() {
   if (!currentBook) return;
+  if (!isReading()) return;
   if (document.querySelector('.overlay.open')) return;
   if (currentSpread > 0) {
     currentSpread--;
@@ -2234,7 +2242,22 @@ function saveProgress() {
 document.addEventListener('keydown', (e) => {
   if (!$('screen-reader').classList.contains('active')) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+  // Escape always exits editing mode (even if an overlay is open, close that first)
+  if (e.key === 'Escape') {
+    if (document.querySelector('.overlay.open')) return; // let overlay handle its own close
+    if (typeof isEditing === 'function' && isEditing()) {
+      exitEditingMode();
+      e.preventDefault();
+      return;
+    }
+  }
+
   if (document.querySelector('.overlay.open')) return;
+  // In editing mode, page-turn keys are inert — but arrow keys don't disrupt
+  // native text-selection either; the browser handles caret movement.
+  if (typeof isReading === 'function' && !isReading()) return;
+
   if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
     readerNext();
     e.preventDefault();
@@ -2268,7 +2291,11 @@ document.addEventListener('keydown', (e) => {
   // visible. Freeze all reader gestures while one is up so dragging a slider
   // can't accidentally turn a page or fire hover-ring logic.
   function gesturesBlocked() {
-    return !!document.querySelector('.overlay.open');
+    // Gestures freeze when an overlay is open OR while in editing mode (where
+    // page turns are disabled and the user is selecting text instead).
+    if (document.querySelector('.overlay.open')) return true;
+    if (typeof readerMode !== 'undefined' && readerMode === 'editing') return true;
+    return false;
   }
 
   function swipeThreshold() {
@@ -2301,14 +2328,16 @@ document.addEventListener('keydown', (e) => {
   }
 
   rc.addEventListener('touchstart', (e) => {
-    if (gesturesBlocked()) { tracking = false; return; }
+    const strip = stripAt(e.target);
+    // If gestures are blocked (overlay open / editing mode), allow slider
+    // touches through (they aren't page-turns) but ignore anything else.
+    if (gesturesBlocked() && !strip) { tracking = false; return; }
     const s = pickStart(e);
     if (!s) return;
     startX = s.x;
     startY = s.y;
     tracking = true;
     lastStep = 0;
-    const strip = stripAt(e.target);
     if (strip === 'font')       mode = 'h-font';
     else if (strip === 'line')  mode = 'h-line';
     else if (strip === 'width') mode = 'width';
@@ -2373,9 +2402,10 @@ document.addEventListener('keydown', (e) => {
   let mdStartX = 0, mdStartY = 0, mdLastStep = 0;
 
   rc.addEventListener('mousedown', (e) => {
-    if (gesturesBlocked()) return;
     const strip = stripAt(e.target);
     if (!strip) return;
+    // Sliders always work, even when overlay is open / in editing mode —
+    // they aren't page-turns.
     mdActive = true;
     mdMode = strip === 'font' ? 'h-font' :
              strip === 'line' ? 'h-line' : 'width';
@@ -2489,11 +2519,15 @@ function isHolding() { return _holdTimer !== null; }
   const hasPointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
   if (!hasPointer) return;
 
-  // Matches the check in the gesture IIFE — overlays freeze reader UI.
-  function overlayOpen() { return !!document.querySelector('.overlay.open'); }
+  // Matches the check in the gesture IIFE — overlays and editing mode freeze reader UI.
+  function blocked() {
+    if (document.querySelector('.overlay.open')) return true;
+    if (typeof readerMode !== 'undefined' && readerMode === 'editing') return true;
+    return false;
+  }
 
   document.addEventListener('mousemove', (e) => {
-    if (overlayOpen()) { if (_hoverDir) hideHover(); return; }
+    if (blocked()) { if (_hoverDir) hideHover(); return; }
     const zone = e.target.closest && e.target.closest('.r-click-zone');
     if (zone) {
       const dir = zone.dataset.dir;
@@ -2504,7 +2538,7 @@ function isHolding() { return _holdTimer !== null; }
     }
   });
   document.addEventListener('mousedown', (e) => {
-    if (overlayOpen()) return;
+    if (blocked()) return;
     const zone = e.target.closest && e.target.closest('.r-click-zone');
     if (!zone || e.button !== 0) return;
     const dir = zone.dataset.dir;
@@ -2608,8 +2642,111 @@ function toggleTOC() { $('ov-toc').classList.toggle('open'); }
 function toggleReaderUI() {
   uiVisible = !uiVisible;
   $('r-toolbar').classList.toggle('hidden', !uiVisible);
-  // Edge strip indicators fade with the toolbar
+  $('r-toolbar-edit').classList.toggle('hidden', !uiVisible);
   document.body.classList.toggle('r-ui-visible', uiVisible);
+}
+
+// Click handler on #r-book. In reading mode: tap anywhere toggles UI.
+// In editing mode: the sentence-select IIFE handles tap, and its preventDefault
+// stops this from firing. If a long-press just resolved into editing-mode entry,
+// the pointer code also eats the click so we don't immediately toggle UI.
+function bookAreaTapped(ev) {
+  if (!isReading()) return;
+  if (ev && ev.defaultPrevented) return;
+  toggleReaderUI();
+}
+
+// ===== READER MODE =====
+// Two modes: 'reading' (default) — swipe turns pages, tap toggles UI.
+// 'editing' — page turns disabled, tap-to-select-sentence active, save/bookmark
+// buttons in the toolbar. Mode is not persisted; books always open in reading mode.
+let readerMode = 'reading';
+function isReading() { return readerMode === 'reading'; }
+function isEditing() { return readerMode === 'editing'; }
+
+function enterEditingMode() {
+  if (readerMode === 'editing') return;
+  readerMode = 'editing';
+  document.body.classList.add('r-mode-editing');
+  // Make sure toolbar is visible when entering editing mode
+  if (!uiVisible) toggleReaderUI();
+  updateEditingActions();
+}
+
+function exitEditingMode() {
+  if (readerMode === 'reading') return;
+  readerMode = 'reading';
+  document.body.classList.remove('r-mode-editing');
+  // Clear any active selection so it doesn't linger
+  const sel = window.getSelection();
+  if (sel) sel.removeAllRanges();
+}
+
+// Enable/disable the save buttons based on whether there's an active selection
+// inside the reader.
+function updateEditingActions() {
+  const hasSel = hasEditingSelection();
+  ['r-edit-save', 'r-edit-bookmark'].forEach(id => {
+    const btn = $(id);
+    if (btn) btn.disabled = !hasSel;
+  });
+}
+
+function hasEditingSelection() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+  const range = sel.getRangeAt(0);
+  const inner = $('r-inner');
+  return !!(inner && inner.contains(range.commonAncestorContainer));
+}
+
+// Save the currently-selected text as a mark on the current book. Uses the
+// active window selection to derive text and chapter/offset anchor.
+function saveEditingMark(isBookmark) {
+  if (!currentBook) return;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  const inner = $('r-inner');
+  if (!inner || !inner.contains(range.commonAncestorContainer)) return;
+
+  // Compute global offsets into the flattened chapter text. This lets us
+  // locate the mark reliably on re-render even if the DOM nodes differ.
+  const { start, end } = rangeToChapterOffsets(inner, range);
+  const text = sel.toString().replace(/\s+/g, ' ').trim();
+  if (!text) return;
+
+  if (!Array.isArray(currentBook.marks)) currentBook.marks = [];
+  currentBook.marks.push({
+    chapterIndex: currentChapterIndex,
+    startOffset: start,
+    endOffset: end,
+    text,
+    isBookmark: !!isBookmark,
+    createdAt: Date.now()
+  });
+  saveLibrary();
+
+  // Clear the selection and exit editing so the user returns to reading.
+  sel.removeAllRanges();
+  exitEditingMode();
+}
+
+// Convert a DOM Range inside `root` to {start, end} character offsets into the
+// flattened text of `root`. Walks text nodes in document order.
+function rangeToChapterOffsets(root, range) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  let offset = 0;
+  let start = -1, end = -1;
+  let n;
+  while ((n = walker.nextNode())) {
+    const len = n.data.length;
+    if (n === range.startContainer) start = offset + range.startOffset;
+    if (n === range.endContainer)   end   = offset + range.endOffset;
+    offset += len;
+    if (start >= 0 && end >= 0) break;
+  }
+  return { start, end };
 }
 
 // ===== SETTINGS =====
@@ -2765,70 +2902,120 @@ if ('serviceWorker' in navigator) {
 function showUpdateToast(sw) { waitingSW = sw; $('update-toast').classList.add('visible'); }
 function applyUpdate() { if (waitingSW) waitingSW.postMessage('skipWaiting'); }
 
-// ===== SENTENCE SELECTION =====
-// Tap a word, get the whole sentence selected. Native browser selection is
-// the source of truth; we're just offering a faster affordance than the
-// usual long-press-and-drag on touch, and a single-click shortcut on desktop.
-// Drag still works normally (selects an arbitrary range) because we only
-// intercept "clean" taps with minimal movement.
+// ===== SENTENCE SELECTION + EDITING-MODE ENTRY =====
+// Two jobs:
+//   1. In reading mode — detect long-press on text and enter editing mode,
+//      selecting the sentence at the press point.
+//   2. In editing mode — tap on text selects the sentence containing the tap.
+// Native drag/long-press-drag selection still works on top of this; we only
+// intercept clean taps and clean holds.
 (() => {
-  // Guard: Intl.Segmenter available on all modern browsers but fall back to
-  // naive regex if not.
   const hasSegmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function';
   const sentenceSegmenter = hasSegmenter
     ? new Intl.Segmenter(undefined, { granularity: 'sentence' })
     : null;
 
-  // Tap tolerances: how much a pointer can move between down and up before
-  // we treat it as a drag rather than a tap.
-  const TAP_MAX_MOVEMENT = 6;     // px
-  const TAP_MAX_DURATION = 350;   // ms
+  const TAP_MAX_MOVEMENT = 6;     // px — max drift for a "clean" gesture
+  const TAP_MAX_DURATION = 350;   // ms — up to this = tap
+  const LONG_PRESS_MS   = 500;    // ms — hold this long = long-press
 
   let downX = 0, downY = 0, downTime = 0, downed = false;
+  let longPressTimer = null;
+  let longPressFired = false;
+
+  function clearLongPress() {
+    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  }
 
   function onPointerDown(e) {
-    // Only primary button / primary touch
     if (e.button !== undefined && e.button !== 0) return;
     downX = e.clientX;
     downY = e.clientY;
     downTime = Date.now();
     downed = true;
+    longPressFired = false;
+    clearLongPress();
+
+    // Arm long-press only in reading mode and only on text targets.
+    const target = e.target;
+    if (!target || target.nodeType !== 1) return;
+    if (target.closest('a, img, code, pre, figure')) return;
+    if (typeof readerMode !== 'undefined' && readerMode !== 'reading') return;
+
+    const px = e.clientX, py = e.clientY;
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null;
+      if (!downed) return;
+      // Still roughly stationary? Then fire.
+      const dx = Math.abs(px - downX), dy = Math.abs(py - downY);
+      if (dx > TAP_MAX_MOVEMENT || dy > TAP_MAX_MOVEMENT) return;
+      longPressFired = true;
+      if (typeof enterEditingMode === 'function') enterEditingMode();
+      selectSentenceAt(px, py);
+      if (typeof updateEditingActions === 'function') updateEditingActions();
+    }, LONG_PRESS_MS);
+  }
+
+  function onPointerMove(e) {
+    if (!downed) return;
+    const dx = Math.abs(e.clientX - downX);
+    const dy = Math.abs(e.clientY - downY);
+    if (dx > TAP_MAX_MOVEMENT || dy > TAP_MAX_MOVEMENT) clearLongPress();
   }
 
   function onPointerUp(e) {
+    clearLongPress();
     if (!downed) return;
     downed = false;
+
+    // If long-press already fired, eat the trailing click so r-book's
+    // bookAreaTapped doesn't interpret it as a UI toggle.
+    if (longPressFired) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
     const dx = Math.abs(e.clientX - downX);
     const dy = Math.abs(e.clientY - downY);
     const dt = Date.now() - downTime;
-    // Native drag selection → let it be. Long press on mobile → let native
-    // selection handle it. We only act on clean quick taps.
     if (dx > TAP_MAX_MOVEMENT || dy > TAP_MAX_MOVEMENT) return;
     if (dt > TAP_MAX_DURATION) return;
 
-    // Ignore taps that landed on non-text elements (links, images).
+    // Non-text targets do nothing special — let the tap propagate to
+    // bookAreaTapped (which toggles UI in reading mode, no-ops in editing).
     const target = e.target;
     if (!target || target.nodeType !== 1) return;
     if (target.closest('a, img, code, pre, figure')) return;
 
-    // Find the sentence containing the tap point.
-    const range = sentenceRangeAtPoint(e.clientX, e.clientY);
-    if (!range) return;
+    // Only in editing mode do taps select sentences. In reading mode, the tap
+    // passes through to bookAreaTapped for UI toggle.
+    if (typeof readerMode !== 'undefined' && readerMode !== 'editing') return;
 
-    // Programmatically set the browser selection. Browser renders its own
-    // highlight + (on touch) its own drag handles.
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-
-    // Eat the click so the book's onclick=toggleReaderUI() doesn't fire.
+    if (!selectSentenceAt(e.clientX, e.clientY)) return;
+    if (typeof updateEditingActions === 'function') updateEditingActions();
     e.preventDefault();
     e.stopPropagation();
   }
 
-  // Also stop clicks from propagating to r-book's toggle handler when a
-  // selection exists inside r-inner (catches cases where drag-select
-  // finished without passing through our pointerdown/up).
+  function onPointerCancel() {
+    clearLongPress();
+    downed = false;
+    longPressFired = false;
+  }
+
+  // Common: find sentence at screen point, set browser selection to that range.
+  function selectSentenceAt(x, y) {
+    const range = sentenceRangeAtPoint(x, y);
+    if (!range) return false;
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
+  }
+
+  // Stop clicks carrying a non-collapsed selection from bubbling to r-book
+  // (prevents UI toggle when the user just drag-selected text in editing mode).
   function onClickCapture(e) {
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && isInsideInner(sel.anchorNode)) {
@@ -2981,9 +3168,20 @@ function applyUpdate() { if (waitingSW) waitingSW.postMessage('skipWaiting'); }
   const inner = $('r-inner');
   if (inner) {
     inner.addEventListener('pointerdown', onPointerDown);
+    inner.addEventListener('pointermove', onPointerMove);
     inner.addEventListener('pointerup', onPointerUp);
+    inner.addEventListener('pointercancel', onPointerCancel);
     inner.addEventListener('click', onClickCapture, true);
   }
+
+  // Keep the editing toolbar's action buttons in sync with the current
+  // selection (enabled when there's text selected inside r-inner).
+  document.addEventListener('selectionchange', () => {
+    if (typeof readerMode !== 'undefined' && readerMode === 'editing' &&
+        typeof updateEditingActions === 'function') {
+      updateEditingActions();
+    }
+  });
 })();
 </script>
 </body>
