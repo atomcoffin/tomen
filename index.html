@@ -755,23 +755,21 @@ body.r-mode-editing .r-inner {
 .r-inner h5 { font-size: 0.95em; margin: 1em 0 0.3em; font-weight: 500; }
 .r-inner h6 { font-size: 0.9em;  margin: 1em 0 0.3em; font-weight: 500; color: var(--stone); }
 
-/* Paragraphs: book-style indent. First paragraph (of a chapter or after a
-   heading) runs flush; subsequent paragraphs get a first-line indent.
-   Justified on desktop two-column, left-aligned on mobile single-column
-   (overridden in the @media rule). */
+/* Paragraphs: block vs indent and alignment are user-controlled via
+   CSS variables set by setParagraphStyle() and setTextAlign(). Defaults
+   below are for block-style justified reading — matches what modern
+   ereaders (Kindle, Kobo, Apple Books) use by default. */
 .r-inner p {
-  margin: 0;
-  text-align: justify;
+  margin: 0 0 var(--p-margin, 1em);
+  text-indent: var(--p-indent, 0);
+  text-align: var(--text-align, justify);
   hyphens: auto;
   break-inside: avoid-column;
 }
+/* First-line indent only applies to paragraphs that follow another paragraph.
+   A paragraph leading a chapter or following a heading always runs flush. */
 .r-inner p + p {
-  text-indent: 1.2em;
-}
-/* A paragraph following a heading always starts flush, no indent. */
-.r-inner h1 + p, .r-inner h2 + p, .r-inner h3 + p,
-.r-inner h4 + p, .r-inner h5 + p, .r-inner h6 + p {
-  text-indent: 0;
+  text-indent: var(--p-indent-rest, 0);
 }
 
 .r-inner img {
@@ -1055,9 +1053,6 @@ body.r-mode-editing .r-inner {
   .r-pct { font-size: 10px; }
   .r-quick { width: min(92vw, 560px); bottom: 20px; }
   .r-quick-bar { height: 42px; }
-  /* Single-column: justify creates bad word-spacing rivers. Left-align
-     reads better on narrow lines. Hyphens still help word-breaking. */
-  .r-inner p { text-align: left; }
 }
 @media (max-width: 480px) {
   .r-content { padding: 60px 16px; }
@@ -1242,6 +1237,20 @@ body.r-mode-editing .r-inner {
         <span class="range-label" style="font-size:10px">∣∣</span>
         <input type="range" min="800" max="1600" step="50" value="1200" id="sl-width" oninput="setReadingWidth(this.value)">
         <span class="range-label" id="rw-display">1200</span>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Paragraphs</div>
+      <div class="theme-row">
+        <button class="theme-btn active" data-pstyle="block" onclick="setParagraphStyle('block')">Block</button>
+        <button class="theme-btn" data-pstyle="indent" onclick="setParagraphStyle('indent')">Indent</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Alignment</div>
+      <div class="theme-row">
+        <button class="theme-btn active" data-align="justify" onclick="setTextAlign('justify')">Justify</button>
+        <button class="theme-btn" data-align="left" onclick="setTextAlign('left')">Left</button>
       </div>
     </div>
   </div>
@@ -3360,11 +3369,11 @@ function setTheme(theme) {
 // different defaults (e.g., mobile starts smaller than desktop).
 const _READER_CONFIG = {
   phone: {
-    defaults: { fontSize: 16, lineHeight: 15, readingWidth: 360 },
+    defaults: { fontSize: 16, lineHeight: 15, readingWidth: 360, paragraphStyle: 'block', textAlign: 'left' },
     widthSlider: { min: 280, max: 440, step: 10 }
   },
   desktop: {
-    defaults: { fontSize: 20, lineHeight: 16, readingWidth: 1200 },
+    defaults: { fontSize: 20, lineHeight: 16, readingWidth: 1200, paragraphStyle: 'block', textAlign: 'justify' },
     widthSlider: { min: 800, max: 1600, step: 50 }
   }
 };
@@ -3445,6 +3454,35 @@ function setReadingWidth(v) {
   remeasureReader();
 }
 
+// Paragraph style: 'block' (margin between paragraphs, no indent) or
+// 'indent' (no margin, first-line indent on p+p). Drives CSS vars on :root.
+function setParagraphStyle(v) {
+  const style = (v === 'indent') ? 'indent' : 'block';
+  if (style === 'indent') {
+    document.documentElement.style.setProperty('--p-margin', '0');
+    document.documentElement.style.setProperty('--p-indent-rest', '1.2em');
+  } else {
+    document.documentElement.style.setProperty('--p-margin', '1em');
+    document.documentElement.style.setProperty('--p-indent-rest', '0');
+  }
+  document.querySelectorAll('.theme-btn[data-pstyle]').forEach(b =>
+    b.classList.toggle('active', b.dataset.pstyle === style)
+  );
+  savePref('paragraphStyle', style);
+  remeasureReader();
+}
+
+// Text alignment: 'justify' or 'left'. Drives --text-align on :root.
+function setTextAlign(v) {
+  const align = (v === 'left') ? 'left' : 'justify';
+  document.documentElement.style.setProperty('--text-align', align);
+  document.querySelectorAll('.theme-btn[data-align]').forEach(b =>
+    b.classList.toggle('active', b.dataset.align === align)
+  );
+  savePref('textAlign', align);
+  remeasureReader();
+}
+
 // Reposition each quick-bar's thumb to match its slider's current value.
 // The thumb sits at (current - min) / (max - min) along the track.
 function updateQuickThumbs() {
@@ -3468,7 +3506,7 @@ function updateQuickThumbs() {
   }
 }
 
-// Apply all three prefs for the current bucket. Called on boot, and again
+// Apply all prefs for the current bucket. Called on boot, and again
 // when the viewport crosses a breakpoint (resize handler). Also refreshes
 // the width slider's range to match the bucket.
 function applyReaderPrefsForBucket() {
@@ -3476,9 +3514,13 @@ function applyReaderPrefsForBucket() {
   const fs = loadPref('fontSize');
   const lh = loadPref('lineHeight');
   const rw = loadPref('readingWidth');
+  const ps = loadPref('paragraphStyle');
+  const ta = loadPref('textAlign');
   if (fs !== null) setFontSize(fs);
   if (lh !== null) setLineHeight(lh);
   if (rw !== null) setReadingWidth(rw);
+  if (ps !== null) setParagraphStyle(ps);
+  if (ta !== null) setTextAlign(ta);
 }
 // Re-measure and reapply spread when the reader's content reflows.
 function remeasureReader() {
