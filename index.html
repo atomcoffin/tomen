@@ -450,8 +450,10 @@ body.r-mode-editing .r-toolbar-editing { display: flex; }
 }
 
 /* Quiet reminder of where the reader is — book title · chapter name. Sits
-   just above the progress bar. Hidden when reader UI is up since the toolbar
-   already shows book title and the quick bars would sit on top anyway. */
+   just above the progress bar. Tinted toward ember to match the brand accent
+   that already appears on the progress bar and mark highlights. Hidden when
+   reader UI is up since the toolbar already shows book title and the quick
+   bars would sit on top anyway. */
 .r-footer-ref {
   position: absolute;
   left: 0; right: 0;
@@ -459,7 +461,7 @@ body.r-mode-editing .r-toolbar-editing { display: flex; }
   text-align: center;
   font-family: var(--font-ui);
   font-size: 11px;
-  color: color-mix(in srgb, var(--stone) 70%, transparent);
+  color: color-mix(in srgb, var(--ember) 75%, var(--stone));
   letter-spacing: 0.02em;
   padding: 0 24px;
   white-space: nowrap;
