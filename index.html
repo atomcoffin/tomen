@@ -764,13 +764,18 @@ body.r-mode-editing .r-inner {
 /* Paragraphs: block vs indent and alignment are user-controlled via
    CSS variables set by setParagraphStyle() and setTextAlign(). Defaults
    below are for block-style justified reading — matches what modern
-   ereaders (Kindle, Kobo, Apple Books) use by default. */
+   ereaders (Kindle, Kobo, Apple Books) use by default.
+   Paragraphs are ALLOWED to split across columns/pages — this matches
+   real book behavior where a long paragraph naturally flows from one
+   page to the next. widows/orphans keep at least 2 lines on either
+   side of a split so a single line is never stranded alone. */
 .r-inner p {
   margin: 0 0 var(--p-margin, 1em);
   text-indent: var(--p-indent, 0);
   text-align: var(--text-align, justify);
   hyphens: auto;
-  break-inside: avoid-column;
+  widows: 2;
+  orphans: 2;
 }
 /* First-line indent only applies to paragraphs that follow another paragraph.
    A paragraph leading a chapter or following a heading always runs flush. */
@@ -802,7 +807,8 @@ body.r-mode-editing .r-inner {
   margin: 1.2em 0;
   color: var(--stone);
   font-style: italic;
-  break-inside: avoid-column;
+  widows: 2;
+  orphans: 2;
 }
 /* Paragraphs inside blockquote don't get first-line indent — the border
    already sets them apart. */
