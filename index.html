@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Tomen</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#C45D3E">
@@ -391,7 +391,9 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 
 /* ===== READER ===== */
 .r-progress {
-  position: fixed; bottom: 0; left: 0; height: 3px;
+  position: fixed;
+  bottom: env(safe-area-inset-bottom, 0px);
+  left: 0; height: 3px;
   background: var(--ember); z-index: 50; width: 0;
 }
 
@@ -399,7 +401,9 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
   position: absolute;
   top: 0; left: 0; right: 0;
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 16px;
+  /* Safe-area top handles iPhone notch / Dynamic Island when installed.
+     Also left/right in case of landscape with home indicator. */
+  padding: calc(10px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) 10px calc(16px + env(safe-area-inset-left, 0px));
   background: color-mix(in srgb, var(--paper) 82%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -444,7 +448,14 @@ body.r-mode-editing .r-toolbar-editing { display: flex; }
   flex: 1;
   overflow: hidden;
   position: relative;
-  padding: 88px 60px 88px;
+  /* Safe-area insets on top/bottom/sides so content stays clear of
+     notches, Dynamic Island, home indicators, and landscape-mode bezels
+     when Tomen is installed as a PWA. */
+  padding:
+    calc(88px + env(safe-area-inset-top, 0px))
+    calc(60px + env(safe-area-inset-right, 0px))
+    calc(88px + env(safe-area-inset-bottom, 0px))
+    calc(60px + env(safe-area-inset-left, 0px));
   display: flex;
   align-items: stretch;
 }
@@ -457,7 +468,7 @@ body.r-mode-editing .r-toolbar-editing { display: flex; }
 .r-footer-ref {
   position: absolute;
   left: 0; right: 0;
-  bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   text-align: center;
   font-family: var(--font-ui);
   font-size: 11px;
@@ -534,7 +545,7 @@ body.r-mode-editing .r-click-zone {
 .r-quick {
   position: absolute;
   left: 50%;
-  bottom: 28px;
+  bottom: calc(28px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%) translateY(8px);
   display: flex;
   flex-direction: column;
@@ -1055,21 +1066,45 @@ body.r-mode-editing .r-inner {
    — no JS changes needed. Two tiers: shared rules for all mobile, plus
    tighter overrides for the smallest phones. */
 @media (max-width: 768px) {
-  .r-content { padding: 68px 24px; }
+  .r-content {
+    padding:
+      calc(68px + env(safe-area-inset-top, 0px))
+      calc(24px + env(safe-area-inset-right, 0px))
+      calc(68px + env(safe-area-inset-bottom, 0px))
+      calc(24px + env(safe-area-inset-left, 0px));
+  }
   .r-pages { column-count: 1; column-gap: 40px; }
   .r-click-zone { width: 50%; }
-  .r-toolbar { padding: 8px 10px; }
+  .r-toolbar {
+    padding:
+      calc(8px + env(safe-area-inset-top, 0px))
+      calc(10px + env(safe-area-inset-right, 0px))
+      8px
+      calc(10px + env(safe-area-inset-left, 0px));
+  }
   .r-title { max-width: 120px; font-size: 13px; }
   .r-toolbar .icon-btn { width: 34px; height: 34px; }
   .r-toolbar .icon-btn .ph { font-size: 18px; }
   .r-pct { font-size: 10px; }
-  .r-quick { width: min(92vw, 560px); bottom: 20px; }
+  .r-quick { width: min(92vw, 560px); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
   .r-quick-bar { height: 42px; }
 }
 @media (max-width: 480px) {
-  .r-content { padding: 60px 16px; }
+  .r-content {
+    padding:
+      calc(60px + env(safe-area-inset-top, 0px))
+      calc(16px + env(safe-area-inset-right, 0px))
+      calc(60px + env(safe-area-inset-bottom, 0px))
+      calc(16px + env(safe-area-inset-left, 0px));
+  }
   .r-pages { column-gap: 32px; }
-  .r-toolbar { padding: 6px 8px; }
+  .r-toolbar {
+    padding:
+      calc(6px + env(safe-area-inset-top, 0px))
+      calc(8px + env(safe-area-inset-right, 0px))
+      6px
+      calc(8px + env(safe-area-inset-left, 0px));
+  }
   .r-title { max-width: 100px; }
   .r-quick-bar { height: 40px; }
 }
