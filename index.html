@@ -3138,28 +3138,142 @@ function showGestureToast(text) {
   _gestureToastTm = setTimeout(() => el.classList.remove('show'), 900);
 }
 
-// Recompute on window resize (text reflows, spread count changes).
-// Also watch for device-bucket transitions (crossing the 768px breakpoint)
-// and reload reader prefs for the new bucket — keeps phone and desktop
-// settings independent as the viewport shifts.
+// Recompute on window resize / orientation change (text reflows, spread count
+// changes). Captures a textual anchor (the chapter-relative character offset
+// at the top-left of the currently visible spread), reflows, then snaps to
+// the spread that now contains that anchor — so the user lands on the same
+// sentence they were reading rather than at a percentage-based position.
+// Also watches for device-bucket transitions (crossing the 768px breakpoint)
+// and reloads reader prefs for the new bucket.
 let _resizeTm = null;
 let _lastBucket = null;
 window.addEventListener('resize', () => {
   clearTimeout(_resizeTm);
   _resizeTm = setTimeout(() => {
     const bucket = getDeviceBucket();
-    if (_lastBucket !== null && bucket !== _lastBucket) {
-      applyReaderPrefsForBucket();
-    }
+    const bucketChanged = _lastBucket !== null && bucket !== _lastBucket;
+    if (bucketChanged) applyReaderPrefsForBucket();
     _lastBucket = bucket;
-    // Re-measure reader only if it's active
     if (!$('screen-reader').classList.contains('active')) return;
+    if (!currentBook) return;
+
+    // Capture the chapter offset of whatever text sits at the top-left of
+    // the visible spread BEFORE we re-measure. This is our anchor.
+    const anchorOffset = captureSpreadAnchorOffset();
     measureSpreads();
+    // Snap to the spread containing the anchor, rather than preserving
+    // currentSpread (which would land in random text after reflow).
+    if (anchorOffset !== null) {
+      const newSpread = findSpreadForChapterOffset(anchorOffset);
+      if (newSpread !== null) currentSpread = newSpread;
+    }
     if (currentSpread >= totalSpreads) currentSpread = totalSpreads - 1;
+    if (currentSpread < 0) currentSpread = 0;
     applySpread();
     updateProgress();
-  }, 120);
+    saveProgress();
+  }, 150);
 });
+
+// Find the chapter-relative character offset of the text at the top-left
+// of the currently visible spread. Used as a stable anchor across reflows.
+function captureSpreadAnchorOffset() {
+  const bookEl = $('r-book');
+  const innerEl = $('r-inner');
+  if (!bookEl || !innerEl) return null;
+  const rect = bookEl.getBoundingClientRect();
+  // Sample a point a few px in from the top-left of the visible spread,
+  // to land safely inside the first text column rather than on its edge.
+  const x = rect.left + 8;
+  const y = rect.top + 16;
+  const range = caretRangeAtPoint(x, y);
+  if (!range) return null;
+  return chapterOffsetForNode(range.startContainer, range.startOffset, innerEl);
+}
+
+// Compute the cumulative character offset of (node, offset) within innerEl.
+// Walks all text nodes in document order, summing their lengths until it
+// reaches the target node, then adds the offset within that node.
+function chapterOffsetForNode(targetNode, targetOffset, innerEl) {
+  let total = 0;
+  const walker = document.createTreeWalker(innerEl, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (node === targetNode) return total + targetOffset;
+    total += node.textContent.length;
+  }
+  return null;
+}
+
+// Inverse of chapterOffsetForNode: find the (node, offset) pair at the
+// given chapter-relative character offset.
+function nodeForChapterOffset(offset, innerEl) {
+  let remaining = offset;
+  const walker = document.createTreeWalker(innerEl, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    const len = node.textContent.length;
+    if (remaining <= len) return { node, offset: remaining };
+    remaining -= len;
+  }
+  return null;
+}
+
+// Given a chapter character offset, figure out which spread it lives on.
+// Uses Range.getBoundingClientRect after resetting any spread translate to
+// get the offset's natural x-position within r-pages.
+function findSpreadForChapterOffset(offset) {
+  const innerEl = $('r-inner');
+  const pagesEl = $('r-pages');
+  const bookEl = $('r-book');
+  if (!innerEl || !pagesEl || !bookEl) return null;
+  const found = nodeForChapterOffset(offset, innerEl);
+  if (!found) return null;
+
+  // Temporarily zero the transform so getBoundingClientRect returns the
+  // natural position of the range within the column flow.
+  const prevTransition = pagesEl.style.transition;
+  const prevTransform = pagesEl.style.transform;
+  pagesEl.style.transition = 'none';
+  pagesEl.style.transform = 'translateX(0)';
+  pagesEl.offsetHeight;  // reflow
+
+  const range = document.createRange();
+  range.setStart(found.node, found.offset);
+  range.setEnd(found.node, found.offset);
+  const rangeRect = range.getBoundingClientRect();
+  const pagesRect = pagesEl.getBoundingClientRect();
+  // Position relative to pages's natural (untranslated) left edge.
+  const xInPages = rangeRect.left - pagesRect.left;
+
+  // Restore previous transform/transition before measurement leaks visually.
+  pagesEl.style.transform = prevTransform;
+  pagesEl.style.transition = prevTransition;
+
+  const spreadWidth = bookEl.clientWidth;
+  const style = getComputedStyle(pagesEl);
+  const gap = parseFloat(style.columnGap) || 80;
+  const pairAdvance = spreadWidth + gap;
+  if (pairAdvance <= 0) return null;
+  const idx = Math.max(0, Math.floor(xInPages / pairAdvance));
+  return Math.min(idx, Math.max(0, totalSpreads - 1));
+}
+
+// Cross-browser caret-from-point. Returns a Range at (x, y) or null.
+function caretRangeAtPoint(x, y) {
+  if (document.caretRangeFromPoint) {
+    return document.caretRangeFromPoint(x, y);
+  }
+  if (document.caretPositionFromPoint) {
+    const cp = document.caretPositionFromPoint(x, y);
+    if (!cp) return null;
+    const r = document.createRange();
+    r.setStart(cp.offsetNode, cp.offset);
+    r.setEnd(cp.offsetNode, cp.offset);
+    return r;
+  }
+  return null;
+}
 
 // ===== TOC =====
 function buildTOC() {
@@ -3655,8 +3769,16 @@ function applyReaderPrefsForBucket() {
 function remeasureReader() {
   if (!$('screen-reader').classList.contains('active')) return;
   if (!currentBook) return;
+  // Capture anchor before reflow so font/line/width changes don't fling
+  // the reader to a percentage-based position. User stays on the same
+  // sentence they were looking at.
+  const anchorOffset = captureSpreadAnchorOffset();
   requestAnimationFrame(() => {
     measureSpreads();
+    if (anchorOffset !== null) {
+      const newSpread = findSpreadForChapterOffset(anchorOffset);
+      if (newSpread !== null) currentSpread = newSpread;
+    }
     if (currentSpread >= totalSpreads) currentSpread = totalSpreads - 1;
     if (currentSpread < 0) currentSpread = 0;
     applySpread();
