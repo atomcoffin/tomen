@@ -1027,7 +1027,7 @@ body.r-mode-editing .r-inner {
     </div>
   </div>
   <div class="lib-body" id="lib-body"></div>
-  <input type="file" id="file-input" accept=".epub,.txt,.html,.htm" multiple onchange="handleFiles(event)">
+  <input type="file" id="file-input" accept=".epub,.txt,.html,.htm,.md,.markdown" multiple onchange="handleFiles(event)">
 </div>
 
 <!-- ===== READER SCREEN ===== -->
@@ -1884,7 +1884,8 @@ async function backfillSpineColors() {
 }
 
 // ===== FILE HANDLING =====
-const SUPPORTED_EXT = ['.epub', '.txt', '.html', '.htm'];
+const SUPPORTED_EXT = ['.epub', '.txt', '.html', '.htm', '.md', '.markdown'];
+const SUPPORTED_LIST_STR = '.epub, .txt, .html, .htm, .md, .markdown';
 function isSupportedFile(name) { return SUPPORTED_EXT.some(ext => name.toLowerCase().endsWith(ext)); }
 
 async function handleFolderPick() {
@@ -1893,7 +1894,7 @@ async function handleFolderPick() {
       const dirHandle = await window.showDirectoryPicker();
       const files = [];
       await collectFilesFromDir(dirHandle, files);
-      if (files.length === 0) { alert('No supported files found (.epub, .txt, .html, .htm)'); return; }
+      if (files.length === 0) { alert(`No supported files found (${SUPPORTED_LIST_STR})`); return; }
       await importFiles(files);
     } catch (err) { if (err.name !== 'AbortError') console.error(err); }
   } else {
@@ -1901,7 +1902,7 @@ async function handleFolderPick() {
     input.type = 'file'; input.webkitdirectory = true; input.multiple = true;
     input.onchange = async (e) => {
       const all = Array.from(e.target.files).filter(f => isSupportedFile(f.name));
-      if (all.length === 0) { alert('No supported files found (.epub, .txt, .html, .htm)'); return; }
+      if (all.length === 0) { alert(`No supported files found (${SUPPORTED_LIST_STR})`); return; }
       await importFiles(all);
     };
     input.click();
@@ -1959,10 +1960,25 @@ async function handleFiles(e) {
   e.target.value = '';
 }
 
+// Load any non-EPUB supported file: plain text, HTML, or Markdown. Each
+// format is converted into the same internal representation (array of
+// chapters with sanitized HTML) and stored identically in the library.
 async function loadTextFile(file, batch = false) {
-  const text = await file.text();
+  const raw = await file.text();
+  // Strip UTF-8 BOM if present
+  const text = raw.replace(/^\uFEFF/, '');
+  const lowerName = file.name.toLowerCase();
   const title = file.name.replace(/\.[^.]+$/, '');
-  const html = `<h1>${esc(title)}</h1>` + text.split(/\n\n+/).map(p => `<p>${esc(p.trim())}</p>`).join('');
+
+  let html;
+  if (lowerName.endsWith('.html') || lowerName.endsWith('.htm')) {
+    html = htmlFileToReaderHtml(text, title);
+  } else if (lowerName.endsWith('.md') || lowerName.endsWith('.markdown')) {
+    html = markdownToHtml(text, title);
+  } else {
+    html = plainTextToHtml(text, title);
+  }
+
   const book = {
     id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
     title, author: '', cover: null,
@@ -1971,13 +1987,190 @@ async function loadTextFile(file, batch = false) {
   };
   await saveBookMeta(book);
   await saveBookContent(book);
-  // Add lightweight meta to in-memory library (without chapters/toc)
   library.push({
     id: book.id, title: book.title, author: book.author, cover: book.cover,
     progress: 0, chapterIndex: 0, scrollPos: 0,
     chapterCount: 1, contentSize: html.length
   });
   if (!batch) renderLibrary();
+}
+
+// Plain text → paragraphs. Splits on blank lines. Each paragraph gets its
+// line breaks preserved as soft breaks inside the <p>.
+function plainTextToHtml(text, title) {
+  const paragraphs = text.split(/\n\s*\n+/).map(p => p.trim()).filter(Boolean);
+  const body = paragraphs.map(p => {
+    // Preserve single line breaks inside paragraphs as <br>
+    const inner = esc(p).replace(/\n/g, '<br>');
+    return `<p>${inner}</p>`;
+  }).join('');
+  return `<h1>${esc(title)}</h1>${body}`;
+}
+
+// HTML file → parse, extract body, sanitize. Strips script/style/iframe/
+// event handlers so nothing dangerous survives. Keeps inline styles off so
+// our typography CSS wins.
+function htmlFileToReaderHtml(raw, fallbackTitle) {
+  const doc = new DOMParser().parseFromString(raw, 'text/html');
+  // Remove anything that could execute or interfere with layout
+  doc.querySelectorAll('script, style, iframe, object, embed, link[rel="stylesheet"], meta').forEach(n => n.remove());
+  // Strip on* event handlers and style attributes from everything
+  const walker = doc.createTreeWalker(doc.body || doc.documentElement, NodeFilter.SHOW_ELEMENT);
+  let node;
+  while ((node = walker.nextNode())) {
+    for (const attr of Array.from(node.attributes)) {
+      if (attr.name.startsWith('on')) node.removeAttribute(attr.name);
+      if (attr.name === 'style') node.removeAttribute('style');
+      if (attr.name === 'class') node.removeAttribute('class');
+    }
+  }
+  const body = doc.body;
+  if (!body || !body.innerHTML.trim()) {
+    // No body — treat as plain text instead
+    return plainTextToHtml(doc.documentElement.textContent || raw, fallbackTitle);
+  }
+  // Prepend document title if there's one and body doesn't already lead with a heading
+  const docTitle = doc.querySelector('title')?.textContent?.trim();
+  const firstEl = body.firstElementChild;
+  const hasHeading = firstEl && /^H[1-6]$/.test(firstEl.tagName);
+  const titlePrefix = (docTitle && !hasHeading) ? `<h1>${esc(docTitle)}</h1>` : '';
+  return titlePrefix + body.innerHTML;
+}
+
+// Markdown → HTML. Lightweight converter handling the 80% case: headings,
+// paragraphs, bold/italic, inline/block code, blockquotes, lists (unordered
+// and ordered), horizontal rules, links, and images. Not CommonMark-compliant
+// but covers what ebook-style Markdown files typically contain.
+function markdownToHtml(md, fallbackTitle) {
+  // Normalize line endings and strip leading BOM
+  const src = md.replace(/\r\n?/g, '\n').replace(/^\uFEFF/, '');
+  const lines = src.split('\n');
+  const out = [];
+  let i = 0;
+
+  // Inline formatting: applies within a block of rendered text.
+  const inline = (s) => {
+    let t = esc(s);
+    // Code spans first so their contents aren't touched by other rules.
+    // Use a placeholder → restore at end to prevent nested processing.
+    const codeSpans = [];
+    t = t.replace(/`([^`\n]+)`/g, (_, c) => {
+      codeSpans.push(c);
+      return `\x00CODE${codeSpans.length - 1}\x00`;
+    });
+    // Images: ![alt](src)
+    t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_, alt, src) =>
+      `<img src="${esc(src)}" alt="${esc(alt)}">`
+    );
+    // Links: [text](url)
+    t = t.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_, txt, url) =>
+      `<a href="${esc(url)}">${txt}</a>`
+    );
+    // Bold: **text** or __text__
+    t = t.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    t = t.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
+    // Italic: *text* or _text_
+    t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    t = t.replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
+    // Restore code spans
+    t = t.replace(/\x00CODE(\d+)\x00/g, (_, n) => `<code>${codeSpans[parseInt(n, 10)]}</code>`);
+    return t;
+  };
+
+  // Block-level pass: walk line by line, emitting HTML for each recognized
+  // block type. Paragraphs are assembled from consecutive non-empty lines.
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Blank line — skip
+    if (!line.trim()) { i++; continue; }
+
+    // Fenced code block
+    const fence = line.match(/^(```+|~~~+)\s*([\w-]*)\s*$/);
+    if (fence) {
+      const closer = fence[1];
+      i++;
+      const codeLines = [];
+      while (i < lines.length && !lines[i].startsWith(closer)) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) i++; // consume closing fence
+      out.push(`<pre><code>${esc(codeLines.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    // ATX heading: # through ######
+    const heading = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (heading) {
+      const level = heading[1].length;
+      out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+      i++;
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) {
+      out.push('<hr>');
+      i++;
+      continue;
+    }
+
+    // Blockquote: consume consecutive > lines
+    if (/^>\s?/.test(line)) {
+      const bqLines = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        bqLines.push(lines[i].replace(/^>\s?/, ''));
+        i++;
+      }
+      out.push(`<blockquote><p>${inline(bqLines.join(' '))}</p></blockquote>`);
+      continue;
+    }
+
+    // Unordered list: - / * / +
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*+]\s+/, ''));
+        i++;
+      }
+      out.push('<ul>' + items.map(t => `<li>${inline(t)}</li>`).join('') + '</ul>');
+      continue;
+    }
+
+    // Ordered list: 1. / 2. / etc.
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+        i++;
+      }
+      out.push('<ol>' + items.map(t => `<li>${inline(t)}</li>`).join('') + '</ol>');
+      continue;
+    }
+
+    // Paragraph: consume until blank line or next block marker
+    const paraLines = [line];
+    i++;
+    while (i < lines.length && lines[i].trim() &&
+           !/^#{1,6}\s+/.test(lines[i]) &&
+           !/^```/.test(lines[i]) && !/^~~~/.test(lines[i]) &&
+           !/^>\s?/.test(lines[i]) &&
+           !/^\s*[-*+]\s+/.test(lines[i]) &&
+           !/^\s*\d+\.\s+/.test(lines[i]) &&
+           !/^\s*(---|\*\*\*|___)\s*$/.test(lines[i])) {
+      paraLines.push(lines[i]);
+      i++;
+    }
+    out.push(`<p>${inline(paraLines.join(' '))}</p>`);
+  }
+
+  // If the rendered output doesn't start with a heading, prepend the filename.
+  const joined = out.join('\n');
+  if (!/^<h[1-6][\s>]/i.test(joined)) {
+    return `<h1>${esc(fallbackTitle)}</h1>${joined}`;
+  }
+  return joined;
 }
 
 async function loadEpub(file, batch = false) {
@@ -2057,6 +2250,7 @@ async function loadEpub(file, batch = false) {
     }
 
     const bookToc = bookChapters.map((ch, i) => ({ title: ch.title, index: i }));
+    // EPUB 2: TOC lives in the NCX (navMap / navPoint).
     const ncxItem = opfDoc.querySelector('item[media-type="application/x-dtbncx+xml"]');
     if (ncxItem) {
       const ncxFile = zip.file(rootDir + ncxItem.getAttribute('href')) || zip.file(ncxItem.getAttribute('href'));
@@ -2077,6 +2271,60 @@ async function loadEpub(file, batch = false) {
               if (idx >= 0) bookToc.push({ title: label.textContent.trim(), index: idx });
             }
           });
+        }
+      }
+    }
+    // EPUB 3: TOC lives in an XHTML nav document marked with properties="nav".
+    // If NCX didn't produce a custom TOC (either missing or empty), try nav.
+    if (bookToc.length === 0 || bookToc.every((item, i) => item.title === bookChapters[i]?.title)) {
+      const navItem = opfDoc.querySelector('item[properties~="nav"]');
+      if (navItem) {
+        const navHref = navItem.getAttribute('href');
+        const navPath = rootDir + navHref;
+        const navFile = zip.file(navPath) || zip.file(navHref);
+        if (navFile) {
+          const navDoc = new DOMParser().parseFromString(await navFile.async('text'), 'application/xhtml+xml');
+          // Locate the <nav> with epub:type="toc"; fall back to role or first nav.
+          let tocNav = null;
+          const allNavs = navDoc.querySelectorAll('nav');
+          for (const n of allNavs) {
+            const t = n.getAttribute('epub:type') || n.getAttributeNS('http://www.idpf.org/2007/ops', 'type');
+            if (t && /\btoc\b/.test(t)) { tocNav = n; break; }
+          }
+          if (!tocNav) {
+            for (const n of allNavs) {
+              if (n.getAttribute('role') === 'doc-toc') { tocNav = n; break; }
+            }
+          }
+          if (!tocNav && allNavs.length > 0) tocNav = allNavs[0];
+          if (tocNav) {
+            // Paths in nav are resolved relative to the nav file's location.
+            const navDir = navPath.includes('/') ? navPath.substring(0, navPath.lastIndexOf('/') + 1) : '';
+            const links = tocNav.querySelectorAll('a[href]');
+            const newToc = [];
+            links.forEach(a => {
+              const href = a.getAttribute('href').split('#')[0];
+              if (!href) return;
+              // Resolve against the nav doc's directory
+              const resolvedFromNav = resolveHref(navDir, href);
+              const idx = bookChapters.findIndex((_, i) => {
+                const chHref = manifest[spineItems[i]?.getAttribute('idref')];
+                if (!chHref) return false;
+                const chFullPath = rootDir + chHref;
+                return chFullPath === resolvedFromNav ||
+                       chHref === href ||
+                       chHref.endsWith(href) ||
+                       chHref.endsWith('/' + href);
+              });
+              if (idx >= 0) {
+                newToc.push({ title: a.textContent.trim(), index: idx });
+              }
+            });
+            if (newToc.length > 0) {
+              bookToc.length = 0;
+              newToc.forEach(t => bookToc.push(t));
+            }
+          }
         }
       }
     }
