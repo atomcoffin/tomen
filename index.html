@@ -475,6 +475,31 @@ body.r-ui-visible .r-footer-ref {
   opacity: 0;
 }
 
+/* Chapter reminder at the top of each spread. Aligned to the left edge of
+   the text column (via max-width + margin: 0 auto inside the padded content
+   area). Hidden when the reader UI is visible — the toolbar shows chapter
+   context via the book title and TOC button. */
+.r-header-ref {
+  position: absolute;
+  top: 40px;
+  left: 0; right: 0;
+  max-width: var(--reading-width, 1200px);
+  margin: 0 auto;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: color-mix(in srgb, var(--stone) 70%, transparent);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 200ms ease;
+}
+body.r-ui-visible .r-header-ref {
+  opacity: 0;
+}
+
 .r-book {
   flex: 1;
   position: relative;
@@ -1157,13 +1182,15 @@ body.r-mode-editing .r-inner {
   </div>
   <div class="r-content" id="r-content">
     <div class="r-click-zone prev" data-dir="prev" onclick="bookAreaTapped(event)"></div>
+    <!-- Chapter reminder at the top of each spread. -->
+    <div class="r-header-ref" id="r-header-ref" aria-hidden="true"></div>
     <div class="r-book" id="r-book" onclick="bookAreaTapped(event)">
       <div class="r-pages" id="r-pages">
         <div class="r-inner" id="r-inner"></div>
       </div>
     </div>
     <div class="r-click-zone next" data-dir="next" onclick="bookAreaTapped(event)"></div>
-    <!-- Quiet reminder of book + current chapter. Always visible at bottom. -->
+    <!-- Book + chapter reminder at bottom. -->
     <div class="r-footer-ref" id="r-footer-ref" aria-hidden="true"></div>
     <!-- Hold-to-turn circular indicator, positioned at cursor on hover/press.
          The ring is an SVG (needs vector stroke animation for fill progress).
@@ -2544,8 +2571,8 @@ function renderChapter() {
   // Wrap saved marks for this chapter in highlight spans, before measuring
   // pagination so spread math reflects the wrapped content.
   renderMarksForChapter(innerEl, currentChapterIndex);
-  // Refresh the footer reference (book · chapter) for the new chapter.
-  updateFooterRef();
+  // Refresh the top and bottom references with current chapter info.
+  updateReaderRefs();
   // Reset transform before measuring
   pagesEl.style.transition = 'none';
   pagesEl.style.transform = 'translateX(0)';
@@ -3071,19 +3098,31 @@ function buildTOC() {
 }
 function toggleTOC() { $('ov-toc').classList.toggle('open'); }
 
-// Update the bottom footer with "Book Title · Chapter Name". Falls back
-// gracefully if the current chapter has no TOC entry.
-function updateFooterRef() {
-  const el = $('r-footer-ref');
-  if (!el) return;
-  if (!currentBook) { el.textContent = ''; return; }
+// Update the top and bottom chrome references that tell you where you are.
+// Header shows just the chapter name; footer shows "Book · Chapter". Falls
+// back gracefully if the current chapter has no TOC entry.
+function updateReaderRefs() {
+  const footerEl = $('r-footer-ref');
+  const headerEl = $('r-header-ref');
+  if (!footerEl && !headerEl) return;
+  if (!currentBook) {
+    if (footerEl) footerEl.textContent = '';
+    if (headerEl) headerEl.textContent = '';
+    return;
+  }
   const bookTitle = currentBook.title || '';
   const tocItem = toc.find(item => item.index === currentChapterIndex);
   const chapterTitle = tocItem?.title || chapters[currentChapterIndex]?.title || '';
-  if (bookTitle && chapterTitle) {
-    el.innerHTML = `${esc(bookTitle)}<span class="r-footer-ref-sep">·</span>${esc(chapterTitle)}`;
-  } else {
-    el.textContent = bookTitle || chapterTitle || '';
+
+  if (footerEl) {
+    if (bookTitle && chapterTitle) {
+      footerEl.innerHTML = `${esc(bookTitle)}<span class="r-footer-ref-sep">·</span>${esc(chapterTitle)}`;
+    } else {
+      footerEl.textContent = bookTitle || chapterTitle || '';
+    }
+  }
+  if (headerEl) {
+    headerEl.textContent = chapterTitle || '';
   }
 }
 
