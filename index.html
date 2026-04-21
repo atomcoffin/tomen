@@ -737,26 +737,61 @@ body.r-mode-editing .r-inner {
   -webkit-user-select: text;
   user-select: text;
 }
-.r-inner h1, .r-inner h2, .r-inner h3 {
-  font-family: var(--font-read); font-weight: 600;
+
+/* Headings render in the UI face (Thow). Siche Text currently has only 400
+   regular + italic, so headings need a face that supports heavier weights. */
+.r-inner h1, .r-inner h2, .r-inner h3,
+.r-inner h4, .r-inner h5, .r-inner h6 {
+  font-family: var(--font-read);
+  font-weight: 600;
   line-height: 1.3;
   break-after: avoid-column;
+  color: var(--ink);
 }
-.r-inner h1 { font-size: 1.5em; margin: 0 0 0.6em; }
+.r-inner h1 { font-size: 1.5em;  margin: 0 0 0.6em; }
 .r-inner h2 { font-size: 1.25em; margin: 1.4em 0 0.5em; }
-.r-inner h3 { font-size: 1.1em; margin: 1.2em 0 0.4em; }
+.r-inner h3 { font-size: 1.1em;  margin: 1.2em 0 0.4em; }
+.r-inner h4 { font-size: 1em;    margin: 1em 0 0.3em; font-weight: 500; }
+.r-inner h5 { font-size: 0.95em; margin: 1em 0 0.3em; font-weight: 500; }
+.r-inner h6 { font-size: 0.9em;  margin: 1em 0 0.3em; font-weight: 500; color: var(--stone); }
+
+/* Paragraphs: book-style indent. First paragraph (of a chapter or after a
+   heading) runs flush; subsequent paragraphs get a first-line indent.
+   Justified on desktop two-column, left-aligned on mobile single-column
+   (overridden in the @media rule). */
 .r-inner p {
-  margin: 0 0 1em;
+  margin: 0;
   text-align: justify;
   hyphens: auto;
   break-inside: avoid-column;
 }
+.r-inner p + p {
+  text-indent: 1.2em;
+}
+/* A paragraph following a heading always starts flush, no indent. */
+.r-inner h1 + p, .r-inner h2 + p, .r-inner h3 + p,
+.r-inner h4 + p, .r-inner h5 + p, .r-inner h6 + p {
+  text-indent: 0;
+}
+
 .r-inner img {
   max-width: 100%;
   border-radius: var(--radius-sm);
   margin: 1em 0;
   break-inside: avoid-column;
 }
+.r-inner figure {
+  margin: 1.2em 0;
+  break-inside: avoid-column;
+}
+.r-inner figcaption {
+  font-size: 0.85em;
+  color: var(--stone);
+  text-align: center;
+  margin-top: 0.4em;
+  font-style: italic;
+}
+
 .r-inner blockquote {
   border-left: 2px solid var(--ember);
   padding-left: 1.2em;
@@ -765,7 +800,69 @@ body.r-mode-editing .r-inner {
   font-style: italic;
   break-inside: avoid-column;
 }
+/* Paragraphs inside blockquote don't get first-line indent — the border
+   already sets them apart. */
+.r-inner blockquote p,
+.r-inner blockquote p + p { text-indent: 0; margin: 0 0 0.4em; }
+.r-inner blockquote p:last-child { margin-bottom: 0; }
+
 .r-inner a { color: var(--ember); text-decoration: none; }
+
+/* Lists: restore reasonable indentation. Tighter item spacing than the
+   browser default so lists don't sprawl. */
+.r-inner ul, .r-inner ol {
+  margin: 0.8em 0;
+  padding-left: 1.6em;
+}
+.r-inner li {
+  margin: 0.2em 0;
+  break-inside: avoid-column;
+}
+/* Paragraphs inside list items stay flush. */
+.r-inner li p,
+.r-inner li p + p { text-indent: 0; margin: 0; }
+
+/* Code — inline and block. Uses the mono face; fenced code blocks get a
+   subtle paper-tinted background so they're visually distinct. */
+.r-inner code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--stone) 10%, transparent);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+.r-inner pre {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  line-height: 1.5;
+  background: color-mix(in srgb, var(--stone) 8%, transparent);
+  padding: 0.9em 1em;
+  border-radius: var(--radius-sm);
+  margin: 1.2em 0;
+  overflow-x: auto;
+  white-space: pre;
+  break-inside: avoid-column;
+}
+/* <code> inside <pre> should not double up the background or padding. */
+.r-inner pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+/* Horizontal rule: a subtle center-aligned divider, not a browser default line. */
+.r-inner hr {
+  border: 0;
+  height: 1px;
+  background: color-mix(in srgb, var(--stone) 30%, transparent);
+  margin: 2em auto;
+  width: 40%;
+  break-inside: avoid-column;
+}
+
+.r-inner small { font-size: 0.85em; color: var(--stone); }
+.r-inner sub, .r-inner sup { font-size: 0.75em; line-height: 0; }
 
 /* Mark highlight spans — classic highlighter look. A single visual treatment
    covers both plain highlights and bookmarked highlights; the bookmark flag
@@ -958,6 +1055,9 @@ body.r-mode-editing .r-inner {
   .r-pct { font-size: 10px; }
   .r-quick { width: min(92vw, 560px); bottom: 20px; }
   .r-quick-bar { height: 42px; }
+  /* Single-column: justify creates bad word-spacing rivers. Left-align
+     reads better on narrow lines. Hyphens still help word-breaking. */
+  .r-inner p { text-align: left; }
 }
 @media (max-width: 480px) {
   .r-content { padding: 60px 16px; }
