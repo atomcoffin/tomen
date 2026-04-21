@@ -796,15 +796,29 @@ body.r-mode-editing .r-inner {
 }
 
 .r-inner img {
+  display: block;
   max-width: 100%;
-  border-radius: var(--radius-sm);
-  margin: 1em 0;
+  max-height: 70vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  margin: 1em auto;
+  break-inside: avoid-column;
+}
+.r-inner svg {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  margin: 1em auto;
   break-inside: avoid-column;
 }
 .r-inner figure {
   margin: 1.2em 0;
   break-inside: avoid-column;
+  text-align: center;
 }
+.r-inner figure img,
+.r-inner figure svg { margin-left: auto; margin-right: auto; }
 .r-inner figcaption {
   font-size: 0.85em;
   color: var(--stone);
@@ -2600,15 +2614,42 @@ function renderChapter() {
   // Force reflow, then restore transition
   pagesEl.offsetHeight;
   pagesEl.style.transition = '';
-  // Measure after layout settles (including font loading)
-  requestAnimationFrame(() => {
+  // Measure after layout settles. Images that haven't loaded yet would shift
+  // the column count after first measurement and cause spreads to be skipped
+  // when the user swipes — wait for them before computing totalSpreads.
+  awaitChapterImagesThenMeasure(innerEl);
+}
+
+// Wait for all images in the chapter to either load (or fail) before
+// running measureSpreads. Falls back to an immediate measure if there are
+// no images. Schedules a follow-up measure for any image that decodes later
+// (e.g. very large remote images).
+function awaitChapterImagesThenMeasure(innerEl) {
+  const doMeasure = () => requestAnimationFrame(() => {
     measureSpreads();
-    // Clamp currentSpread in case chapter shrunk
     if (currentSpread >= totalSpreads) currentSpread = totalSpreads - 1;
     if (currentSpread < 0) currentSpread = 0;
     applySpread();
     updateProgress();
   });
+
+  const imgs = Array.from(innerEl.querySelectorAll('img'));
+  if (imgs.length === 0) { doMeasure(); return; }
+
+  // Quick first measure with whatever's loaded so far — keeps the user from
+  // seeing a totally empty page while remote images decode.
+  doMeasure();
+
+  // Wait for everything to finish, then re-measure to catch the post-load
+  // layout. Use Promise.allSettled so a failed image doesn't hang.
+  const waits = imgs.map(img => {
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+    return new Promise(resolve => {
+      img.addEventListener('load', resolve, { once: true });
+      img.addEventListener('error', resolve, { once: true });
+    });
+  });
+  Promise.allSettled(waits).then(() => doMeasure());
 }
 
 // Measure how many spreads (groups of columns) the current chapter occupies.
@@ -2689,12 +2730,21 @@ function readerPrev() {
 }
 
 // Fade the current pages out, run callback (which re-renders), fade in.
+// While a fade-swap is in progress, readerInteractionBlocked() returns true
+// so additional page-turn inputs (swipes, holds, key presses) don't queue
+// up and skip pages once the new chapter renders.
+let _fadeSwapBusy = false;
 function fadeSwap(cb) {
+  if (_fadeSwapBusy) return;
+  _fadeSwapBusy = true;
   const pagesEl = $('r-pages');
   pagesEl.classList.add('fade');
   setTimeout(() => {
     cb();
-    requestAnimationFrame(() => pagesEl.classList.remove('fade'));
+    requestAnimationFrame(() => {
+      pagesEl.classList.remove('fade');
+      _fadeSwapBusy = false;
+    });
   }, 180);
 }
 
@@ -3171,6 +3221,7 @@ function isEditing() { return readerMode === 'editing'; }
 function readerInteractionBlocked() {
   if (document.querySelector('.overlay.open')) return true;
   if (readerMode === 'editing') return true;
+  if (_fadeSwapBusy) return true;
   return false;
 }
 
