@@ -499,28 +499,56 @@ body.r-mode-editing .r-toolbar-editing { display: flex; }
   position: absolute;
   left: 0; right: 0;
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
   text-align: center;
   font-family: var(--font-ui);
   font-size: 11px;
   color: color-mix(in srgb, var(--ember) 75%, var(--stone));
   letter-spacing: 0.02em;
   padding: 0 24px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   pointer-events: none;
   user-select: none;
   transition: opacity 200ms ease;
+}
+/* Primary line — book title and chapter name. Can ellipsize if the
+   combined string is too long for the available width. */
+.r-footer-ref-primary {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 .r-footer-ref-sep {
   margin: 0 8px;
   opacity: 0.6;
 }
-/* Time remaining in the footer is secondary to book/chapter text —
-   same family but in the stone color, slightly lower in the visual stack. */
+/* Time remaining is secondary — slightly muted color, sits inline on
+   desktop via gap between spans, stacks below primary on mobile. */
 .r-footer-ref-time {
   color: var(--stone);
   opacity: 0.8;
+  white-space: nowrap;
+}
+/* Desktop inline: add a small dot separator before the time so it reads
+   as part of the same phrase. Pseudo-element avoids extra markup. */
+@media (min-width: 769px) {
+  .r-footer-ref-time:not(:first-child)::before {
+    content: '·';
+    margin-right: 8px;
+    opacity: 0.6;
+  }
+}
+/* Mobile: force the flex container to wrap — primary on one line,
+   time stacked below. Both centered. */
+@media (max-width: 768px) {
+  .r-footer-ref {
+    flex-direction: column;
+    gap: 3px;
+  }
 }
 body.r-ui-visible .r-footer-ref {
   opacity: 0;
@@ -2256,12 +2284,15 @@ function renderTextView(el, books) {
     // approximate text-only length (tags, whitespace inflate raw length).
     // Fall back silently if contentSize is missing (legacy books).
     let timeMeta = '';
-    if (b.contentSize) {
+    if (b.contentSize && p < 100) {
       const textChars = b.contentSize * 0.75;
       const remainingChars = textChars * (1 - p / 100);
       const mins = estimateReadingMinutes(remainingChars);
       const formatted = formatReadingTime(mins);
-      if (formatted && p < 100) timeMeta = ' · <span style="font-family:var(--font-mono);font-size:11px">' + formatted + '</span>';
+      if (formatted) {
+        const phrase = isReading ? formatted + ' until finished' : formatted + ' to read';
+        timeMeta = ' · <span style="font-family:var(--font-mono);font-size:11px">' + phrase + '</span>';
+      }
     }
     const progressMeta = isReading ? ' · <span style="font-family:var(--font-mono);font-size:11px">' + Math.round(p) + '%</span>' : '';
     return `<div class="tv-item" onclick="openBookById('${b.id}')">
@@ -3731,8 +3762,10 @@ function buildTOC() {
 }
 function toggleTOC() { $('ov-toc').classList.toggle('open'); }
 
-// Update the footer reference with "Book Title · Chapter Name". Falls back
-// gracefully if the current chapter has no TOC entry.
+// Update the footer reference with book / chapter / time remaining. Primary
+// line carries book and chapter identity; secondary line carries time
+// remaining. On mobile they stack (time below); on desktop they sit inline
+// separated by dots.
 function updateReaderRefs() {
   const el = $('r-footer-ref');
   if (!el) return;
@@ -3741,11 +3774,18 @@ function updateReaderRefs() {
   const tocItem = toc.find(item => item.index === currentChapterIndex);
   const chapterTitle = tocItem?.title || chapters[currentChapterIndex]?.title || '';
 
-  // Compute estimated time remaining in the current chapter. Uses the
-  // visible chapter text (innerEl.textContent, so tags don't inflate) and
-  // proportional position (currentSpread / totalSpreads). Only shows if
-  // we're partway through and the remaining time is meaningful.
-  let timeRef = '';
+  // Build the primary identifier — Book · Chapter.
+  const sep = '<span class="r-footer-ref-sep">·</span>';
+  const idParts = [];
+  if (bookTitle) idParts.push(esc(bookTitle));
+  if (chapterTitle) idParts.push(esc(chapterTitle));
+  const primary = `<span class="r-footer-ref-primary">${idParts.join(sep)}</span>`;
+
+  // Compute chapter time remaining. Uses visible chapter text
+  // (innerEl.textContent, so tags don't inflate) and proportional position
+  // (currentSpread / totalSpreads). Phrased "until next chapter" when
+  // there's a following chapter; "until finished" when this is the last.
+  let timeSpan = '';
   const innerEl = $('r-inner');
   if (innerEl && totalSpreads > 0) {
     const totalChars = innerEl.textContent.length;
@@ -3753,15 +3793,14 @@ function updateReaderRefs() {
     const remainingChars = Math.max(0, totalChars * (1 - frac));
     const mins = estimateReadingMinutes(remainingChars);
     const formatted = formatReadingTime(mins);
-    if (formatted) timeRef = formatted + ' left';
+    if (formatted) {
+      const isLastChapter = currentChapterIndex >= chapters.length - 1;
+      const suffix = isLastChapter ? ' until finished' : ' until next chapter';
+      timeSpan = `<span class="r-footer-ref-time">${esc(formatted + suffix)}</span>`;
+    }
   }
 
-  const sep = '<span class="r-footer-ref-sep">·</span>';
-  const parts = [];
-  if (bookTitle) parts.push(esc(bookTitle));
-  if (chapterTitle) parts.push(esc(chapterTitle));
-  if (timeRef) parts.push(`<span class="r-footer-ref-time">${esc(timeRef)}</span>`);
-  el.innerHTML = parts.join(sep);
+  el.innerHTML = primary + timeSpan;
 }
 
 // ===== UI TOGGLE =====
