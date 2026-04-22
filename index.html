@@ -22,6 +22,17 @@
 @font-face { font-family: 'Siche Text'; src: url('fonts/Siche-Text-v.0.3-Regular-Italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
 @font-face { font-family: 'Siche Display'; src: url('fonts/Siche-Display-v.0.3-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
 @font-face { font-family: 'Siche Display'; src: url('fonts/Siche-Display-v.0.3-Regular-Italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+/* Uncut Sans — reading face alternative to Siche Text. Variable font covers the
+   full weight range (300-700) via a single file. The ital axis handles italic
+   so we declare both style variants pointing at the same file with different
+   font-variation-settings. */
+@font-face { font-family: 'Uncut Sans'; src: url('fonts/UncutSans-Variable.woff2') format('woff2-variations'), url('fonts/UncutSans-Variable.woff2') format('woff2'); font-weight: 300 700; font-style: normal; font-variation-settings: 'ital' 0; font-display: swap; }
+@font-face { font-family: 'Uncut Sans'; src: url('fonts/UncutSans-Variable.woff2') format('woff2-variations'), url('fonts/UncutSans-Variable.woff2') format('woff2'); font-weight: 300 700; font-style: italic; font-variation-settings: 'ital' 11; font-display: swap; }
+/* Dolph YY — monospace reading face. True-monospace family from Domicile
+   Foundry. Real cursive italic (not just slanted regular). Regular + Italic
+   only to keep asset size reasonable; bold falls back to synthetic. */
+@font-face { font-family: 'Dolph YY'; src: url('fonts/DolphYY-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Dolph YY'; src: url('fonts/DolphYY-RegularItalic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -45,6 +56,22 @@
   --font-read: 'Thow', 'Georgia', serif;
   --font-ui: 'Thow', 'Georgia', serif;
   --font-mono: 'Thow Mono', 'Courier New', monospace;
+  /* Reading face system. Each face is a separate variable so it can be
+     swapped independently if we change fonts later. --font-read-active is
+     what .r-inner actually uses; setReadingFace() swaps it among the three.
+     Default is serif — the canonical Tomen reading experience. */
+  --font-read-serif: 'Siche Text', 'Thow', 'Georgia', serif;
+  --font-read-sans: 'Uncut Sans', 'Inter', 'Helvetica Neue', sans-serif;
+  --font-read-mono: 'Dolph YY', 'Thow Mono', 'Courier New', monospace;
+  --font-read-active: var(--font-read-serif);
+  /* Display (heading) face pairs with the reading face. Siche mode uses the
+     dedicated Siche Display; sans and mono modes use their body face at a
+     heavier weight (set by --font-display-weight). */
+  --font-display-serif: 'Siche Display', 'Siche Text', 'Thow', serif;
+  --font-display-sans: 'Uncut Sans', 'Inter', 'Helvetica Neue', sans-serif;
+  --font-display-mono: 'Dolph YY', 'Thow Mono', 'Courier New', monospace;
+  --font-display-active: var(--font-display-serif);
+  --font-display-weight: 400;
   --reading-width: 1200px;
   --font-size: 18px;
   --line-height: 1.8;
@@ -740,7 +767,7 @@ body.r-debug .r-book {
 }
 
 .r-inner {
-  font-family: 'Siche Text', var(--font-read);
+  font-family: var(--font-read-active);
   font-size: var(--font-size);
   line-height: var(--line-height);
   color: var(--ink);
@@ -760,8 +787,12 @@ body.r-mode-editing .r-inner {
    with only 400 weight, so headings run at 400 to avoid synthetic bold. */
 .r-inner h1, .r-inner h2, .r-inner h3,
 .r-inner h4, .r-inner h5, .r-inner h6 {
-  font-family: 'Siche Display', var(--font-read);
-  font-weight: 400;
+  /* Headings follow the active reading face. For serif mode this uses Siche
+     Display (a companion to Siche Text); for sans/mono modes we use the same
+     face as body with a heavier weight. Set via --font-display-active, which
+     setReadingFace() keeps in sync with the body face. */
+  font-family: var(--font-display-active);
+  font-weight: var(--font-display-weight, 400);
   line-height: 1.25;
   break-after: avoid-column;
   color: var(--ink);
@@ -985,6 +1016,39 @@ body.r-mode-editing .r-inner {
   font-size: 11px;
   line-height: 1.45;
   color: var(--stone);
+}
+
+/* Colophon — a small reverent credit to the typefaces Tomen uses. Each face
+   name is rendered in its own face so readers can see what they're choosing
+   between. Small caps-adjacent size, stone gray for restraint. */
+.colophon {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--stone);
+}
+.colophon p {
+  margin: 0 0 6px;
+}
+.colophon p:last-child {
+  margin-bottom: 0;
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--fog);
+}
+.colophon .colophon-face {
+  color: var(--ink);
+  font-size: 13px;
+}
+.colophon a {
+  color: var(--stone);
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 2px;
+  transition: color 150ms ease;
+}
+.colophon a:hover {
+  color: var(--ember);
 }
 .range-row { display: flex; align-items: center; gap: 12px; }
 .range-row input[type="range"] {
@@ -1335,6 +1399,14 @@ body.r-mode-editing .r-inner {
       </div>
     </div>
     <div class="settings-section">
+      <div class="settings-label">Reading face</div>
+      <div class="theme-row">
+        <button class="theme-btn active" data-face="serif" onclick="setReadingFace('serif')">Serif</button>
+        <button class="theme-btn" data-face="sans" onclick="setReadingFace('sans')">Sans</button>
+        <button class="theme-btn" data-face="mono" onclick="setReadingFace('mono')">Mono</button>
+      </div>
+    </div>
+    <div class="settings-section">
       <div class="settings-label">Font size</div>
       <div class="range-row">
         <span class="range-label" style="font-size:12px">A</span>
@@ -1411,6 +1483,16 @@ body.r-mode-editing .r-inner {
         <span>Export library</span>
       </button>
       <div class="settings-hint">Downloads your entire library, reading progress, and marks as a single file. Keep it safe — it's a complete backup.</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Colophon</div>
+      <div class="colophon">
+        <p>Tomen's reading faces are licensed from independent type designers.</p>
+        <p><span class="colophon-face" style="font-family: var(--font-read-serif); font-weight: 400;">Siche Text</span> and <span class="colophon-face" style="font-family: var(--font-display-serif); font-weight: 400;">Siche Display</span> by <a href="https://www.caterinasantullo.com" target="_blank" rel="noopener">Caterina Santullo</a>.</p>
+        <p><span class="colophon-face" style="font-family: var(--font-read-sans);">Uncut Sans</span> by <a href="https://uncut.wtf" target="_blank" rel="noopener">Kasper Nordkvist</a>.</p>
+        <p><span class="colophon-face" style="font-family: var(--font-read-mono); font-weight: 400;">Dolph YY</span> by <a href="https://domicilefoundry.com" target="_blank" rel="noopener">Domicile Foundry</a>.</p>
+        <p>UI set in Thow by Kenyatype.</p>
+      </div>
     </div>
   </div>
 </div>
@@ -3950,9 +4032,33 @@ function setTheme(theme) {
   // r-mode-editing, r-debug, etc.)
   document.body.classList.remove('dark', 'sepia');
   if (theme) document.body.classList.add(theme);
-  document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', b.dataset.theme === theme));
+  // Scope to buttons that actually carry a data-theme attribute — otherwise
+  // we'd also toggle face/paragraph/align buttons which share .theme-btn.
+  document.querySelectorAll('.theme-btn[data-theme]').forEach(b => b.classList.toggle('active', b.dataset.theme === theme));
   localStorage.setItem('tomen_theme', theme);
   updateSystemBarColor(theme);
+}
+
+// Reading face: swap between Siche Text (serif), Uncut Sans (sans), and
+// Dolph YY (mono). Changes CSS variables only — no chapter re-render, no
+// spread remeasure needed. remeasureReader() handles the layout shift.
+const _READING_FACES = {
+  serif: { read: 'var(--font-read-serif)', display: 'var(--font-display-serif)', weight: '400' },
+  sans:  { read: 'var(--font-read-sans)',  display: 'var(--font-display-sans)',  weight: '600' },
+  mono:  { read: 'var(--font-read-mono)',  display: 'var(--font-display-mono)',  weight: '700' }
+};
+function setReadingFace(face) {
+  const config = _READING_FACES[face] || _READING_FACES.serif;
+  const root = document.documentElement.style;
+  root.setProperty('--font-read-active', config.read);
+  root.setProperty('--font-display-active', config.display);
+  root.setProperty('--font-display-weight', config.weight);
+  document.querySelectorAll('.theme-btn[data-face]').forEach(b => b.classList.toggle('active', b.dataset.face === face));
+  localStorage.setItem('tomen_readingFace', face);
+  // The swap changes metrics — different faces have different x-heights,
+  // widths, and line-boxing behavior. Remeasure so pagination reflects the
+  // new layout and we stay anchored to the user's current sentence.
+  if (typeof remeasureReader === 'function') remeasureReader();
 }
 
 // Keep the browser/OS notification bar color synced with Tomen's background.
@@ -4204,6 +4310,8 @@ function renderGreeting() {
 (async function init() {
   const t = localStorage.getItem('tomen_theme') || '';
   setTheme(t);
+  const face = localStorage.getItem('tomen_readingFace') || 'serif';
+  setReadingFace(face);
   // Migrate any legacy global reader prefs → desktop bucket, then apply
   // the current bucket's values (with defaults if unset).
   migrateGlobalPrefsToBuckets();
