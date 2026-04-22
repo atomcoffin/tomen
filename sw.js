@@ -6,7 +6,7 @@
 // handler below deletes any cache whose key doesn't match this version.
 // Add new assets (fonts, icons) to ASSETS so they're cached on install.
 // =====================================================================
-const CACHE_VERSION = 'tomen-v1.6.0';
+const CACHE_VERSION = 'tomen-v1.6.1';
 
 const ASSETS = [
   './',
@@ -24,6 +24,7 @@ const ASSETS = [
   './fonts/UncutSans-Variable.woff2',
   './fonts/DolphYY-Regular.woff2',
   './fonts/DolphYY-RegularItalic.woff2',
+  './fonts/DolphYY-Bold.woff2',
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'
 ];
 

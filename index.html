@@ -30,9 +30,11 @@
 @font-face { font-family: 'Uncut Sans'; src: url('fonts/UncutSans-Variable.woff2') format('woff2-variations'), url('fonts/UncutSans-Variable.woff2') format('woff2'); font-weight: 300 700; font-style: italic; font-variation-settings: 'ital' 11; font-display: swap; }
 /* Dolph YY — monospace reading face. True-monospace family from Domicile
    Foundry. Real cursive italic (not just slanted regular). Regular + Italic
-   only to keep asset size reasonable; bold falls back to synthetic. */
+   + Bold — bold covers chapter headings at weight 700; bold-italic is rare
+   enough in body text that synthesis from Bold + Italic is acceptable. */
 @font-face { font-family: 'Dolph YY'; src: url('fonts/DolphYY-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
 @font-face { font-family: 'Dolph YY'; src: url('fonts/DolphYY-RegularItalic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Dolph YY'; src: url('fonts/DolphYY-Bold.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
