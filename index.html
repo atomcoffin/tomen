@@ -1123,6 +1123,20 @@ body.r-mode-editing .r-inner {
 }
 .gesture-toast.show { opacity: 1; }
 
+/* Brightness dim overlay. A full-screen black layer whose opacity is driven
+   by --brightness-dim (0-0.8 range). Lives below overlays (z-index 200)
+   so the settings panel isn't dimmed while the user is adjusting the slider.
+   pointer-events: none so taps pass through to reader content. */
+.brightness-dim {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #000;
+  opacity: var(--brightness-dim, 0);
+  pointer-events: none;
+  z-index: 100;
+  transition: opacity 120ms ease;
+}
+
 /* Error toast — same look as gesture toast but positioned near the top so
    it's harder to miss during reading, lingers longer, and uses ember to
    read as "something needs attention." */
@@ -1263,6 +1277,10 @@ body.r-mode-editing .r-inner {
 </head>
 <body>
 
+<!-- Brightness dim overlay. Global fixed layer, opacity controlled by
+     setBrightness(). pointer-events: none so it never blocks input. -->
+<div class="brightness-dim" id="brightness-dim"></div>
+
 <!-- ===== LIBRARY SCREEN ===== -->
 <div class="screen active" id="screen-lib">
   <div class="lib-header">
@@ -1401,6 +1419,14 @@ body.r-mode-editing .r-inner {
       </div>
     </div>
     <div class="settings-section">
+      <div class="settings-label">Brightness</div>
+      <div class="range-row">
+        <span class="range-label" style="font-size:12px" aria-hidden="true"><i class="ph ph-sun-dim"></i></span>
+        <input type="range" min="0" max="100" value="100" id="sl-brightness" oninput="setBrightness(this.value)">
+        <span class="range-label" style="font-size:14px" aria-hidden="true"><i class="ph ph-sun"></i></span>
+      </div>
+    </div>
+    <div class="settings-section">
       <div class="settings-label">Reading face</div>
       <div class="theme-row">
         <button class="theme-btn active" data-face="serif" onclick="setReadingFace('serif')">Serif</button>
@@ -1437,6 +1463,14 @@ body.r-mode-editing .r-inner {
       <div class="theme-row">
         <button class="theme-btn active" data-pstyle="block" onclick="setParagraphStyle('block')">Block</button>
         <button class="theme-btn" data-pstyle="indent" onclick="setParagraphStyle('indent')">Indent</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Paragraph spacing</div>
+      <div class="range-row">
+        <span class="range-label" style="font-size:10px" aria-hidden="true">≡</span>
+        <input type="range" min="5" max="20" step="1" value="10" id="sl-pspacing" oninput="setParagraphSpacing(this.value)">
+        <span class="range-label" id="ps-display">1.0</span>
       </div>
     </div>
     <div class="settings-section">
@@ -4041,6 +4075,18 @@ function setTheme(theme) {
   updateSystemBarColor(theme);
 }
 
+// Brightness: a visual dim overlay driven by --brightness-dim. Slider value
+// 0-100 maps to overlay opacity 0.7-0 (inverted — "brighter" = less overlay).
+// Max dim is capped at 0.7 so the UI remains visible even at the dimmest
+// setting — a fully black overlay would trap users unable to see the slider.
+function setBrightness(value) {
+  const v = Math.max(0, Math.min(100, parseInt(value, 10) || 100));
+  const dim = (100 - v) / 100 * 0.7;  // 0 = no dim, 100 = 0.7 dim
+  document.documentElement.style.setProperty('--brightness-dim', dim);
+  const slider = $('sl-brightness');
+  if (slider && slider.value != String(v)) slider.value = v;
+  localStorage.setItem('tomen_brightness', String(v));
+}
 // Reading face: swap between Siche Text (serif), Uncut Sans (sans), and
 // Dolph YY (mono). Changes CSS variables only — no chapter re-render, no
 // spread remeasure needed. remeasureReader() handles the layout shift.
@@ -4095,11 +4141,11 @@ function updateSystemBarColor(theme) {
 // different defaults (e.g., mobile starts smaller than desktop).
 const _READER_CONFIG = {
   phone: {
-    defaults: { fontSize: 16, lineHeight: 15, readingWidth: 360, paragraphStyle: 'block', textAlign: 'left' },
+    defaults: { fontSize: 16, lineHeight: 15, readingWidth: 360, paragraphStyle: 'block', textAlign: 'left', paragraphSpacing: 10 },
     widthSlider: { min: 280, max: 440, step: 10 }
   },
   desktop: {
-    defaults: { fontSize: 20, lineHeight: 16, readingWidth: 1200, paragraphStyle: 'block', textAlign: 'justify' },
+    defaults: { fontSize: 20, lineHeight: 16, readingWidth: 1200, paragraphStyle: 'block', textAlign: 'justify', paragraphSpacing: 10 },
     widthSlider: { min: 800, max: 1600, step: 50 }
   }
 };
@@ -4182,19 +4228,42 @@ function setReadingWidth(v) {
 
 // Paragraph style: 'block' (margin between paragraphs, no indent) or
 // 'indent' (no margin, first-line indent on p+p). Drives CSS vars on :root.
+// Block mode uses the current paragraphSpacing pref (in tenths of em) for
+// its between-paragraph gap; indent mode always uses 0 and relies on the
+// first-line indent as the paragraph break signal.
 function setParagraphStyle(v) {
   const style = (v === 'indent') ? 'indent' : 'block';
   if (style === 'indent') {
     document.documentElement.style.setProperty('--p-margin', '0');
     document.documentElement.style.setProperty('--p-indent-rest', '1.2em');
   } else {
-    document.documentElement.style.setProperty('--p-margin', '1em');
+    const sp = loadPref('paragraphSpacing') || '10';
+    document.documentElement.style.setProperty('--p-margin', `${parseInt(sp, 10) / 10}em`);
     document.documentElement.style.setProperty('--p-indent-rest', '0');
   }
   document.querySelectorAll('.theme-btn[data-pstyle]').forEach(b =>
     b.classList.toggle('active', b.dataset.pstyle === style)
   );
   savePref('paragraphStyle', style);
+  remeasureReader();
+}
+
+// Paragraph spacing: how much vertical space sits between paragraphs in
+// block mode. Stored as tenths of em (10 = 1.0em). Only visibly affects
+// block mode; indent mode ignores --p-margin. Slider still persists the
+// pref so switching block/indent/block restores the user's chosen spacing.
+function setParagraphSpacing(value) {
+  const v = Math.max(5, Math.min(20, parseInt(value, 10) || 10));
+  savePref('paragraphSpacing', v);
+  // Only apply visually if currently in block mode; indent mode keeps 0.
+  const currentStyle = loadPref('paragraphStyle') || 'block';
+  if (currentStyle === 'block') {
+    document.documentElement.style.setProperty('--p-margin', `${v / 10}em`);
+  }
+  const slider = $('sl-pspacing');
+  if (slider && slider.value != String(v)) slider.value = v;
+  const display = $('ps-display');
+  if (display) display.textContent = (v / 10).toFixed(1);
   remeasureReader();
 }
 
@@ -4242,9 +4311,13 @@ function applyReaderPrefsForBucket() {
   const rw = loadPref('readingWidth');
   const ps = loadPref('paragraphStyle');
   const ta = loadPref('textAlign');
+  const psp = loadPref('paragraphSpacing');
   if (fs !== null) setFontSize(fs);
   if (lh !== null) setLineHeight(lh);
   if (rw !== null) setReadingWidth(rw);
+  // Apply spacing BEFORE style — style reads the current spacing pref
+  // when setting block-mode --p-margin.
+  if (psp !== null) setParagraphSpacing(psp);
   if (ps !== null) setParagraphStyle(ps);
   if (ta !== null) setTextAlign(ta);
 }
@@ -4314,6 +4387,8 @@ function renderGreeting() {
   setTheme(t);
   const face = localStorage.getItem('tomen_readingFace') || 'serif';
   setReadingFace(face);
+  const brightness = localStorage.getItem('tomen_brightness');
+  setBrightness(brightness === null ? 100 : brightness);
   // Migrate any legacy global reader prefs → desktop bucket, then apply
   // the current bucket's values (with defaults if unset).
   migrateGlobalPrefsToBuckets();
