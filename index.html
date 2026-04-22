@@ -445,6 +445,14 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
   bottom: env(safe-area-inset-bottom, 0px);
   left: 0; height: 3px;
   background: var(--brand); z-index: 50; width: 0;
+  transition: opacity 180ms ease;
+}
+/* When the UI is open, the bottom toolbar sits right over where the
+   progress bar would be — hide the bar to avoid double information and
+   visual conflict. Time-remaining text in the footer ref already conveys
+   the same info when UI is hidden. */
+body.r-ui-visible .r-progress {
+  opacity: 0;
 }
 
 /* Reader toolbars. Top bar carries app-level chrome (Library + title +
@@ -488,12 +496,6 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
   max-width: min(720px, calc(100vw - 32px));
   margin: 0 auto;
   padding: 0 calc(12px + env(safe-area-inset-right, 0px)) 0 calc(12px + env(safe-area-inset-left, 0px));
-}
-/* Bottom bar variant — no centered title, so just left/right clusters
-   with space-between distribution. Keeps the same width constraints. */
-.r-toolbar-inner-split {
-  grid-template-columns: auto auto;
-  justify-content: space-between;
 }
 /* Hidden state — slide off screen on toggle, fade out. Top slides up,
    bottom slides down, so they visually "clear out" from the content. */
@@ -543,11 +545,18 @@ body.r-mode-editing .r-toolbar-bottom {
 /* Center title column — centered horizontally via grid, ellipsizes if
    the combined Book · Chapter · Time string runs long. Minimum width
    zero so ellipsis works inside the grid column. */
+/* Center column — flex-centers the title span within the grid cell so it
+   sits vertically aligned with flanking icon buttons. line-height: 1 on
+   the span removes the extra line-box height that was lifting text up. */
 .r-toolbar-center {
   min-width: 0;
   text-align: center;
   justify-self: center;
   max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
 }
 
 .r-title {
@@ -566,6 +575,7 @@ body.r-mode-editing .r-toolbar-bottom {
   margin-left: 0;
   color: color-mix(in srgb, var(--ink) 85%, transparent);
   display: inline-block;
+  line-height: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1646,7 +1656,7 @@ body.r-mode-editing .r-inner {
   <div class="r-toolbar r-toolbar-reading r-toolbar-top" id="r-toolbar">
     <div class="r-toolbar-inner">
       <div class="r-toolbar-left">
-        <button class="icon-btn" onclick="showLibrary()" title="Back to library" aria-label="Back to library"><i class="ph ph-arrow-left"></i></button>
+        <button class="icon-btn" onclick="showLibrary()" title="Back to library" aria-label="Back to library"><i class="ph ph-house"></i></button>
       </div>
       <div class="r-toolbar-center">
         <span class="r-title r-title-passive" id="r-title"></span>
@@ -1698,15 +1708,18 @@ body.r-mode-editing .r-inner {
          the user is swiping toward. Opacity scales with swipe progress. -->
     <div class="r-swipe-ring" id="r-swipe-ring" aria-hidden="true"></div>
   </div>
-  <!-- Reading toolbar (bottom). Book-level chrome: Contents / Marks /
-       Appearance on the left, page arrows on the right. Constrained to the
-       same comfortable toolbar width as the top bar so items feel clustered
-       and chrome reads as a single system. Hidden during highlight mode. -->
+  <!-- Reading toolbar (bottom). Three groups: navigation within book
+       (Contents + Marks) on the left, Appearance (visual/reading settings)
+       alone in the center, page turns on the right. Grouping reflects that
+       Appearance is a different KIND of thing from navigation — it's
+       configuration, not wayfinding. Hidden during highlight mode. -->
   <div class="r-toolbar r-toolbar-bottom" id="r-toolbar-bottom">
-    <div class="r-toolbar-inner r-toolbar-inner-split">
+    <div class="r-toolbar-inner">
       <div class="r-toolbar-left">
         <button class="icon-btn" onclick="toggleTOC()" title="Contents" aria-label="Contents"><i class="ph ph-list-bullets"></i></button>
         <button class="icon-btn" onclick="toggleMarks()" title="Marks" aria-label="Marks"><i class="ph ph-bookmark-simple"></i></button>
+      </div>
+      <div class="r-toolbar-center">
         <button class="icon-btn" onclick="toggleSettings()" title="Appearance" aria-label="Appearance"><i class="ph ph-sliders"></i></button>
       </div>
       <div class="r-toolbar-right">
@@ -3480,13 +3493,13 @@ function goToChapter(index) {
 function updateProgress() {
   if (!chapters.length) return;
   const chapterPct = totalSpreads > 1 ? currentSpread / (totalSpreads - 1) : 1;
-  const pct = ((currentChapterIndex + chapterPct) / chapters.length) * 100;
-  $('r-progress').style.width = pct + '%';
-  // r-pct was on the old top bar and has been removed; the progress line
-  // alone communicates this info now. Left here in case a future design
-  // restores a visible percentage readout.
-  const pctEl = $('r-pct');
-  if (pctEl) pctEl.textContent = Math.round(pct) + '%';
+  // Visual progress bar at screen bottom tracks CHAPTER progress, not book.
+  // This matches the chapter-time-remaining text shown just above it in the
+  // footer reference — both track the same unit. The bar resets at each
+  // chapter boundary and fills as the user advances through spreads, which
+  // gives satisfying movement per-read. Book-wide progress is still computed
+  // and persisted for library sort & "time remaining" elsewhere.
+  $('r-progress').style.width = (chapterPct * 100) + '%';
   // Footer reference carries chapter-time-remaining which changes with
   // every spread. Kept here rather than in a separate hook so the progress
   // bar and the footer move together visually.
@@ -4220,8 +4233,9 @@ function updateReaderRefs() {
   updateTopTitle(bookTitle, chapterTitle);
 }
 
-// Update the top-bar passive title. Separate from footer so it can be
-// different if needed later (e.g., fewer characters on narrow screens).
+// Update the top-bar passive title. Shows book title + book-level time
+// remaining. Chapter name lives only in the footer reference below —
+// top bar stays breathable with just the two most-relevant strings.
 function updateTopTitle(bookTitle, chapterTitle) {
   const el = $('r-title');
   if (!el) return;
@@ -4229,16 +4243,12 @@ function updateTopTitle(bookTitle, chapterTitle) {
   if (bookTitle === undefined) {
     if (!currentBook) { el.textContent = ''; return; }
     bookTitle = currentBook.title || '';
-    const tocItem = toc.find(item => item.index === currentChapterIndex);
-    chapterTitle = tocItem?.title || chapters[currentChapterIndex]?.title || '';
   }
   const parts = [];
   if (bookTitle) parts.push(esc(bookTitle));
-  if (chapterTitle) parts.push(esc(chapterTitle));
-  // Append book-level time remaining (not chapter — the footer already
-  // carries chapter-time). Uses contentSize × 0.75 for the text-length
-  // approximation and current progress for what's consumed. Only shown
-  // when progress < 100%.
+  // Append book-level time remaining. Uses contentSize × 0.75 for the
+  // text-length approximation and current progress for what's consumed.
+  // Only shown when progress < 100%.
   if (currentBook && currentBook.contentSize && (currentBook.progress || 0) < 100) {
     const textChars = currentBook.contentSize * 0.75;
     const remainingChars = textChars * (1 - (currentBook.progress || 0) / 100);
@@ -4676,11 +4686,13 @@ function formatReadingTime(minutes) {
   const hours = Math.floor(minutes / 60);
   const mins = Math.round(minutes - hours * 60);
   // Round down minutes into 30-min buckets over 1h for fuzzy honest output.
-  // 2h 7min → ~2h; 2h 22min → ~2h; 2h 48min → ~3h.
-  // But keep 2h 15-45min range as "~2h 30min" so half-hour differences show.
-  if (mins < 15) return `~${hours}h`;
-  if (mins < 45) return `~${hours}h 30min`;
-  return `~${hours + 1}h`;
+  // 2h 7min → about 2h; 2h 22min → about 2h; 2h 48min → about 3h.
+  // Keep 2h 15-45min range as "about 2h 30min" so half-hour differences show.
+  // "about" prefix reads more naturally than "~" in the flowing sentence
+  // contexts where this appears ("about 2h 30min until next chapter").
+  if (mins < 15) return `about ${hours}h`;
+  if (mins < 45) return `about ${hours}h 30min`;
+  return `about ${hours + 1}h`;
 }
 // Reading face: swap between Siche Text (serif), Uncut Sans (sans), and
 // Dolph YY (mono). Changes CSS variables only — no chapter re-render, no
