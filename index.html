@@ -889,6 +889,11 @@ body.r-ui-visible .r-footer-ref {
   height: 100%;
   overflow: hidden;
   position: relative;
+  /* Explicit z-index keeps the slot (and its stacking-context inner) below
+     click zones (z-index: 3). Without this, `will-change: transform` on
+     .r-slot-inner creates a stacking context that can interfere with
+     click-zone hit-testing on some browsers. */
+  z-index: 1;
 }
 
 .r-slot-inner {
@@ -5041,6 +5046,12 @@ function cancelHold(completed) {
   document.addEventListener('mousedown', (e) => {
     if (readerInteractionBlocked()) return;
     const zone = e.target.closest && e.target.closest('.r-click-zone');
+    // TEMPORARY DIAGNOSTIC — remove after debug
+    console.log('[click-debug] mousedown target:',
+      e.target.tagName, e.target.className || '(no class)',
+      'id:', e.target.id || '(none)',
+      'found zone:', !!zone,
+      'button:', e.button);
     if (!zone || e.button !== 0) return;
     const dir = zone.dataset.dir;
     if (!dir) return;
