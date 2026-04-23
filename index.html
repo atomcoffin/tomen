@@ -1544,12 +1544,17 @@ body.r-mode-editing .r-inner {
   }
   .r-pages { column-count: 1; column-gap: 40px; }
   .r-click-zone { width: 50%; }
-  .r-toolbar {
+  /* Mobile toolbar padding — top and bottom each have their own rules so the
+     bottom toolbar preserves safe-area-inset-bottom padding (home indicator
+     on iPhone sits inside that inset; without it, buttons land in the
+     reserved OS gesture area and can't be reliably tapped). */
+  .r-toolbar-top {
     padding:
-      calc(8px + env(safe-area-inset-top, 0px))
-      calc(10px + env(safe-area-inset-right, 0px))
-      8px
-      calc(10px + env(safe-area-inset-left, 0px));
+      calc(8px + env(safe-area-inset-top, 0px)) 0 8px 0;
+  }
+  .r-toolbar-bottom {
+    padding:
+      8px 0 calc(8px + env(safe-area-inset-bottom, 0px)) 0;
   }
   .r-title { max-width: 120px; font-size: 13px; }
   .r-toolbar .icon-btn { width: 34px; height: 34px; }
@@ -1564,12 +1569,13 @@ body.r-mode-editing .r-inner {
       calc(16px + env(safe-area-inset-left, 0px));
   }
   .r-pages { column-gap: 32px; }
-  .r-toolbar {
+  .r-toolbar-top {
     padding:
-      calc(6px + env(safe-area-inset-top, 0px))
-      calc(8px + env(safe-area-inset-right, 0px))
-      6px
-      calc(8px + env(safe-area-inset-left, 0px));
+      calc(6px + env(safe-area-inset-top, 0px)) 0 6px 0;
+  }
+  .r-toolbar-bottom {
+    padding:
+      6px 0 calc(6px + env(safe-area-inset-bottom, 0px)) 0;
   }
   .r-title { max-width: 100px; }
 }
