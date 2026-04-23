@@ -989,12 +989,79 @@ body.r-mode-editing .r-inner {
   break-after: avoid-column;
   color: var(--ink);
 }
-.r-inner h1 { font-size: 2.2em; margin: 0 0 1em;    }
-.r-inner h2 { font-size: 1.7em; margin: 1.6em 0 0.5em; }
-.r-inner h3 { font-size: 1.3em; margin: 1.3em 0 0.4em; }
+/* Heading sizes — h1 is rare in our normalized output (used as the
+   fallback when a chapter has nothing else to title with); h2 is what
+   the EPUB normalizer produces for chapter titles, so it carries the
+   most weight in actual reading. h3 is for sub-headings within chapters
+   (rare in fiction, common in non-fiction).
+   Margins favor space BELOW the heading — chapter titles want real
+   breathing room before the body text starts so the title reads as a
+   moment, not a label glued to the next paragraph. The top margin
+   matters less since chapters render fresh starting from spread 0. */
+.r-inner h1 { font-size: 2.4em; margin: 0 0 1.4em;     letter-spacing: -0.01em; }
+.r-inner h2 { font-size: 2.0em; margin: 0.5em 0 1.2em; letter-spacing: -0.01em; }
+.r-inner h3 { font-size: 1.4em; margin: 1.4em 0 0.6em; }
 .r-inner h4 { font-size: 1.1em; margin: 1em 0 0.3em; }
 .r-inner h5 { font-size: 1em;   margin: 1em 0 0.3em; }
 .r-inner h6 { font-size: 0.95em; margin: 1em 0 0.3em; color: var(--stone); }
+
+/* Part-title pages — chapters that contain only a heading (Book One,
+   Part II, etc.) detected during EPUB import. Treats them as designed
+   pauses rather than near-empty pages: large centered title near the
+   top of the spread, with intentional empty space below acting as a
+   contemplative break — matches the print convention of a dedicated
+   page for part dividers.
+   The .r-part-page class is set on .r-inner by renderChapter() when the
+   normalizer's marker element is detected.
+   No flex centering — vertical centering would float the title in a
+   weird middle position. Top-aligned with generous top margin reads
+   more like a true part-title page from a printed novel.
+   The parent .r-pages multi-column layout stays intact; column-span: all
+   on the heading lifts it out of column flow so it appears centered
+   across the full spread on 2-column desktop layouts. */
+.r-inner.r-part-page {
+  text-align: center;
+}
+/* Part heading itself — much larger than a normal chapter title, with
+   wider tracking that flatters display caps. column-span: all spans the
+   full spread. Generous top margin pushes it down from the top edge so
+   it doesn't feel cramped against the top of the page. The chartreuse
+   underline is short and thin — a typographic flourish, not a rule. */
+.r-inner.r-part-page h1,
+.r-inner.r-part-page h2,
+.r-inner.r-part-page h3 {
+  font-size: 3.6em;
+  margin: 2em 0 0;
+  letter-spacing: 0.04em;
+  font-weight: 400;
+  position: relative;
+  padding-bottom: 0.6em;
+  column-span: all;
+  text-align: center;
+}
+.r-inner.r-part-page h1::after,
+.r-inner.r-part-page h2::after,
+.r-inner.r-part-page h3::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80px;
+  height: 2px;
+  background: var(--brand);
+}
+/* If there's any subtitle/tagline text on a part page, it sits below the
+   heading at body size in stone color — secondary, deferential. */
+.r-inner.r-part-page p {
+  text-align: center;
+  text-indent: 0;
+  color: var(--stone);
+  font-style: italic;
+  max-width: 28em;
+  margin: 1.2em auto 0.8em;
+  column-span: all;
+}
 
 /* Paragraphs: block vs indent and alignment are user-controlled via
    CSS variables set by setParagraphStyle() and setTextAlign(). Defaults
@@ -3497,6 +3564,36 @@ function normalizeChapterHtml(body) {
       div.parentNode.replaceChild(br, div);
     }
   }
+
+  // Step 5 — detect part-title pages. EPUBs commonly have dedicated chapter
+  // files for "Part I" or "Book One" containing nothing but the part name,
+  // mirroring the print convention of dedicating a full page to each part
+  // divider. Without special treatment these render as a tiny title at the
+  // top of an otherwise empty spread, which looks broken rather than
+  // intentional. Adding a marker class lets CSS center the content
+  // vertically and treat it as a designed pause.
+  //
+  // Heuristic: a chapter qualifies as a part page if it contains a heading
+  // AND has very little non-heading text content (under 200 chars). Catches
+  // pure title-only pages and title-plus-brief-tagline patterns; excludes
+  // real chapters which always have substantial body text.
+  const heading = body.querySelector('h1, h2, h3');
+  if (heading) {
+    // Compute text content excluding the heading itself.
+    const bodyText = (body.textContent || '').trim();
+    const headingText = (heading.textContent || '').trim();
+    const nonHeadingText = bodyText.replace(headingText, '').trim();
+    if (nonHeadingText.length < 200) {
+      // Mark on the body element. The renderer wraps body.innerHTML in
+      // .r-inner, so we'll need the marker class on the wrapper at render
+      // time. Stashing a sentinel comment is brittle; instead, prepend a
+      // marker div the renderer can detect.
+      const marker = doc.createElement('div');
+      marker.className = 'r-part-page-marker';
+      marker.style.display = 'none';
+      body.insertBefore(marker, body.firstChild);
+    }
+  }
 }
 
 async function loadEpub(file, batch = false) {
@@ -3834,6 +3931,18 @@ function renderChapter() {
   const pagesEl = $('r-pages');
   const innerEl = $('r-inner');
   innerEl.innerHTML = chapters[currentChapterIndex]?.html || '<p>No content</p>';
+  // Detect part-title page marker inserted by the EPUB normalizer. When
+  // present, add a class to the inner wrapper so CSS can vertically center
+  // the heading and apply the larger part-title typography. Marker is then
+  // removed since it has served its purpose and shouldn't show up if the
+  // user copies text from the page.
+  const partMarker = innerEl.querySelector('.r-part-page-marker');
+  if (partMarker) {
+    innerEl.classList.add('r-part-page');
+    partMarker.remove();
+  } else {
+    innerEl.classList.remove('r-part-page');
+  }
   // Wrap saved marks for this chapter in highlight spans, before measuring
   // pagination so spread math reflects the wrapped content.
   renderMarksForChapter(innerEl, currentChapterIndex);
