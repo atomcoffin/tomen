@@ -858,17 +858,61 @@ body.r-ui-visible .r-footer-ref {
   width: 100%;
 }
 
-.r-pages {
-  column-count: 2;
-  column-fill: auto;
+/* ===== Dual-slot page architecture =====
+   The r-spread container is a flex row of two page-slot viewports. Each
+   slot independently renders the chapter content and scrolls to show a
+   specific page. Phase A: both slots always animate together, behaving
+   identically to the old single-container layout. Phase B will make them
+   animate independently.
+
+   Each slot has column-count: 1 with column-fill: auto — when the inner
+   content exceeds the slot's height, multi-column flows it into additional
+   columns to the right, which the slot then scrolls horizontally to show
+   a specific page. The --slot-page-index custom property drives the
+   horizontal translation of .r-slot-inner.
+
+   The unused visual "gap" between slots (where a physical book's gutter
+   would be) is the flex row's column-gap, not a column-gap inside each
+   slot's multi-column. This matters because column-gap inside a slot
+   would create in-slot gaps between pages, which we don't want. */
+.r-spread {
+  display: flex;
+  flex-direction: row;
   column-gap: 80px;
   height: 100%;
   width: 100%;
-  transition: transform 220ms ease, opacity 160ms ease;
+}
+
+.r-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.r-slot-inner {
+  /* column-count + column-fill: auto + constrained height forces content
+     overflow into additional columns (one per "page"). Gap between these
+     in-slot columns is 0 because a single slot shows one column at a time
+     — any gap would be visible as blank space when scrolled. */
+  column-count: 1;
+  column-fill: auto;
+  column-gap: 0;
+  height: 100%;
+  width: 100%;
+  /* Horizontal translation to show the correct page column. Computed in JS
+     as -pageIndex * slotInnerContentWidth. Transition applied during
+     animated turns (see applySpread). Opacity transition here handles the
+     chapter fadeSwap which swaps the .fade class on .r-spread. */
+  transform: translateX(0);
+  transition: opacity 160ms ease;
   will-change: transform, opacity;
   opacity: 1;
 }
-.r-pages.fade { opacity: 0; }
+/* Legacy .fade class still used by fadeSwap for chapter transitions; it
+   now targets the whole spread (both slots fade in sync). */
+.r-spread.fade .r-slot-inner { opacity: 0; }
 
 /* Click zones for pagination. Cursor hides when over the zone so the
    hover-ring stands in for it. */
@@ -1045,9 +1089,9 @@ body.r-mode-editing .r-inner {
    No flex centering — vertical centering would float the title in a
    weird middle position. Top-aligned with generous top margin reads
    more like a true part-title page from a printed novel.
-   The parent .r-pages multi-column layout stays intact; column-span: all
+   The parent slot's multi-column layout stays intact; column-span: all
    on the heading lifts it out of column flow so it appears centered
-   across the full spread on 2-column desktop layouts. */
+   across the full column on each slot. */
 .r-inner.r-part-page {
   text-align: center;
 }
@@ -1944,10 +1988,9 @@ body.r-mode-editing .r-inner {
   .spine { --spine-scale: 1; }
 }
 
-/* Mobile reader — single-column pagination, tighter chrome. The spread math
-   (measureSpreads) reads column-count from CSS, so switching to 1 is enough
-   — no JS changes needed. Two tiers: shared rules for all mobile, plus
-   tighter overrides for the smallest phones. */
+/* Mobile reader — single-page mode hides the right slot so the left slot
+   alone shows one page at a time. measureSpreads() detects this via the
+   right slot's visibility and adjusts _pagesPerSpread accordingly. */
 @media (max-width: 768px) {
   .r-content {
     padding:
@@ -1956,7 +1999,8 @@ body.r-mode-editing .r-inner {
       calc(68px + env(safe-area-inset-bottom, 0px))
       calc(24px + env(safe-area-inset-left, 0px));
   }
-  .r-pages { column-count: 1; column-gap: 40px; }
+  .r-slot-right { display: none; }
+  .r-spread { column-gap: 0; }
   .r-click-zone { width: 50%; }
   /* Mobile toolbar padding — top and bottom each have their own rules so the
      bottom toolbar preserves safe-area-inset-bottom padding (home indicator
@@ -1982,7 +2026,6 @@ body.r-mode-editing .r-inner {
       calc(60px + env(safe-area-inset-bottom, 0px))
       calc(16px + env(safe-area-inset-left, 0px));
   }
-  .r-pages { column-gap: 32px; }
   .r-toolbar-top {
     padding:
       calc(6px + env(safe-area-inset-top, 0px)) 0 6px 0;
@@ -2119,8 +2162,17 @@ body.r-mode-editing .r-inner {
   <div class="r-content" id="r-content">
     <div class="r-click-zone prev" data-dir="prev" onclick="bookAreaTapped(event)"></div>
     <div class="r-book" id="r-book" onclick="bookAreaTapped(event)">
-      <div class="r-pages" id="r-pages">
-        <div class="r-inner" id="r-inner"></div>
+      <!-- Dual-slot page model. Each slot is an independent page viewport
+           containing the full chapter HTML. Left slot is authoritative for
+           reads (selection ranges, anchor offsets, sentence-select); right
+           slot is a rendering twin. See renderChapter / applySpread. -->
+      <div class="r-spread" id="r-spread">
+        <div class="r-slot r-slot-left" id="r-slot-left">
+          <div class="r-slot-inner r-inner" id="r-inner"></div>
+        </div>
+        <div class="r-slot r-slot-right" id="r-slot-right">
+          <div class="r-slot-inner r-inner" id="r-inner-right" aria-hidden="true"></div>
+        </div>
       </div>
     </div>
     <div class="r-click-zone next" data-dir="next" onclick="bookAreaTapped(event)"></div>
@@ -4310,43 +4362,56 @@ function showLibrary() {
 // Render the current chapter's HTML into the pages container, then measure
 // how many spreads it occupies.
 function renderChapter() {
-  const pagesEl = $('r-pages');
-  const innerEl = $('r-inner');
-  innerEl.innerHTML = chapters[currentChapterIndex]?.html || '<p>No content</p>';
-  // Detect part-title page marker inserted by the EPUB normalizer. When
-  // present, add a class to the inner wrapper so CSS can vertically center
-  // the heading and apply the larger part-title typography. Marker is then
-  // removed since it has served its purpose and shouldn't show up if the
-  // user copies text from the page.
-  const partMarker = innerEl.querySelector('.r-part-page-marker');
-  if (partMarker) {
-    innerEl.classList.add('r-part-page');
-    partMarker.remove();
-  } else {
-    innerEl.classList.remove('r-part-page');
+  const leftInner = $('r-inner');
+  const rightInner = $('r-inner-right');
+  const html = chapters[currentChapterIndex]?.html || '<p>No content</p>';
+  // Set content on both slot inners. Both slots carry the full chapter so
+  // either can display any page column — left is authoritative for reads
+  // (selection, anchors, sentence-select), right is a display twin.
+  leftInner.innerHTML = html;
+  rightInner.innerHTML = html;
+  // Part-title marker — applies to both inners so the centered/large
+  // layout renders correctly regardless of which slot it lands in.
+  for (const inner of [leftInner, rightInner]) {
+    const partMarker = inner.querySelector('.r-part-page-marker');
+    if (partMarker) {
+      inner.classList.add('r-part-page');
+      partMarker.remove();
+    } else {
+      inner.classList.remove('r-part-page');
+    }
   }
-  // Wrap saved marks for this chapter in highlight spans, before measuring
-  // pagination so spread math reflects the wrapped content.
-  renderMarksForChapter(innerEl, currentChapterIndex);
+  // Wrap saved marks in both inners. highlightOneMark walks text nodes, so
+  // running it on both trees produces highlights in both.
+  renderMarksForChapter(leftInner, currentChapterIndex);
+  renderMarksForChapter(rightInner, currentChapterIndex);
   // Refresh the top and bottom references with current chapter info.
   updateReaderRefs();
-  // Reset transform before measuring
-  pagesEl.style.transition = 'none';
-  pagesEl.style.transform = 'translateX(0)';
-  // Force reflow, then restore transition
-  pagesEl.offsetHeight;
-  pagesEl.style.transition = '';
-  // Measure after layout settles. Images that haven't loaded yet would shift
-  // the column count after first measurement and cause spreads to be skipped
-  // when the user swipes — wait for them before computing totalSpreads.
-  awaitChapterImagesThenMeasure(innerEl);
+  // Reset transforms on both slot inners before measuring. Clear transitions
+  // so the reset is an instant snap, then force reflow before restoring.
+  for (const inner of [leftInner, rightInner]) {
+    inner.style.transition = 'none';
+    inner.style.transform = 'translateX(0)';
+    inner.style.opacity = '1';
+  }
+  void leftInner.offsetHeight; // force reflow
+  for (const inner of [leftInner, rightInner]) {
+    inner.style.transition = '';
+  }
+  // Measure after layout settles. Pagination is computed from the LEFT slot
+  // only — both slots have identical content so their column counts match.
+  awaitChapterImagesThenMeasure(leftInner);
 }
 
 // Wait for all images in the chapter to either load (or fail) before
 // running measureSpreads. Falls back to an immediate measure if there are
-// no images. Schedules a follow-up measure for any image that decodes later
-// (e.g. very large remote images).
+// no images. Schedules a follow-up measure for any image that decodes later.
+// Dual-slot: awaits images from BOTH slot inners so neither slot's layout
+// shifts after measurement. They render the same HTML so image sets match,
+// but they're separate <img> elements with separate load events.
 function awaitChapterImagesThenMeasure(innerEl) {
+  const leftInner = $('r-inner');
+  const rightInner = $('r-inner-right');
   const doMeasure = () => requestAnimationFrame(() => {
     measureSpreads();
     if (currentSpread >= totalSpreads) currentSpread = totalSpreads - 1;
@@ -4355,7 +4420,9 @@ function awaitChapterImagesThenMeasure(innerEl) {
     updateProgress();
   });
 
-  const imgs = Array.from(innerEl.querySelectorAll('img'));
+  const imgs = [];
+  if (leftInner) imgs.push(...leftInner.querySelectorAll('img'));
+  if (rightInner) imgs.push(...rightInner.querySelectorAll('img'));
   if (imgs.length === 0) { doMeasure(); return; }
 
   // Quick first measure with whatever's loaded so far — keeps the user from
@@ -4375,57 +4442,92 @@ function awaitChapterImagesThenMeasure(innerEl) {
 }
 
 // Measure how many spreads (groups of columns) the current chapter occupies.
-// A "spread" is one visible pane — 2 columns on desktop, 1 column on mobile.
-// Each spread advances by (spreadWidth + gap) pixels to the next.
+// A "spread" is what the user sees at once — two pages side-by-side on
+// desktop (left + right slot), one on mobile (single slot visible).
+//
+// Dual-slot model: each slot's inner is a multi-column layout with
+// column-count: 1. The browser paginates the inner content into N columns
+// (one per page), and the total columns is inferred from scrollWidth just
+// like the old single-container model — we just read from the left slot.
+// Column count inside a slot is whatever multi-column produces; gap is 0
+// because in-slot gaps would show as visible blank space when scrolled.
+//
+// _slotColumnWidth and _slotColumnGap are cached so applySpread / anchor
+// math can read them without a getComputedStyle call per turn.
+let _slotColumnWidth = 0;
+let _slotColumnGap = 0;
+let _pagesPerSpread = 2; // 2 on desktop (dual visible), 1 on mobile (right slot hidden)
+
 function measureSpreads() {
-  const pagesEl = $('r-pages');
-  const bookEl = $('r-book');
-  const spreadWidth = bookEl.clientWidth;
-  const contentWidth = pagesEl.scrollWidth;
-  if (spreadWidth <= 0 || contentWidth <= 0) {
+  const innerEl = $('r-inner');
+  const slotEl = $('r-slot-left');
+  if (!innerEl || !slotEl) { totalSpreads = 1; return; }
+  const slotWidth = slotEl.clientWidth;
+  const contentWidth = innerEl.scrollWidth;
+  if (slotWidth <= 0 || contentWidth <= 0) {
     totalSpreads = 1;
+    _slotColumnWidth = slotWidth;
+    _slotColumnGap = 0;
     return;
   }
-  const style = getComputedStyle(pagesEl);
-  const gap = parseFloat(style.columnGap) || 80;
-  const cols = parseInt(style.columnCount, 10) || 2;
-  // Per-column width — for cols=2 there's one gap between the two columns
-  // inside a single spread; for cols=1 the column fills the spread.
-  const colWidth = cols > 1
-    ? (spreadWidth - gap * (cols - 1)) / cols
-    : spreadWidth;
-  // Total columns generated by the multi-column layout, inferred from content
-  // width. `scrollWidth = N*colWidth + (N-1)*gap` → solve for N.
-  const approxCols = Math.max(1, Math.round((contentWidth + gap) / (colWidth + gap)));
-  totalSpreads = Math.max(1, Math.ceil(approxCols / cols));
+  const style = getComputedStyle(innerEl);
+  // In-slot column-gap is 0 per CSS — but read defensively in case a theme
+  // ever overrides it. slotWidth is the per-column width when column-count
+  // is 1, since one column fills the slot.
+  const gap = parseFloat(style.columnGap) || 0;
+  _slotColumnWidth = slotWidth;
+  _slotColumnGap = gap;
+  // scrollWidth = N * colWidth + (N-1) * gap  →  N = (scrollWidth + gap) / (colWidth + gap)
+  const approxCols = Math.max(1, Math.round((contentWidth + gap) / (slotWidth + gap)));
+  // Determine how many pages render per spread. The right slot's display
+  // determines this — if it's hidden (mobile), each spread is one page.
+  const rightSlot = $('r-slot-right');
+  const rightVisible = rightSlot && rightSlot.offsetWidth > 0;
+  _pagesPerSpread = rightVisible ? 2 : 1;
+  totalSpreads = Math.max(1, Math.ceil(approxCols / _pagesPerSpread));
 }
 
-// Apply the current spread by translating the pages container.
+// Apply the current spread by translating each slot inner to show the
+// correct page column. Dual-slot architecture: the left slot shows
+// pageIndex 2S (even), the right slot shows pageIndex 2S+1 (odd), where
+// S is currentSpread. On mobile (right slot hidden, _pagesPerSpread=1),
+// the left slot alone shows the current page.
+//
 // When animate=true (passed only by readerNext / readerPrev), runs a
-// fade+tiny-slide transition: the current spread fades out while drifting
-// 14px in the turn direction, then the new spread fades in while drifting
-// from 14px the other way back to 0. Programmatic jumps (resize, chapter
+// fade+tiny-slide transition: current pages fade out while drifting 14px
+// in the turn direction, then the new pages fade in while drifting from
+// 14px the other way back to 0. Programmatic jumps (resize, chapter
 // render, go-to-location) pass animate=false and snap instantly.
+//
+// Phase A: both slots animate in lock-step (identical timing, identical
+// behavior). Phase B will stagger them or make them independent.
 let _animatingTurn = false;
 function applySpread(animate = false, direction = 1) {
-  const pagesEl = $('r-pages');
-  const bookEl = $('r-book');
-  const spreadWidth = bookEl.clientWidth;
-  const style = getComputedStyle(pagesEl);
-  const gap = parseFloat(style.columnGap) || 80;
-  const pairAdvance = spreadWidth + gap;
-  const targetX = -currentSpread * pairAdvance;
+  const leftInner = $('r-inner');
+  const rightInner = $('r-inner-right');
+  if (!leftInner || !rightInner) return;
+  if (_slotColumnWidth <= 0) return; // pre-measurement; nothing to do
+
+  // Per-slot page index. Each slot's translation is -pageIndex * stepWidth.
+  const step = _slotColumnWidth + _slotColumnGap;
+  const leftPageIdx = currentSpread * _pagesPerSpread;
+  const rightPageIdx = currentSpread * _pagesPerSpread + 1;
+  const leftTargetX = -leftPageIdx * step;
+  const rightTargetX = -rightPageIdx * step;
 
   if (!animate) {
     // Instant application. Clear any lingering transition so the jump is
     // truly a snap (a stale transition would animate the translate).
-    pagesEl.style.transition = 'none';
-    pagesEl.style.opacity = '1';
-    pagesEl.style.transform = `translateX(${targetX}px)`;
+    for (const [inner, tx] of [[leftInner, leftTargetX], [rightInner, rightTargetX]]) {
+      inner.style.transition = 'none';
+      inner.style.opacity = '1';
+      inner.style.transform = `translateX(${tx}px)`;
+    }
     // Force reflow so the next transition-change doesn't batch with this
     // snap into a single animated frame.
-    void pagesEl.offsetHeight;
-    pagesEl.style.transition = '';
+    void leftInner.offsetHeight;
+    leftInner.style.transition = '';
+    rightInner.style.transition = '';
     return;
   }
 
@@ -4435,38 +4537,41 @@ function applySpread(animate = false, direction = 1) {
   const drift = 14;
   const phaseOutMs = 90;
   const phaseInMs = 110;
+  const inners = [
+    { el: leftInner, tx: leftTargetX },
+    { el: rightInner, tx: rightTargetX }
+  ];
 
-  // Phase 1: fade current spread out while drifting in the turn direction.
-  // Keep the transform anchored at the OLD spread's position — the current
-  // translateX is whatever applySpread last set it to.
-  pagesEl.style.transition = `opacity ${phaseOutMs}ms ease, transform ${phaseOutMs}ms ease`;
-  pagesEl.style.opacity = '0';
-  // Current computed transform + drift.
-  const currentTransform = pagesEl.style.transform;
-  // Extract current X — conservative parse so we don't regex for perf.
-  const m = /translateX\(([-0-9.]+)px\)/.exec(currentTransform);
-  const currentX = m ? parseFloat(m[1]) : 0;
-  pagesEl.style.transform = `translateX(${currentX + (-direction * drift)}px)`;
+  // Phase 1: fade current pages out while drifting in the turn direction.
+  // Each slot drifts from its current translation by ±drift.
+  for (const { el } of inners) {
+    el.style.transition = `opacity ${phaseOutMs}ms ease, transform ${phaseOutMs}ms ease`;
+    el.style.opacity = '0';
+    // Current computed transform + drift.
+    const m = /translateX\(([-0-9.]+)px\)/.exec(el.style.transform);
+    const currentX = m ? parseFloat(m[1]) : 0;
+    el.style.transform = `translateX(${currentX + (-direction * drift)}px)`;
+  }
 
-  // Phase 2: after fade-out completes, snap to the new spread (offset by
-  // +drift in the incoming direction), then fade in while drifting to 0.
+  // Phase 2: after fade-out completes, snap each slot to its new page
+  // (offset by +drift in the incoming direction), then fade in drifting
+  // back to 0.
   setTimeout(() => {
-    // Snap to pre-fade-in position (no transition).
-    pagesEl.style.transition = 'none';
-    pagesEl.style.transform = `translateX(${targetX + (direction * drift)}px)`;
-    // Force reflow so the next property change starts a fresh transition.
-    void pagesEl.offsetHeight;
-    // Kick off the fade-in + drift-to-zero.
-    pagesEl.style.transition = `opacity ${phaseInMs}ms ease, transform ${phaseInMs}ms ease`;
-    pagesEl.style.opacity = '1';
-    pagesEl.style.transform = `translateX(${targetX}px)`;
+    for (const { el, tx } of inners) {
+      el.style.transition = 'none';
+      el.style.transform = `translateX(${tx + (direction * drift)}px)`;
+    }
+    void leftInner.offsetHeight;
+    for (const { el, tx } of inners) {
+      el.style.transition = `opacity ${phaseInMs}ms ease, transform ${phaseInMs}ms ease`;
+      el.style.opacity = '1';
+      el.style.transform = `translateX(${tx}px)`;
+    }
     // Unlock input once fade-in completes (with a small buffer so the last
     // frame paints before another click can queue).
     setTimeout(() => {
       _animatingTurn = false;
-      // Reset transition to stylesheet default so future calls aren't
-      // stuck with our overrides.
-      pagesEl.style.transition = '';
+      for (const { el } of inners) el.style.transition = '';
     }, phaseInMs + 20);
   }, phaseOutMs);
 }
@@ -4521,12 +4626,15 @@ let _fadeSwapBusy = false;
 function fadeSwap(cb) {
   if (_fadeSwapBusy) return;
   _fadeSwapBusy = true;
-  const pagesEl = $('r-pages');
-  pagesEl.classList.add('fade');
+  // Targets the .r-spread container so both slot inners fade in sync via
+  // the .r-spread.fade > .r-slot-inner CSS rule. Transitions on the inner
+  // opacity are stylesheet-provided.
+  const spreadEl = $('r-spread');
+  spreadEl.classList.add('fade');
   setTimeout(() => {
     cb();
     requestAnimationFrame(() => {
-      pagesEl.classList.remove('fade');
+      spreadEl.classList.remove('fade');
       _fadeSwapBusy = false;
     });
   }, 180);
@@ -5085,43 +5193,44 @@ function nodeForChapterOffset(offset, innerEl) {
 }
 
 // Given a chapter character offset, figure out which spread it lives on.
-// Uses Range.getBoundingClientRect after resetting any spread translate to
-// get the offset's natural x-position within r-pages.
+// Uses Range.getBoundingClientRect against the left slot-inner, temporarily
+// resetting its transform so the rect reads the natural (in-column-flow)
+// position. Converts x to a page index, then divides by _pagesPerSpread to
+// get the spread index.
 function findSpreadForChapterOffset(offset) {
   const innerEl = $('r-inner');
-  const pagesEl = $('r-pages');
-  const bookEl = $('r-book');
-  if (!innerEl || !pagesEl || !bookEl) return null;
+  if (!innerEl) return null;
   const found = nodeForChapterOffset(offset, innerEl);
   if (!found) return null;
 
   // Temporarily zero the transform so getBoundingClientRect returns the
-  // natural position of the range within the column flow.
-  const prevTransition = pagesEl.style.transition;
-  const prevTransform = pagesEl.style.transform;
-  pagesEl.style.transition = 'none';
-  pagesEl.style.transform = 'translateX(0)';
-  pagesEl.offsetHeight;  // reflow
+  // natural column-flow position of the range. Restore when done.
+  const prevTransition = innerEl.style.transition;
+  const prevTransform = innerEl.style.transform;
+  innerEl.style.transition = 'none';
+  innerEl.style.transform = 'translateX(0)';
+  void innerEl.offsetHeight;  // reflow
 
   const range = document.createRange();
   range.setStart(found.node, found.offset);
   range.setEnd(found.node, found.offset);
   const rangeRect = range.getBoundingClientRect();
-  const pagesRect = pagesEl.getBoundingClientRect();
-  // Position relative to pages's natural (untranslated) left edge.
-  const xInPages = rangeRect.left - pagesRect.left;
+  const innerRect = innerEl.getBoundingClientRect();
+  // Position relative to the inner's natural (untranslated) left edge.
+  const xInInner = rangeRect.left - innerRect.left;
 
-  // Restore previous transform/transition before measurement leaks visually.
-  pagesEl.style.transform = prevTransform;
-  pagesEl.style.transition = prevTransition;
+  // Restore previous transform/transition before the measurement leaks visually.
+  innerEl.style.transform = prevTransform;
+  innerEl.style.transition = prevTransition;
 
-  const spreadWidth = bookEl.clientWidth;
-  const style = getComputedStyle(pagesEl);
-  const gap = parseFloat(style.columnGap) || 80;
-  const pairAdvance = spreadWidth + gap;
-  if (pairAdvance <= 0) return null;
-  const idx = Math.max(0, Math.floor(xInPages / pairAdvance));
-  return Math.min(idx, Math.max(0, totalSpreads - 1));
+  // Page step = column width + column gap. _slotColumnWidth is set by the
+  // most recent measureSpreads(). Page index floors the x; spread index
+  // divides by pages-per-spread.
+  const step = _slotColumnWidth + _slotColumnGap;
+  if (step <= 0) return null;
+  const pageIdx = Math.max(0, Math.floor(xInInner / step));
+  const spreadIdx = Math.floor(pageIdx / Math.max(1, _pagesPerSpread));
+  return Math.min(spreadIdx, Math.max(0, totalSpreads - 1));
 }
 
 // Cross-browser caret-from-point. Returns a Range at (x, y) or null.
