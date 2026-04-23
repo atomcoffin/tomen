@@ -4539,9 +4539,13 @@ function applySpread(animate = false, direction = 1) {
   if (_animatingTurn) return;
   _animatingTurn = true;
 
-  const drift = 14;
-  const phaseOutMs = 90;
-  const phaseInMs = 110;
+  const drift = 20;
+  const phaseOutMs = 140;
+  const pauseMs = 60;   // brief empty state between fade-out end and fade-in start
+  const phaseInMs = 180;
+  // Gentle curve — accelerates slowly and decelerates slowly, gives the
+  // animation a restful feel rather than a quick flash.
+  const ease = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
   // Run the full fade-out → snap → fade-in sequence for ONE slot. Returns
   // a promise that resolves when the slot's animation finishes. Scheduling
@@ -4549,18 +4553,20 @@ function applySpread(animate = false, direction = 1) {
   // so the caller controls stagger by delaying each call independently.
   const animateSlot = (el, targetX) => new Promise(resolve => {
     // Phase 1: fade out + drift in turn direction.
-    el.style.transition = `opacity ${phaseOutMs}ms ease, transform ${phaseOutMs}ms ease`;
+    el.style.transition = `opacity ${phaseOutMs}ms ${ease}, transform ${phaseOutMs}ms ${ease}`;
     el.style.opacity = '0';
     const m = /translateX\(([-0-9.]+)px\)/.exec(el.style.transform);
     const currentX = m ? parseFloat(m[1]) : 0;
     el.style.transform = `translateX(${currentX + (-direction * drift)}px)`;
-    // Phase 2: snap to new page (offset by +drift opposite direction),
-    // then fade in drifting back to target.
+    // Phase 2: after fade-out completes AND a brief pause, snap to the new
+    // page (offset by +drift opposite direction), then fade in drifting
+    // back to target. The pause lets the page feel momentarily absent —
+    // calm beat rather than an instant handoff.
     setTimeout(() => {
       el.style.transition = 'none';
       el.style.transform = `translateX(${targetX + (direction * drift)}px)`;
       void el.offsetHeight; // reflow before starting the new transition
-      el.style.transition = `opacity ${phaseInMs}ms ease, transform ${phaseInMs}ms ease`;
+      el.style.transition = `opacity ${phaseInMs}ms ${ease}, transform ${phaseInMs}ms ${ease}`;
       el.style.opacity = '1';
       el.style.transform = `translateX(${targetX}px)`;
       // Clear inline opacity/transition once the fade-in settles so later
@@ -4570,7 +4576,7 @@ function applySpread(animate = false, direction = 1) {
         el.style.opacity = '';
         resolve();
       }, phaseInMs + 20);
-    }, phaseOutMs);
+    }, phaseOutMs + pauseMs);
   });
 
   // Both slots start their animations at the same instant. Each slot
@@ -4579,10 +4585,22 @@ function applySpread(animate = false, direction = 1) {
   const leftDone = animateSlot(leftInner, leftTargetX);
   const rightDone = animateSlot(rightInner, rightTargetX);
 
-  // Unlock input once both slots have finished their turns.
+  // Unlock input once both slots have finished their turns. A defensive
+  // fallback also clears _animatingTurn after a reasonable max duration,
+  // in case a promise never resolves (e.g. an error in a setTimeout chain
+  // that would otherwise leave the reader permanently locked).
+  const maxTotalMs = phaseOutMs + pauseMs + phaseInMs + 100;
+  let settled = false;
   Promise.all([leftDone, rightDone]).then(() => {
+    if (settled) return;
+    settled = true;
     _animatingTurn = false;
   });
+  setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    _animatingTurn = false;
+  }, maxTotalMs);
 }
 
 // Navigate one spread forward. Crosses into next chapter at the end.
