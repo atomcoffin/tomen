@@ -481,14 +481,16 @@ html, body {
 
 /* === SPINE VIEW ========================================================
 
-Clean layout:
-  0 ...... 8%   : top headband zone (thin line at ~8%)
-  10% .. 74%   : title zone (upper), height 64%, primary + optional secondary
-  74% .. 90%   : author zone (lower), height 16%, horizontal text
-  92% ...100%  : bottom headband zone (thin line at ~92%)
+Flat, minimal spines. Each spine is:
+  - A solid color (the book's spineColor — hash-derived or extracted from cover)
+  - A fill mechanic where the read portion tints toward the page background,
+    filling UP from the bottom as progress increases (0% = fully saturated,
+    100% = fully faded)
+  - A single centered vertical title in that book's typeface
+  - An optional chartreuse dot at the base marking last-read
 
-All text placement uses the JS-measured dimensions of each zone, so CSS and JS
-never disagree. Orientation is vertical for title/secondary, horizontal for author.
+No texture, no bands, no bookmark triangle, no author, no gradient, no inset
+shadow. The whole row is meant to read as a clean chart of colors + types.
 ============================================================================ */
 
 .view-spine-wrap {
@@ -502,7 +504,7 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
 .view-spine-wrap::-webkit-scrollbar-thumb { background: var(--fog); border-radius: 3px; opacity: 0.3; }
 
 .view-spine {
-  display: flex; align-items: flex-end; gap: 3px;
+  display: flex; align-items: flex-end; gap: 2px;
   height: 100%;
   max-height: 85vh;
   width: max-content;
@@ -510,146 +512,82 @@ never disagree. Orientation is vertical for title/secondary, horizontal for auth
   padding: 40px 40px 28px 28px;
 }
 
+/* The spine is positioned so absolutely-placed children (fill layer, title,
+   last-read dot) can stack cleanly. Color is set inline per-book via
+   --spine-color (a single hex string). --spine-fill-pct drives the height
+   of the faded-bottom fill — 0% = no fill visible, 100% = fully faded. */
 .spine {
   flex-shrink: 0;
   position: relative;
   overflow: hidden;
   cursor: pointer;
-  border-radius: 3px 6px 6px 3px;
-  box-shadow:
-    inset  1px 0 0 rgba(255,255,255,0.06),
-    inset -3px 0 6px rgba(0,0,0,0.22),
-    2px 0 5px rgba(0,0,0,0.18);
-  will-change: transform;
+  border-radius: 2px;
+  background: var(--spine-color, #888);
+  transition: filter 140ms ease;
 }
 .spine:hover { filter: brightness(1.08); }
-.spine.pinned { margin-right: 4px; }
 
-/* Cloth weave texture — two very subtle crossed gradients */
-.spine::before {
-  content: '';
-  position: absolute; inset: 0;
-  background:
-    repeating-linear-gradient(90deg, transparent 0 1px, rgba(0,0,0,0.035) 1px 2px),
-    repeating-linear-gradient(0deg, transparent 0 1px, rgba(255,255,255,0.025) 1px 2px);
-  pointer-events: none;
-  border-radius: inherit;
-  z-index: 0;
-}
-
-/* Left edge page sliver — follows the rounded corners */
-.spine-pages {
-  position: absolute; left: 0; top: 0; bottom: 0; width: 1.5px;
-  background: linear-gradient(180deg,
-    rgba(255,255,255,0) 0%,
-    rgba(255,255,255,0.16) 6%,
-    rgba(255,255,255,0.16) 94%,
-    rgba(255,255,255,0) 100%);
-  border-radius: inherit;
-  z-index: 1;
-  pointer-events: none;
-}
-
-/* Headband ridges — positioned via inline `top` percent from JS */
-.spine-band {
-  position: absolute; left: 0; right: 0; height: 1px;
-  background: rgba(0,0,0,0.12);
-  box-shadow: 0 1px 0 rgba(255,255,255,0.04);
-  z-index: 1;
-  pointer-events: none;
-}
-
-/* Title zone — upper area, holds primary + optional secondary side by side */
-.spine-top {
+/* The read-portion fill. Sits at the bottom, grows upward with progress.
+   Uses color-mix to blend the spine color with the current theme's paper
+   color, so the faded region reads as "lighter version of the same book"
+   in light, dark, and sepia themes without per-theme tuning. */
+.spine-fill {
   position: absolute;
-  top: 12%; left: 0; right: 0; height: 68%;
-  display: flex;
-  flex-direction: row;
-  gap: 4px;
-  padding: 0 3px;
-  z-index: 2;
+  left: 0; right: 0; bottom: 0;
+  height: var(--spine-fill-pct, 0%);
+  background: color-mix(in srgb, var(--spine-color, #888) 15%, var(--paper));
   pointer-events: none;
-  justify-content: center;
-  align-items: flex-start;
+  transition: height 200ms ease;
 }
-.spine-top.center { align-items: center; }
 
-/* Author zone — small strip near bottom, ending just before bottom band */
-.spine-bot {
+/* Thin line where the fill meets the unread portion. Only visible when
+   there's actual progress. Uses a darker mix of the spine color so it
+   reads as "the liquid surface" rather than an artificial divider. */
+.spine-fill-line {
   position: absolute;
-  top: 84%; left: 0; right: 0; height: 6%;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding-bottom: 1%;
-  z-index: 2;
+  left: 0; right: 0;
+  height: 1px;
+  bottom: calc(var(--spine-fill-pct, 0%) - 0.5px);
+  background: color-mix(in srgb, var(--spine-color, #888) 60%, #000);
+  opacity: 0.35;
   pointer-events: none;
 }
+.spine[data-progress="0"] .spine-fill-line { display: none; }
 
-/* Vertical text for title + secondary */
-.spine-title, .spine-secondary {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  font-family: var(--font-read);
-  line-height: 1.1;
-  word-break: break-word;
-  text-shadow: 0 1px 0 rgba(0,0,0,0.45);
-}
-.spine-title { color: rgba(248,240,228,0.9); }
-.spine-secondary {
-  color: rgba(248,240,228,0.6);
-  font-style: italic;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-height: 100%;
-}
-
-/* Horizontal text for author */
-.spine-author {
-  writing-mode: horizontal-tb;
-  font-family: var(--font-read);
-  line-height: 1.15;
-  color: rgba(248,240,228,0.72);
-  text-align: center;
-  text-shadow: 0 1px 0 rgba(0,0,0,0.45);
-  word-break: normal;
-  overflow-wrap: break-word;
-}
-
-/* Bookmark — hangs from above the top band, out of the title zone */
-.spine-bookmark {
+/* Title zone. Full-height, centered. Writing mode vertical-rl with
+   text-orientation mixed so rotated Latin characters read top-to-bottom.
+   Font family is inherited from the spine element (set inline per-book).
+   Color is set inline via --spine-title-color based on luminance. */
+.spine-title {
   position: absolute;
-  top: -2px;
-  left: 30%;
-  width: 40%;
-  height: 52px;
-  background: var(--brand);
-  z-index: 3;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%);
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25));
-}
-
-.spine-prog {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  height: 3px; background: rgba(0,0,0,0.15);
-}
-.spine-prog-fill { height: 100%; background: var(--brand); }
-
-/* Last-read separator */
-.spine-spacer {
-  flex-shrink: 0;
-  width: 20px;
-  height: 100%;
+  top: 6%; left: 0; right: 0; bottom: 6%;
   display: flex;
   align-items: center;
   justify-content: center;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  line-height: 1.1;
+  word-break: break-word;
+  color: var(--spine-title-color, rgba(255,255,255,0.92));
+  padding: 0 3px;
+  z-index: 2;
+  pointer-events: none;
 }
-.spine-spacer-line {
-  width: 1px;
-  height: 40%;
-  background: rgba(255,255,255,0.1);
-  border-radius: 1px;
+
+/* Last-read indicator. Small chartreuse dot at the base of the spine,
+   centered horizontally, just above the fill line so it's always visible
+   regardless of progress. Replaces the old pinned-margin + spacer. */
+.spine-last-read {
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 6px; height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--brand) 40%, var(--paper));
+  z-index: 3;
+  pointer-events: none;
 }
 
 /* ===== READER ===== */
@@ -1962,7 +1900,7 @@ body.r-mode-editing .r-inner {
   .lib-body { padding: 0 12px 12px; }
   .view-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 14px; }
   .tv-title { font-size: 22px; }
-  .view-spine { padding: 12px 20px 16px 12px; gap: 2px; }
+  .view-spine { padding: 12px 20px 16px 12px; gap: 1px; }
   .spine { --spine-scale: 0.45; }
   .view-spine-wrap::-webkit-scrollbar { height: 0; }
   .icon-btn { width: 32px; height: 32px; }
@@ -3048,7 +2986,7 @@ const _probe = (() => {
   };
 })();
 
-function measureVertical(text, fontSize, fontWeight, maxHeightPx) {
+function measureVertical(text, fontSize, fontWeight, maxHeightPx, fontFamily) {
   const el = _probe();
   el.style.writingMode = 'vertical-rl';
   el.style.textOrientation = 'mixed';
@@ -3060,6 +2998,10 @@ function measureVertical(text, fontSize, fontWeight, maxHeightPx) {
   el.style.maxHeight = maxHeightPx + 'px';
   el.style.maxWidth = '';
   el.style.display = '';
+  // fontFamily is optional. Default (omitted) uses the probe's Thow fallback.
+  // Spine measurement needs the actual per-book face since serif / sans /
+  // mono metrics differ enough to throw off the binary-search fit.
+  el.style.fontFamily = fontFamily || '';
   el.textContent = text;
   return { w: el.offsetWidth, h: el.offsetHeight };
 }
@@ -3083,12 +3025,12 @@ function measureHorizontal(text, fontSize, fontWeight, maxWidthPx) {
   return { w, h, overflowed: intrinsic > maxWidthPx + 0.5 };
 }
 
-function fitVertical(text, maxW, maxH, sizeLo, sizeHi) {
+function fitVertical(text, maxW, maxH, sizeLo, sizeHi, fontFamily) {
   let lo = sizeLo, hi = sizeHi, best = sizeLo, bestW = 0, bestH = 0;
   for (let i = 0; i < 14 && lo <= hi; i++) {
     const mid = Math.round((lo + hi) / 2);
     const weight = mid >= 22 ? 500 : 400;
-    const m = measureVertical(text, mid, weight, maxH);
+    const m = measureVertical(text, mid, weight, maxH, fontFamily);
     if (m.w <= maxW && m.h <= maxH) {
       best = mid; bestW = m.w; bestH = m.h;
       lo = mid + 1;
@@ -3113,83 +3055,52 @@ function fitHorizontal(text, maxW, maxH, maxLines, sizeHi, sizeLo) {
 }
 
 // ===== SPINE LAYOUT =====
-// Given a spine's ACTUAL rendered width/height in pixels, compute layout.
-// Zone percentages MUST match CSS exactly (top: 10% h: 64%; top: 74% h: 16%).
-function spineLayout(book, widthPx, heightPx) {
+// Given a spine's ACTUAL rendered width/height in pixels, compute the title's
+// fitted size. Flat-spine redesign: no secondary text, no author. Just the
+// title in the book's chosen face, fit to the full inner area.
+//
+// fontFamily is the CSS font-family string that will actually render the
+// title — passed through to measureVertical so size fitting uses the real
+// metrics rather than the probe's default face.
+function spineLayout(book, widthPx, heightPx, fontFamily) {
   const parsed = parseSpineContent(book);
+  // Use the whole title, undivided. The series/subtitle-splitting logic in
+  // parseSpineContent was for a secondary-text treatment we no longer have.
+  // Rejoining keeps book identity intact (e.g. "Deltora Quest #3: City of
+  // the Rats" reads as a single title rather than losing its subtitle).
+  const primaryText = parsed.secondary
+    ? `${parsed.primary} ${parsed.secondary}`
+    : parsed.primary;
 
-  // Zone heights — must match CSS percentages exactly.
-  // CSS: .spine-top  top:12% height:68%  (pixel range 12-80%)
-  // CSS: .spine-bot  top:82% height:6%   (pixel range 82-88%)
-  const topZoneH = Math.round(heightPx * 0.68);
-  const botZoneH = Math.round(heightPx * 0.06);
+  // Title area is the full spine minus a small vertical margin (6% top+bot
+  // matches the CSS .spine-title top/bottom). Horizontal padding is 3px
+  // on each side, also matching CSS.
+  const titleMaxW = Math.max(10, widthPx - 6);
+  const titleMaxH = Math.max(20, Math.round(heightPx * 0.88));
 
-  const sidePad = Math.max(6, Math.round(widthPx * 0.10));
-  const authorMaxW = Math.max(10, widthPx - sidePad * 2);
-  const authorMaxH = botZoneH;
-
-  const hasSecondary = !!parsed.secondary;
-  // Title width budget — short titles get more width so they can go large.
-  const isShort = parsed.primary.length <= 8;
-  const widthFactor = hasSecondary ? 0.40 :
-                      isShort ? 0.70 : 0.55;
-  const titleMaxW = Math.round(widthPx * widthFactor);
-  const titleMaxH = topZoneH;
-
-  // Title caps scale with spine height so the same text feels right on
-  // 500px mobile spines and 1200px desktop spines. Calibrated against a
-  // reference spine height of 1100px: a 4-char title caps at ~80px there,
-  // scaling down proportionally on shorter spines (min 18px cap).
-  // Scale factor: clamped between 0.5 (short) and 1.0 (tall).
+  // Size caps scale with spine height so the same text feels right on a
+  // 500px mobile spine and a 1200px desktop spine. Short titles cap bigger
+  // since they can fill more of the zone with a single large glyph column.
   const hScale = Math.max(0.5, Math.min(1.0, heightPx / 1100));
-  const len = parsed.primary.length;
-  const baseCap = len <= 4  ? 80 :
-                  len <= 8  ? 60 :
-                  len <= 16 ? 44 :
-                  len <= 30 ? 32 : 26;
-  const titleCap = Math.max(14, Math.round(baseCap * hScale));
+  const len = primaryText.length;
+  const baseCap = len <= 4  ? 72 :
+                  len <= 8  ? 56 :
+                  len <= 16 ? 40 :
+                  len <= 30 ? 30 : 24;
+  const titleCap = Math.max(12, Math.round(baseCap * hScale));
 
-  let title = fitVertical(parsed.primary, titleMaxW, titleMaxH, 10, titleCap);
+  let title = fitVertical(primaryText, titleMaxW, titleMaxH, 10, titleCap, fontFamily);
 
-  // If a long title ended up well below its cap AND well under the zone height,
-  // it's because single-column physically can't get bigger. Try wrapping.
-  // This happens when the title is height-constrained by char count, not width.
-  if (parsed.primary.length > 18 && title.size < titleCap * 0.75) {
-    const wideW = Math.round(widthPx * (hasSecondary ? 0.55 : 0.85));
-    const wrapped = fitVertical(parsed.primary, wideW, titleMaxH, title.size + 1, titleCap);
+  // Long titles sometimes under-size because single-column is height-bound
+  // by char count, not width. Try a wider budget so they can wrap.
+  if (primaryText.length > 18 && title.size < titleCap * 0.75) {
+    const wideW = Math.round(widthPx * 0.85);
+    const wrapped = fitVertical(primaryText, wideW, titleMaxH, title.size + 1, titleCap, fontFamily);
     if (wrapped.size > title.size) title = wrapped;
   }
 
-  let secondary = null;
-  if (hasSecondary) {
-    const remainingW = Math.max(0, widthPx - title.width - 10);
-    if (remainingW >= 8) {
-      const secSize = Math.max(9, Math.round(title.size * 0.72));
-      secondary = { text: parsed.secondary, size: secSize, weight: 400 };
-    }
-  }
-
-  const titleCenter = title.height < titleMaxH * 0.55;
-
-  let author = null;
-  if (parsed.author) {
-    const full = parsed.author;
-    const init = parsed.authorInitials;
-    // Author sizes grow with big spines but have a hard legibility floor.
-    const authorCap = heightPx > 900 ? 16 : heightPx > 600 ? 14 : 12;
-    const authorFloor = 9;
-    author = fitHorizontal(full, authorMaxW, authorMaxH, 1, authorCap, authorFloor);
-    if (!author && full.includes(' ')) author = fitHorizontal(full, authorMaxW, authorMaxH, 2, authorCap - 1, authorFloor);
-    if (!author && init && init !== full) author = fitHorizontal(init, authorMaxW, authorMaxH, 1, authorCap, authorFloor);
-    if (!author && init) author = fitHorizontal(init, authorMaxW, authorMaxH, 1, authorCap, 7);
-  }
-
   return {
-    primary: { text: parsed.primary, ...title },
-    secondary,
-    author,
-    authorMaxW,
-    titleCenter
+    primary: { text: primaryText, ...title }
   };
 }
 
@@ -3366,84 +3277,134 @@ function renderGridView(el, books) {
   }).join('') + '</div>';
 }
 
+// Map the three valid fontFace keys to the actual CSS font-family strings
+// used for rendering AND measurement. Kept in sync with _READING_FACES.
+const _SPINE_FONT_FAMILIES = {
+  serif: "'Siche Text', 'Thow', 'Georgia', serif",
+  sans:  "'Uncut Sans', 'Inter', 'Helvetica Neue', sans-serif",
+  mono:  "'Dolph YY', 'Thow Mono', 'Courier New', monospace"
+};
+
+// Pick a title color (light or dark) based on the spine color's perceived
+// luminance. Uses the relative-luminance formula (Rec. 709 coefficients)
+// on a gamma-approximated linear-ish value — close enough for UI decisions.
+// Returns a CSS color string suitable for the title on BOTH the saturated
+// and faded portions of the spine (the faded portion is only 15% color +
+// 85% paper, so its luminance is close to paper's — a light-text choice
+// that works on the saturated band becomes unreadable there, which is why
+// we err on the side of dark text on medium-luminance colors).
+function titleColorForSpine(hex) {
+  if (typeof hex !== 'string' || !hex.startsWith('#')) return 'rgba(255,255,255,0.92)';
+  const h = hex.slice(1);
+  if (h.length !== 6) return 'rgba(255,255,255,0.92)';
+  const r = parseInt(h.slice(0, 2), 16) / 255;
+  const g = parseInt(h.slice(2, 4), 16) / 255;
+  const b = parseInt(h.slice(4, 6), 16) / 255;
+  // Fast approximation — perceived brightness via Rec. 709 coefficients.
+  // Proper sRGB linearization would be more accurate but adds cost for
+  // little payoff at this decision threshold.
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  // Threshold picked empirically: the existing palette in strColor() has
+  // everything well below 0.55 (its lightest is around 0.47 for the
+  // ochre/amber pair), so most autogenerated colors get light text.
+  // Cover-extracted colors can be anywhere, so the check is real.
+  return lum > 0.55
+    ? 'rgba(20, 16, 12, 0.85)'
+    : 'rgba(255, 250, 240, 0.95)';
+}
+
 function renderSpineView(el, books) {
   updateSpineScale();
   const lastId = getLastReadId();
 
-  // Build the data model first (dimensions, colors, progress flags)
+  // Build the data model. spineColor is stored as a [primary, deeper] pair
+  // for legacy reasons (old gradient design); new flat design uses only
+  // the primary color. Keep the pair in storage — don't mutate existing
+  // records.
   const spineData = books.map((b, i) => {
     const w = spineWidth(b);
     const hPct = spineHeight(b);
-    let seed = 0;
-    for (let j = 0; j < b.title.length; j++) seed += b.title.charCodeAt(j);
-    const bandTop = 7 + (seed % 4);      // 7-10%
-    const bandBottom = 90 + (seed % 4);  // 90-93%
-    const color = b.spineColor || strColor(b.title);
-    const hasProgress = (b.progress || 0) > 0 && (b.progress || 0) < 100;
+    const colorPair = b.spineColor || strColor(b.title);
+    const color = colorPair[0];
+    const progress = Math.max(0, Math.min(100, b.progress || 0));
     const isLastRead = b.id === lastId;
-    return { book: b, index: i, width: w, heightPct: hPct, color,
-      progress: b.progress || 0, bandTop, bandBottom, hasProgress, isLastRead };
+    // Per-book face resolves to the book's override if set, else the global
+    // default. Both the title's CSS font-family AND the measurement pass
+    // need this value so fit calculations use the actual render font.
+    const faceKey = _READING_FACES[b.fontFace] ? b.fontFace : globalReadingFace;
+    const fontFamily = _SPINE_FONT_FAMILIES[faceKey] || _SPINE_FONT_FAMILIES.serif;
+    const titleColor = titleColorForSpine(color);
+    return { book: b, index: i, width: w, heightPct: hPct,
+      color, progress, isLastRead, faceKey, fontFamily, titleColor };
   });
 
-  // PASS 1: Render skeleton spines (dimensions only, no text). This lets the
-  // browser perform real layout so we can MEASURE each spine's actual height.
+  // PASS 1: render skeletons with dimensions and color variables set. The
+  // browser performs real layout here so we can measure each spine's
+  // actual pixel height before deciding title size. Title text is added in
+  // PASS 2 after fonts are loaded.
   el.innerHTML = '<div class="view-spine-wrap"><div class="view-spine" id="spine-row">' +
     spineData.map((s) => {
-      const pinnedClass = s.isLastRead ? ' pinned' : '';
-      const bg = `linear-gradient(180deg,${s.color[0]},${s.color[1]})`;
-      const spineHtml = `<div class="spine${pinnedClass}" id="spine-${s.index}" style="width:${s.width}px;height:${s.heightPct}%;background:${bg}" onclick="openBookById('${s.book.id}')" title="${esc(s.book.title)}"></div>`;
-      const spacer = (s.isLastRead && spineData.length > 1) ?
-        '<div class="spine-spacer"><div class="spine-spacer-line"></div></div>' : '';
-      return spineHtml + spacer;
+      // Inline style carries: dimensions, the color variable, the fill
+      // percentage variable, the title color variable, and the font-family
+      // on the spine element itself (so descendant .spine-title inherits).
+      const style = [
+        `width:${s.width}px`,
+        `height:${s.heightPct}%`,
+        `--spine-color:${s.color}`,
+        `--spine-fill-pct:${s.progress}%`,
+        `--spine-title-color:${s.titleColor}`,
+        `font-family:${s.fontFamily}`
+      ].join(';');
+      return `<div class="spine" id="spine-${s.index}"
+        data-progress="${Math.round(s.progress)}"
+        style="${style}"
+        onclick="openBookById('${s.book.id}')"
+        title="${esc(s.book.title)}">
+        <div class="spine-fill"></div>
+        <div class="spine-fill-line"></div>
+        ${s.isLastRead ? '<div class="spine-last-read" aria-label="Last read"></div>' : ''}
+      </div>`;
     }).join('') + '</div></div>';
 
-  // Wait for fonts to load, then measure and fill in text. If fonts aren't
-  // ready, measurements are poisoned by the fallback font's metrics.
+  // PASS 2: measure with the actual per-book font, fit the title, inject.
   const paintText = () => {
     spineData.forEach((s) => {
       const spineEl = $(`spine-${s.index}`);
       if (!spineEl) return;
       const hPx = spineEl.clientHeight;
       if (hPx <= 0) return;
-      const layout = spineLayout(s.book, s.width, hPx);
-
+      const layout = spineLayout(s.book, s.width, hPx, s.fontFamily);
       const p = layout.primary;
-      const primarySpacing = p.size >= 18 ? '-0.2px' : p.size >= 12 ? '0.2px' : '0.4px';
-      const primaryHtml = `<span class="spine-title" style="font-size:${p.size}px;font-weight:${p.weight};letter-spacing:${primarySpacing}">${esc(p.text)}</span>`;
-
-      let secondaryHtml = '';
-      if (layout.secondary) {
-        const sec = layout.secondary;
-        secondaryHtml = `<span class="spine-secondary" style="font-size:${sec.size}px;font-weight:${sec.weight}">${esc(sec.text)}</span>`;
-      }
-
-      let authorHtml = '';
-      if (layout.author) {
-        const a = layout.author;
-        authorHtml = `<span class="spine-author" style="font-size:${a.size}px;font-weight:${a.weight};max-width:${layout.authorMaxW}px">${esc(a.text)}</span>`;
-      }
-
-      const centerClass = layout.titleCenter ? ' center' : '';
+      // Tighter tracking at larger sizes; looser at smaller so tall skinny
+      // spines don't feel cramped.
+      const spacing = p.size >= 18 ? '-0.2px' : p.size >= 12 ? '0.2px' : '0.4px';
+      const titleHtml = `<span class="spine-title"
+        style="font-size:${p.size}px;font-weight:${p.weight};letter-spacing:${spacing}">${esc(p.text)}</span>`;
+      // Preserve the fill + fill-line + last-read dot; re-inject title.
+      // (Querying existing children and appending would also work but this
+      // is simpler and the nodes are cheap.)
       spineEl.innerHTML = `
-        <div class="spine-pages"></div>
-        <div class="spine-band" style="top:${s.bandTop}%"></div>
-        <div class="spine-band" style="top:${s.bandBottom}%"></div>
-        ${s.hasProgress ? '<div class="spine-bookmark"></div>' : ''}
-        <div class="spine-top${centerClass}">${primaryHtml}${secondaryHtml}</div>
-        ${authorHtml ? `<div class="spine-bot">${authorHtml}</div>` : ''}
-        ${s.progress > 0 ? '<div class="spine-prog"><div class="spine-prog-fill" style="width:' + s.progress + '%"></div></div>' : ''}
+        <div class="spine-fill"></div>
+        <div class="spine-fill-line"></div>
+        ${s.isLastRead ? '<div class="spine-last-read" aria-label="Last read"></div>' : ''}
+        ${titleHtml}
       `;
     });
   };
 
-  // Wait for Thow to actually load, then measure and fill in text.
-  // document.fonts.load() forces a fetch+load of the named font — unlike
-  // document.fonts.ready which only waits for already-requested fonts.
+  // Wait for all three reading faces to load before measuring — the probe
+  // uses whichever face the spine is set to, and if that face hasn't loaded
+  // yet the fallback metrics poison the fit. Loading all three upfront
+  // avoids per-book load waits.
   const loadAndPaint = async () => {
     try {
       await Promise.all([
-        document.fonts.load('14px Thow'),
-        document.fonts.load('bold 14px Thow'),
+        document.fonts.load('14px "Siche Text"'),
+        document.fonts.load('bold 14px "Siche Text"'),
+        document.fonts.load('14px "Uncut Sans"'),
+        document.fonts.load('bold 14px "Uncut Sans"'),
+        document.fonts.load('14px "Dolph YY"'),
+        document.fonts.load('bold 14px "Dolph YY"'),
       ]);
     } catch {}
     paintText();
@@ -3455,7 +3416,7 @@ function renderSpineView(el, books) {
     requestAnimationFrame(paintText);
   }
 
-  // Vertical mouse wheel → horizontal scroll
+  // Vertical mouse wheel → horizontal scroll. Natural on a shelf view.
   const wrap = el.querySelector('.view-spine-wrap');
   if (wrap) {
     wrap.addEventListener('wheel', (e) => {
@@ -3486,11 +3447,17 @@ async function backfillSpineColors() {
       if (color) {
         book.spineColor = color;
         await saveBookMeta(book);
-        // Update the spine in the DOM if we're still on spine view
+        // Update the spine in the DOM if we're still on spine view. The
+        // new flat design reads the color from the --spine-color custom
+        // property, so we update that (and the title color too, since a
+        // newly-extracted color may need different contrast).
         if (currentView === 'spine') {
           const idx = library.findIndex(b => b.id === book.id);
           const el = $('spine-' + idx);
-          if (el) el.style.background = `linear-gradient(180deg,${color[0]},${color[1]})`;
+          if (el) {
+            el.style.setProperty('--spine-color', color[0]);
+            el.style.setProperty('--spine-title-color', titleColorForSpine(color[0]));
+          }
         }
       }
     }));
