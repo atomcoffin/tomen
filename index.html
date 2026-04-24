@@ -778,13 +778,14 @@ body.r-mode-editing .r-toolbar-bottom {
      when Tomen is installed as a PWA.
      Vertical padding uses clamp() so it scales with viewport height:
      on short/mobile screens it stays at 88px for enough text per page,
-     on tall desktop monitors it grows up to ~160px so the page feels
-     like a book rather than a wall of text. The 8vh middle term is what
-     drives the scaling between the two bounds. */
+     on tall desktop monitors it grows so the page feels book-like. Paired
+     with .r-book's max-height + align-self:center, extra vertical space
+     becomes equal margins above and below the page rather than more text
+     per page. */
   padding:
-    calc(clamp(88px, 8vh, 160px) + env(safe-area-inset-top, 0px))
+    calc(clamp(88px, 10vh, 200px) + env(safe-area-inset-top, 0px))
     calc(60px + env(safe-area-inset-right, 0px))
-    calc(clamp(88px, 8vh, 160px) + env(safe-area-inset-bottom, 0px))
+    calc(clamp(88px, 10vh, 200px) + env(safe-area-inset-bottom, 0px))
     calc(60px + env(safe-area-inset-left, 0px));
   display: flex;
   align-items: stretch;
@@ -855,10 +856,17 @@ body.r-ui-visible .r-footer-ref {
 }
 
 .r-book {
-  flex: 1;
   position: relative;
   overflow: hidden;
   max-width: var(--reading-width, 1200px);
+  /* Cap the reading page at a book-like height. On tall monitors, extra
+     vertical space becomes equal margins above and below rather than
+     more text per page. 820px is calibrated for ~30-32 lines of text at
+     default font/line-height — a comfortable, book-like page length.
+     align-self: center centers the page in .r-content's cross-axis so
+     the excess space splits evenly. */
+  height: min(100%, 820px);
+  align-self: center;
   margin: 0 auto;
   width: 100%;
 }
