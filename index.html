@@ -32,9 +32,9 @@
    Foundry. Real cursive italic (not just slanted regular). Regular + Italic
    + Bold — bold covers chapter headings at weight 700; bold-italic is rare
    enough in body text that synthesis from Bold + Italic is acceptable. */
-@font-face { font-family: 'Dolph YY'; src: url('fonts/DolphYY-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Dolph YY'; src: url('fonts/DolphYY-RegularItalic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
-@font-face { font-family: 'Dolph YY'; src: url('fonts/DolphYY-Bold.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Dolph YY'; src: url('fonts/DolphYY-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; size-adjust: 88%; }
+@font-face { font-family: 'Dolph YY'; src: url('fonts/DolphYY-RegularItalic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; size-adjust: 88%; }
+@font-face { font-family: 'Dolph YY'; src: url('fonts/DolphYY-Bold.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; size-adjust: 88%; }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -775,11 +775,16 @@ body.r-mode-editing .r-toolbar-bottom {
   position: relative;
   /* Safe-area insets on top/bottom/sides so content stays clear of
      notches, Dynamic Island, home indicators, and landscape-mode bezels
-     when Tomen is installed as a PWA. */
+     when Tomen is installed as a PWA.
+     Vertical padding uses clamp() so it scales with viewport height:
+     on short/mobile screens it stays at 88px for enough text per page,
+     on tall desktop monitors it grows up to ~160px so the page feels
+     like a book rather than a wall of text. The 8vh middle term is what
+     drives the scaling between the two bounds. */
   padding:
-    calc(88px + env(safe-area-inset-top, 0px))
+    calc(clamp(88px, 8vh, 160px) + env(safe-area-inset-top, 0px))
     calc(60px + env(safe-area-inset-right, 0px))
-    calc(88px + env(safe-area-inset-bottom, 0px))
+    calc(clamp(88px, 8vh, 160px) + env(safe-area-inset-bottom, 0px))
     calc(60px + env(safe-area-inset-left, 0px));
   display: flex;
   align-items: stretch;
@@ -4771,7 +4776,12 @@ document.addEventListener('keydown', (e) => {
   if (!rc) return;
 
   function swipeThreshold() {
-    return Math.max(60, window.innerWidth * 0.15);
+    // Threshold for a swipe to register as a page turn. Lowered from
+    // 15% / 60px floor to 10% / 45px floor after testing: the old value
+    // required a hand-drag almost halfway across a phone screen, which
+    // felt like work. 10% of the viewport width with a hard floor of
+    // 45px is responsive to both small phones and wide desktops.
+    return Math.max(45, window.innerWidth * 0.10);
   }
   function pickStart(e) {
     if (e.touches.length !== 1) return null;
