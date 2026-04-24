@@ -1025,44 +1025,43 @@ body.r-mode-editing .r-click-zone {
 }
 .r-edge-ring.hover { opacity: 0.55; }
 .r-edge-ring.active { opacity: 1; }
+/* During the exit bounce, keep the ring at hover opacity so the size
+   shrink is actually visible. Without this, removing the .hover class
+   triggers an opacity fade that completes (140ms) much faster than the
+   size bounce (420ms), and the ring effectively just disappears. */
+.r-edge-ring.exiting { opacity: 0.55; }
 .r-edge-ring svg {
   width: 100%; height: 100%;
   overflow: visible;
   display: block;
 }
-/* Idle outline ring — thin perimeter, no fill. Scales with the SVG (no
-   non-scaling-stroke) so stroke width is proportional to ring size: a
-   delicate hairline on the small initial pop, slightly more confident
-   at full size. */
+/* Idle outline ring — thin perimeter, no fill. With non-scaling-stroke,
+   the stroke width stays constant in CSS pixels regardless of how the
+   SVG container scales — so the border looks consistent whether the
+   ring is small or large. */
 .r-edge-ring-track {
   fill: none;
   stroke: var(--ink);
   stroke-opacity: 0.35;
-  stroke-width: 0.6;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
 }
 /* Hold fill — sweeps clockwise from top (12 o'clock) to fill the arc as
-   the user holds. Stroke-dasharray = circumference; stroke-dashoffset
-   transitions from full to 0 over HOLD_MS.
-
-   Important: NO `vector-effect: non-scaling-stroke` here. That property
-   reinterprets dasharray and dashoffset in screen pixels rather than
-   SVG user units, which breaks the math (we calculated 238.76 = one
-   circumference IN USER UNITS). Without it, the stroke width scales
-   with the SVG — slightly thicker at max ring size, but the dash math
-   stays correct and the fill animation reads cleanly. */
+   the user holds. Stroke-dasharray and stroke-dashoffset are set in JS,
+   not CSS — they need to match the *rendered* circumference (in CSS
+   pixels, since non-scaling-stroke makes them screen-pixel-based), which
+   changes with ring size. The rAF tick updates them per-frame for the
+   idle ring; startHold locks them at the click-time radius. */
 .r-edge-ring-fill {
   fill: none;
   stroke: var(--brand);
-  stroke-width: 0.9;
+  stroke-width: 2;
   stroke-linecap: round;
-  /* circumference = 2 * PI * 38 ≈ 238.76 — equals one full circle in
-     user units, so dashoffset 238.76 = invisible, 0 = full circle. */
-  stroke-dasharray: 238.76;
-  stroke-dashoffset: 238.76;
+  vector-effect: non-scaling-stroke;
+  /* dasharray + dashoffset set inline in JS — see _renderRing and startHold. */
   /* Rotate so the dash starts at 12 o'clock and sweeps clockwise. */
   transform: rotate(-90deg);
   transform-origin: center;
-  /* Transition set inline when the hold starts. */
 }
 
 /* Swipe-to-turn edge stripe. Chartreuse vertical bar flush against the
@@ -5186,8 +5185,10 @@ const EDGE_ZONE_FRACTION = 1 / 3;
 // Stop the rAF loop when both size and Y are within this many pixels of
 // target — avoids burning CPU on infinitesimal residuals.
 const EDGE_RING_SETTLE_THRESHOLD = 0.4;
-// Ring fill circumference in SVG units (2 * PI * 38).
-const EDGE_RING_CIRC = 238.76;
+// (EDGE_RING_CIRC was a constant for the user-unit circumference back
+// when we set stroke-dasharray once in CSS. With non-scaling-stroke we
+// now compute the dasharray per-frame in CSS pixels — see _renderRing
+// and startHold. No longer needed.)
 // Bounce timings — entry overshoots and settles; exit eases back to 0.
 // Mirrored timings so entry and exit feel like the same gesture played
 // in reverse. 540ms is deliberately slow — the ring blooms into existence
@@ -5249,6 +5250,12 @@ function _cursorInsideRing(dir, cursorX, cursorY) {
 }
 
 // Apply current state to the DOM. Called from the rAF loop.
+// Also keeps the fill's stroke-dasharray in sync with the current rendered
+// radius — necessary because vector-effect: non-scaling-stroke makes the
+// stroke (and its dash pattern) measure in screen pixels, so dasharray
+// has to equal the rendered circumference (2 * π * currentR) in CSS pixels
+// rather than a fixed user-unit value. Without this update the dashes
+// would look subtly wrong as the ring scales.
 function _renderRing(dir) {
   const ring = _ringForDir(dir);
   if (!ring) return;
@@ -5257,6 +5264,17 @@ function _renderRing(dir) {
   ring.style.width = size + 'px';
   ring.style.height = size + 'px';
   ring.style.top = s.currentY + 'px';
+  // Update fill dash to match rendered circumference. Skip during a hold
+  // — the fill is mid-transition from full-offset to 0, and updating
+  // dasharray under it would make the fill jump.
+  if (_holdTimer) return;
+  const fill = _fillForDir(dir);
+  if (!fill) return;
+  const circ = 2 * Math.PI * s.currentR;
+  fill.style.strokeDasharray = String(circ);
+  // Idle state — keep fill invisible (offset = full circumference).
+  // startHold overrides this with its transition.
+  fill.style.strokeDashoffset = String(circ);
 }
 
 // rAF loop: ease both rings' current values toward their targets each
@@ -5321,15 +5339,20 @@ function showHover(dir, x, y) {
   const state = _ringState[dir];
   if (!ring) return;
 
-  ring.classList.remove('active');
+  ring.classList.remove('active', 'exiting');
   ring.classList.add('hover');
   // ALWAYS reset the fill on entry — covers the case where a previous
   // hold completed (dashoffset got left at 0 = fully colored) and the
   // user re-entered the zone. Without this reset, the new hover-state
   // ring would render with full color stroke from the start.
+  // Use the bounce-destination circumference so the dash math is right
+  // throughout the entry bounce (rAF won't be writing during popping=true,
+  // so we need a value that keeps the fill invisible at the end size too).
   if (fill) {
+    const circ = 2 * Math.PI * EDGE_RING_INITIAL_R;
     fill.style.transition = 'none';
-    fill.style.strokeDashoffset = String(EDGE_RING_CIRC);
+    fill.style.strokeDasharray = String(circ);
+    fill.style.strokeDashoffset = String(circ);
   }
 
   // Initial pop-in: jump current Y to cursor (no Y easing on entry — that
@@ -5391,13 +5414,18 @@ function hideHover() {
   // stay visible until the hold completes or cancels.
   if (_holdTimer) return;
 
+  // Swap .hover for .exiting so opacity stays at hover level (0.55) for
+  // the duration of the size bounce. Without this, removing .hover would
+  // trigger the opacity-out transition (140ms) which races and beats the
+  // size shrink (420ms), making the ring "just disappear" instead of
+  // bouncing out.
   ring.classList.remove('hover', 'active');
+  ring.classList.add('exiting');
 
   // Exit bounce — mirror of the entry bounce, played as a one-shot CSS
   // transition. Suspend rAF for this direction (popping=true blocks it
   // from writing width/height), animate down to 0, then mark fully
-  // hidden. Picks up the cursor's last known Y position so the shrink
-  // happens in place.
+  // hidden and drop opacity.
   state.popping = true;
   state.targetR = 0;
   // Read current rendered values so the transition starts from where
@@ -5416,6 +5444,7 @@ function hideHover() {
     state.currentR = 0;
     state.targetR = 0;
     ring.style.transition = '';
+    ring.classList.remove('exiting');  // now opacity fades to 0 (already invisible by size)
   }, EDGE_RING_BOUNCE_OUT_MS);
 }
 
@@ -5428,15 +5457,20 @@ function startHold(dir, x, y) {
   // Don't reposition during hold — the ring stays where the user clicked,
   // even if the cursor drifts a little. The fill animation is the focal
   // point now, not pursuit.
+  // Compute the dash circumference based on the CURRENTLY RENDERED ring
+  // radius, since vector-effect: non-scaling-stroke makes dash values
+  // measure in CSS pixels.
+  const circ = 2 * Math.PI * _ringState[dir].currentR;
   fill.style.transition = 'none';
-  fill.style.strokeDashoffset = String(EDGE_RING_CIRC);
+  fill.style.strokeDasharray = String(circ);
+  fill.style.strokeDashoffset = String(circ);
   void fill.getBoundingClientRect();  // reflow
   // Soft ease on the fill rather than linear — matches the rest of the
   // experience's "flowy" feel. Fill starts a little slow, picks up
   // through the middle, eases into completion.
   fill.style.transition = `stroke-dashoffset ${HOLD_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`;
   fill.style.strokeDashoffset = '0';
-  ring.classList.remove('hover');
+  ring.classList.remove('hover', 'exiting');
   ring.classList.add('active');
   _holdTimer = setTimeout(() => {
     _holdTimer = null;
@@ -5461,14 +5495,18 @@ function cancelHold(completed) {
   // color), so the color would persist on the ring after the page turned
   // and would re-appear next time the ring grew. The page turn happens
   // instantly anyway — there's no celebration moment to preserve.
+  // Use rendered radius for the dash circumference (non-scaling-stroke).
   if (fill) {
+    const circ = 2 * Math.PI * _ringState[dir].currentR;
     fill.style.transition = 'none';
-    fill.style.strokeDashoffset = String(EDGE_RING_CIRC);
+    fill.style.strokeDasharray = String(circ);
+    fill.style.strokeDashoffset = String(circ);
   }
   if (_hoverDir === dir) {
     ring.classList.add('hover');
   } else {
     ring.classList.remove('hover');
+    ring.classList.add('exiting');
     // Cursor has already left the zone — play the exit bounce.
     const state = _ringState[dir];
     state.popping = true;
@@ -5487,6 +5525,7 @@ function cancelHold(completed) {
       state.currentR = 0;
       state.targetR = 0;
       ring.style.transition = '';
+      ring.classList.remove('exiting');
     }, EDGE_RING_BOUNCE_OUT_MS);
   }
 }
