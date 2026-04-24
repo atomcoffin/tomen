@@ -4884,7 +4884,18 @@ document.addEventListener('keydown', (e) => {
       if (Math.abs(dx) >= swipeThreshold()) {
         if (dx < 0) readerNext();
         else readerPrev();
+        // Mark the gesture as resolved so the synthesized click that
+        // browsers MIGHT dispatch after a touch sequence gets swallowed
+        // by bookAreaTapped instead of toggling the UI. Auto-clear after
+        // a short delay because the browser doesn't reliably synthesize
+        // a click from a swipe (finger moved too far), and without this
+        // cleanup the flag would persist and swallow the user's NEXT
+        // real tap — causing a "first tap after swipe does nothing" bug.
         _gestureJustResolved = true;
+        clearTimeout(_gestureResolvedTimer);
+        _gestureResolvedTimer = setTimeout(() => {
+          _gestureJustResolved = false;
+        }, 350);
       }
       hideSwipeProgress();
     }
@@ -5751,9 +5762,22 @@ function toggleReaderUI() {
 // instead of toggling UI. Checked before the gesture/default guards so a
 // swipe that ended on a highlight doesn't accidentally open the menu.
 let _gestureJustResolved = false;
+// Fallback timer for the above flag. Set by the swipe IIFE's touchend;
+// auto-clears the flag if no synthesized click arrives from the browser.
+// Also canceled by bookAreaTapped when a click DOES consume the flag, so
+// the timer doesn't fire spuriously later. See comment in touchend for
+// why this fallback is needed.
+let _gestureResolvedTimer = null;
 function bookAreaTapped(ev) {
   if (!isReading()) return;
-  if (_gestureJustResolved) { _gestureJustResolved = false; return; }
+  if (_gestureJustResolved) {
+    _gestureJustResolved = false;
+    if (_gestureResolvedTimer) {
+      clearTimeout(_gestureResolvedTimer);
+      _gestureResolvedTimer = null;
+    }
+    return;
+  }
   if (ev && ev.defaultPrevented) return;
   // Tap on an existing highlight → open its menu. Use the span as anchor so
   // the popover hangs right next to the tapped mark rather than the page edge.
