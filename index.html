@@ -1058,10 +1058,10 @@ body.r-mode-editing .r-click-zone {
   stroke-width: 2;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
-  /* dasharray + dashoffset set inline in JS — see _renderRing and startHold. */
-  /* Rotate so the dash starts at 12 o'clock and sweeps clockwise. */
-  transform: rotate(-90deg);
-  transform-origin: center;
+  /* dasharray + dashoffset set inline in JS — see _renderRing and startHold.
+     Path natively starts at 12 o'clock and ends at 6 o'clock along the
+     visible side, so no rotation needed. Sweep direction is built into
+     the arc command (sweep-flag in d attr). */
 }
 
 /* Swipe-to-turn edge stripe. Chartreuse vertical bar flush against the
@@ -2377,24 +2377,32 @@ body.r-mode-editing .r-inner {
     <div class="r-footer-ref" id="r-footer-ref" aria-hidden="true"></div>
     <!-- Edge-anchored half-circle hold indicators. Each ring sits flush
          against its side of the screen (left edge for prev, right edge
-         for next). Size scales with cursor proximity to the edge: 0 when
-         cursor is at the inner boundary of the click zone, max when the
-         cursor reaches the edge. The ring's Y position tracks the cursor's
-         Y. Click and hold *inside the visible half-disc* fills the arc
-         clockwise and turns the page when full.
-         The visible half-circle is achieved by sizing the SVG element
-         to 2R x 2R and offsetting half its width offscreen so only one
-         half shows. The arc lives at the visible perimeter. -->
+         for next). Size scales with cursor proximity to the edge.
+         The SVG renders ONLY the visible half-arc — not a full circle
+         clipped by the viewport. This matters for the fill animation:
+         a full circle would sweep its dash through the off-screen half,
+         creating an invisible "delay" in the perceived progress. The
+         half-arc path means the dash sweep maps 1:1 to what the user sees.
+         Path goes from 12 o'clock (top) → through the visible side →
+         to 6 o'clock (bottom). Sweep direction matches gravity. -->
     <div class="r-edge-ring r-edge-ring-prev" id="r-edge-ring-prev" aria-hidden="true">
       <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
-        <circle class="r-edge-ring-track" cx="40" cy="40" r="38"></circle>
-        <circle class="r-edge-ring-fill"  cx="40" cy="40" r="38"></circle>
+        <!-- Visible half is the RIGHT semicircle (left edge of screen,
+             ring extends rightward into the page). M at 12 o'clock,
+             arc through 3 o'clock, end at 6 o'clock. -->
+        <path class="r-edge-ring-track" d="M 40 2 A 38 38 0 0 1 40 78"></path>
+        <path class="r-edge-ring-fill"  d="M 40 2 A 38 38 0 0 1 40 78"></path>
       </svg>
     </div>
     <div class="r-edge-ring r-edge-ring-next" id="r-edge-ring-next" aria-hidden="true">
       <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
-        <circle class="r-edge-ring-track" cx="40" cy="40" r="38"></circle>
-        <circle class="r-edge-ring-fill"  cx="40" cy="40" r="38"></circle>
+        <!-- Visible half is the LEFT semicircle (right edge of screen,
+             ring extends leftward into the page). M at 12 o'clock,
+             arc through 9 o'clock, end at 6 o'clock. The sweep-flag (0)
+             differs from the prev ring (1), making the arc go the OTHER
+             way around the circle. -->
+        <path class="r-edge-ring-track" d="M 40 2 A 38 38 0 0 0 40 78"></path>
+        <path class="r-edge-ring-fill"  d="M 40 2 A 38 38 0 0 0 40 78"></path>
       </svg>
     </div>
     <!-- Swipe-to-turn edge glow. Tall narrow ember bloom on whichever side
@@ -5264,17 +5272,19 @@ function _renderRing(dir) {
   ring.style.width = size + 'px';
   ring.style.height = size + 'px';
   ring.style.top = s.currentY + 'px';
-  // Update fill dash to match rendered circumference. Skip during a hold
-  // — the fill is mid-transition from full-offset to 0, and updating
+  // Update fill dash to match rendered HALF-circumference. The path is
+  // a half-arc (only the visible side of the half-disc), so the dasharray
+  // value is half what it would be for a full circle. Skip during a hold —
+  // the fill is mid-transition from full-offset to 0, and updating
   // dasharray under it would make the fill jump.
   if (_holdTimer) return;
   const fill = _fillForDir(dir);
   if (!fill) return;
-  const circ = 2 * Math.PI * s.currentR;
-  fill.style.strokeDasharray = String(circ);
-  // Idle state — keep fill invisible (offset = full circumference).
+  const halfCirc = Math.PI * s.currentR;
+  fill.style.strokeDasharray = String(halfCirc);
+  // Idle state — keep fill invisible (offset = arc length).
   // startHold overrides this with its transition.
-  fill.style.strokeDashoffset = String(circ);
+  fill.style.strokeDashoffset = String(halfCirc);
 }
 
 // rAF loop: ease both rings' current values toward their targets each
@@ -5345,14 +5355,15 @@ function showHover(dir, x, y) {
   // hold completed (dashoffset got left at 0 = fully colored) and the
   // user re-entered the zone. Without this reset, the new hover-state
   // ring would render with full color stroke from the start.
-  // Use the bounce-destination circumference so the dash math is right
-  // throughout the entry bounce (rAF won't be writing during popping=true,
-  // so we need a value that keeps the fill invisible at the end size too).
+  // Use the bounce-destination half-circumference so the dash math is
+  // right throughout the entry bounce (rAF won't be writing during
+  // popping=true, so we need a value that keeps the fill invisible at
+  // the end size too). Path is a half-circle → π * r.
   if (fill) {
-    const circ = 2 * Math.PI * EDGE_RING_INITIAL_R;
+    const halfCirc = Math.PI * EDGE_RING_INITIAL_R;
     fill.style.transition = 'none';
-    fill.style.strokeDasharray = String(circ);
-    fill.style.strokeDashoffset = String(circ);
+    fill.style.strokeDasharray = String(halfCirc);
+    fill.style.strokeDashoffset = String(halfCirc);
   }
 
   // Initial pop-in: jump current Y to cursor (no Y easing on entry — that
@@ -5457,13 +5468,14 @@ function startHold(dir, x, y) {
   // Don't reposition during hold — the ring stays where the user clicked,
   // even if the cursor drifts a little. The fill animation is the focal
   // point now, not pursuit.
-  // Compute the dash circumference based on the CURRENTLY RENDERED ring
-  // radius, since vector-effect: non-scaling-stroke makes dash values
-  // measure in CSS pixels.
-  const circ = 2 * Math.PI * _ringState[dir].currentR;
+  // Compute the dash arc length based on the CURRENTLY RENDERED ring
+  // radius. The path is a half-circle (visible arc only), so the dash
+  // value is HALF the circumference: π * r. Stays in CSS pixels via
+  // vector-effect: non-scaling-stroke.
+  const halfCirc = Math.PI * _ringState[dir].currentR;
   fill.style.transition = 'none';
-  fill.style.strokeDasharray = String(circ);
-  fill.style.strokeDashoffset = String(circ);
+  fill.style.strokeDasharray = String(halfCirc);
+  fill.style.strokeDashoffset = String(halfCirc);
   void fill.getBoundingClientRect();  // reflow
   // Soft ease on the fill rather than linear — matches the rest of the
   // experience's "flowy" feel. Fill starts a little slow, picks up
@@ -5495,12 +5507,12 @@ function cancelHold(completed) {
   // color), so the color would persist on the ring after the page turned
   // and would re-appear next time the ring grew. The page turn happens
   // instantly anyway — there's no celebration moment to preserve.
-  // Use rendered radius for the dash circumference (non-scaling-stroke).
+  // Use half-circumference for the visible arc (path is a half-circle).
   if (fill) {
-    const circ = 2 * Math.PI * _ringState[dir].currentR;
+    const halfCirc = Math.PI * _ringState[dir].currentR;
     fill.style.transition = 'none';
-    fill.style.strokeDasharray = String(circ);
-    fill.style.strokeDashoffset = String(circ);
+    fill.style.strokeDasharray = String(halfCirc);
+    fill.style.strokeDashoffset = String(halfCirc);
   }
   if (_hoverDir === dir) {
     ring.classList.add('hover');
