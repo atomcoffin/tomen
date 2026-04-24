@@ -995,15 +995,17 @@ body.r-mode-editing .r-click-zone {
 .r-edge-ring {
   position: fixed;
   top: 0;  /* set inline by JS to follow cursor Y */
-  width: 0;  /* set inline by JS based on cursor proximity to edge */
+  width: 0;  /* set inline by JS via rAF easing loop */
   height: 0;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 140ms ease, width 80ms ease-out, height 80ms ease-out;
+  /* Only opacity transitions via CSS. width/height/top are written
+     per-frame by the rAF loop in _ringTick — putting CSS transitions
+     on them would fight the easing and feel sluggish. CSS transitions
+     ARE briefly applied on the initial pop-in (handled inline in JS). */
+  transition: opacity 140ms ease;
   z-index: 5;
   transform: translateY(-50%);  /* center vertically on cursor Y */
-  /* will-change kept narrow — width/height/top change frequently, opacity
-     changes on hover/leave. */
   will-change: width, height, top, opacity;
 }
 .r-edge-ring-prev {
@@ -5142,22 +5144,46 @@ document.addEventListener('keydown', (e) => {
 // Mouse-only: touch users get the swipe gesture for page turns, no
 // equivalent hold-ring UI on touch (would conflict with scroll/swipe).
 const HOLD_MS = 400;
-// Max ring radius in CSS pixels. The visible half-disc reaches this far
-// into the page area when the cursor is at the screen edge. Tuned big
-// enough to be a confident target, small enough not to dominate the
-// viewport.
-const EDGE_RING_MAX_R = 80;
+// Max ring radius in CSS pixels — the visible half-disc reaches this
+// far into the page area when the cursor is at the screen edge.
+const EDGE_RING_MAX_R = 160;
+// Initial radius the ring pops to when the cursor first enters the click
+// zone — visible enough to register as "appeared," small enough that
+// proximity-driven growth still has somewhere to go.
+const EDGE_RING_INITIAL_R = 50;
 // Minimum visible radius before the ring becomes interactive. Below this,
 // the ring is too small to deliberately click — treat as "not present"
-// even if size > 0. Avoids accidental triggers from drift through the
-// far edge of the click zone.
-const EDGE_RING_MIN_R = 18;
+// even if size > 0. Avoids accidental triggers from drift.
+const EDGE_RING_MIN_R = 24;
+// rAF easing factor for size/position pursuit. Each frame, the ring's
+// rendered values move (target - current) * EASE toward the target.
+// Lower = more lag, higher = snappier. 0.18 is perceptibly soft but
+// not laggy; cursor leads, ring follows like it's catching up.
+const EDGE_RING_EASE = 0.18;
+// Stop the rAF loop when both size and Y are within this many pixels of
+// target — avoids burning CPU on infinitesimal residuals.
+const EDGE_RING_SETTLE_THRESHOLD = 0.4;
 // Ring fill circumference in SVG units (2 * PI * 38).
 const EDGE_RING_CIRC = 238.76;
+// CSS easing for the one-shot bounce on initial pop-in. Standard
+// "back-out" curve overshoots ~10% then settles — gives a subtle
+// spring without going cartoony.
+const EDGE_RING_BOUNCE_EASE = 'cubic-bezier(0.34, 1.56, 0.64, 1)';
+const EDGE_RING_BOUNCE_MS = 220;
 
 let _holdTimer = null;
 let _holdDir = null;
 let _hoverDir = null;
+
+// Per-direction render state for the rAF easing loop. `target` values are
+// what the cursor implies right now; `current` values are what's actually
+// rendered, lagging behind via easing. `popping` marks the brief window
+// after entry when the CSS bounce transition is playing instead of rAF.
+const _ringState = {
+  prev: { targetR: 0, currentR: 0, targetY: 0, currentY: 0, popping: false },
+  next: { targetR: 0, currentR: 0, targetY: 0, currentY: 0, popping: false }
+};
+let _ringRafId = null;
 
 function _ringForDir(dir) {
   return $(dir === 'prev' ? 'r-edge-ring-prev' : 'r-edge-ring-next');
@@ -5166,78 +5192,171 @@ function _fillForDir(dir) {
   return _ringForDir(dir)?.querySelector('.r-edge-ring-fill');
 }
 
-// Compute the ring's current visible radius for a given cursor position.
-// Returns 0 if the cursor is outside the click zone or not in either zone.
-// Curve is slightly eased — distance is normalized to [0..1] across the
-// click zone width, then raised to a small power so the ring stays small
-// across most of the zone and grows quickly only as the cursor approaches
-// the edge. Keeps the ring unobtrusive during normal cursor wandering.
-function _computeRingRadius(dir, cursorX) {
+// Compute the ring's *target* radius for a given cursor position. The rAF
+// loop eases the rendered radius toward this. Returns 0 when the cursor
+// is outside the click zone (which causes the loop to ease the ring back
+// down to nothing and stop).
+function _computeTargetRadius(dir, cursorX) {
   const vw = window.innerWidth;
-  let distFromEdge;
-  if (dir === 'prev') {
-    distFromEdge = cursorX;
-  } else {
-    distFromEdge = vw - cursorX;
-  }
-  // Click zone is 40% of viewport width; ring scales across this range.
+  const distFromEdge = dir === 'prev' ? cursorX : (vw - cursorX);
   const zoneWidth = vw * 0.40;
   if (distFromEdge < 0 || distFromEdge > zoneWidth) return 0;
-  const proximity = 1 - (distFromEdge / zoneWidth);  // 0 at zone edge, 1 at screen edge
-  // Ease — power > 1 means stays small longer, then grows. 1.5 is gentle.
-  const eased = Math.pow(proximity, 1.5);
-  return EDGE_RING_MAX_R * eased;
+  const proximity = 1 - (distFromEdge / zoneWidth);
+  // Slight ease — power > 1 keeps the ring smaller across most of the
+  // zone, then grows faster as the cursor commits to the edge. Combined
+  // with the initial-pop floor below, this means the ring opens at
+  // INITIAL_R as soon as you enter and grows from there.
+  const eased = Math.pow(proximity, 1.4);
+  const proximityR = EDGE_RING_MAX_R * eased;
+  // Floor at INITIAL_R so the ring never shrinks below the pop-in size
+  // while in the zone. Anywhere in the zone, the ring is at least visible.
+  return Math.max(EDGE_RING_INITIAL_R, proximityR);
 }
 
-// Test whether the cursor is "inside" the visible half-disc of a ring.
-// Since the ring's center sits ON the screen edge at the cursor's Y,
-// inside-ness reduces to: distFromEdge <= currentRadius.
+// Test whether the cursor is "inside" the visible half-disc — uses the
+// CURRENTLY RENDERED radius (not the target), because the user clicks
+// what they see. If the ring is mid-grow, it's not yet a valid target.
 function _cursorInsideRing(dir, cursorX, cursorY) {
-  const r = _computeRingRadius(dir, cursorX);
+  const r = _ringState[dir].currentR;
   if (r < EDGE_RING_MIN_R) return false;
   const vw = window.innerWidth;
   const distFromEdge = dir === 'prev' ? cursorX : (vw - cursorX);
   return distFromEdge <= r;
 }
 
-// Position and size the edge ring for the given direction. Sets size based
-// on cursor proximity, top to follow cursor Y. The other direction's ring
-// is hidden.
-function _updateEdgeRing(dir, cursorX, cursorY) {
+// Apply current state to the DOM. Called from the rAF loop.
+function _renderRing(dir) {
   const ring = _ringForDir(dir);
-  const otherRing = _ringForDir(dir === 'prev' ? 'next' : 'prev');
-  if (otherRing) { otherRing.style.opacity = ''; otherRing.classList.remove('hover', 'active'); }
   if (!ring) return;
-  const r = _computeRingRadius(dir, cursorX);
-  const size = r * 2;
+  const s = _ringState[dir];
+  const size = s.currentR * 2;
   ring.style.width = size + 'px';
   ring.style.height = size + 'px';
-  ring.style.top = cursorY + 'px';
+  ring.style.top = s.currentY + 'px';
+}
+
+// rAF loop: ease both rings' current values toward their targets each
+// frame. Stops when both rings are settled (close to target and target
+// is non-zero, OR target is 0 and current is also ~0 = fully hidden).
+function _ringTick() {
+  let stillAnimating = false;
+  for (const dir of ['prev', 'next']) {
+    const s = _ringState[dir];
+    if (s.popping) {
+      // CSS bounce transition is playing — don't fight it from JS this
+      // frame. The transition will end and subsequent ticks will resume
+      // rAF easing from wherever the bounce landed.
+      stillAnimating = true;
+      continue;
+    }
+    const dR = s.targetR - s.currentR;
+    const dY = s.targetY - s.currentY;
+    if (Math.abs(dR) > EDGE_RING_SETTLE_THRESHOLD || Math.abs(dY) > EDGE_RING_SETTLE_THRESHOLD) {
+      s.currentR += dR * EDGE_RING_EASE;
+      s.currentY += dY * EDGE_RING_EASE;
+      _renderRing(dir);
+      stillAnimating = true;
+    } else if (s.currentR > 0 || Math.abs(dR) > 0 || Math.abs(dY) > 0) {
+      // Snap to settled state and render one final frame.
+      s.currentR = s.targetR;
+      s.currentY = s.targetY;
+      _renderRing(dir);
+    }
+  }
+  if (stillAnimating) {
+    _ringRafId = requestAnimationFrame(_ringTick);
+  } else {
+    _ringRafId = null;
+  }
+}
+
+function _ensureRingTicking() {
+  if (_ringRafId == null) _ringRafId = requestAnimationFrame(_ringTick);
+}
+
+// Set the target values for a ring based on cursor position. The rAF
+// loop will catch up. The opposite-direction ring is told to shrink
+// to 0 (rAF will ease it down).
+function _updateEdgeRing(dir, cursorX, cursorY) {
+  const otherDir = dir === 'prev' ? 'next' : 'prev';
+  const otherRing = _ringForDir(otherDir);
+  const otherState = _ringState[otherDir];
+  if (otherRing) { otherRing.classList.remove('hover', 'active'); }
+  otherState.targetR = 0;
+
+  const state = _ringState[dir];
+  state.targetR = _computeTargetRadius(dir, cursorX);
+  state.targetY = cursorY;
+  _ensureRingTicking();
 }
 
 function showHover(dir, x, y) {
   _hoverDir = dir;
-  _updateEdgeRing(dir, x, y);
   const ring = _ringForDir(dir);
   const fill = _fillForDir(dir);
-  if (ring) {
-    ring.classList.remove('active');
-    ring.classList.add('hover');
-  }
+  const state = _ringState[dir];
+  if (!ring) return;
+
+  ring.classList.remove('active');
+  ring.classList.add('hover');
   if (fill) {
     fill.style.transition = 'none';
     fill.style.strokeDashoffset = String(EDGE_RING_CIRC);
   }
+
+  // Initial pop-in: jump current Y to cursor (no Y easing on entry — that
+  // would look like the ring is starting in the wrong place and slowly
+  // sliding to you). Then play a one-shot CSS bounce on width/height
+  // from 0 → INITIAL_R*2. After the bounce ends, rAF takes over for any
+  // further size changes driven by proximity.
+  state.currentY = y;
+  state.targetY = y;
+
+  // If the ring isn't already visible, do the bounce. If it IS visible
+  // (rapid re-entry), skip the bounce and just resume rAF.
+  if (state.currentR < EDGE_RING_MIN_R) {
+    state.popping = true;
+    state.currentR = 0;
+    state.targetR = EDGE_RING_INITIAL_R;
+    // Instant snap at 0 with no transition, then transition to INITIAL.
+    ring.style.transition = 'none';
+    ring.style.width = '0';
+    ring.style.height = '0';
+    ring.style.top = y + 'px';
+    void ring.offsetHeight;  // reflow
+    ring.style.transition = `width ${EDGE_RING_BOUNCE_MS}ms ${EDGE_RING_BOUNCE_EASE}, height ${EDGE_RING_BOUNCE_MS}ms ${EDGE_RING_BOUNCE_EASE}`;
+    const popSize = EDGE_RING_INITIAL_R * 2;
+    ring.style.width = popSize + 'px';
+    ring.style.height = popSize + 'px';
+    setTimeout(() => {
+      state.popping = false;
+      state.currentR = EDGE_RING_INITIAL_R;
+      // Clear inline transitions so rAF's per-frame width/height writes
+      // don't trigger CSS transitions on every frame (would feel sluggish).
+      ring.style.transition = 'none';
+      // Now refresh target with current cursor position — cursor may
+      // have moved during the pop, so target may differ from INITIAL.
+      _updateEdgeRing(dir, x, y);
+    }, EDGE_RING_BOUNCE_MS);
+  }
+
+  // Always set targets even if popping (rAF will pick them up after bounce).
+  state.targetR = Math.max(state.targetR, _computeTargetRadius(dir, x));
+  state.targetY = y;
+  _ensureRingTicking();
 }
 
 function hideHover() {
   if (_hoverDir) {
-    const ring = _ringForDir(_hoverDir);
+    const dir = _hoverDir;
+    const ring = _ringForDir(dir);
+    const state = _ringState[dir];
     if (ring && !_holdTimer) {
       ring.classList.remove('hover', 'active');
-      ring.style.width = '0';
-      ring.style.height = '0';
     }
+    // Ease back down to 0 — don't snap. Feels coherent with the entry.
+    state.targetR = 0;
+    _ensureRingTicking();
   }
   _hoverDir = null;
 }
@@ -5248,7 +5367,9 @@ function startHold(dir, x, y) {
   const ring = _ringForDir(dir);
   const fill = _fillForDir(dir);
   if (!ring || !fill) return;
-  _updateEdgeRing(dir, x, y);
+  // Don't reposition during hold — the ring stays where the user clicked,
+  // even if the cursor drifts a little. The fill animation is the focal
+  // point now, not pursuit.
   fill.style.transition = 'none';
   fill.style.strokeDashoffset = String(EDGE_RING_CIRC);
   void fill.getBoundingClientRect();  // reflow
@@ -5281,8 +5402,8 @@ function cancelHold(completed) {
   if (_hoverDir === dir) ring.classList.add('hover');
   else {
     ring.classList.remove('hover');
-    ring.style.width = '0';
-    ring.style.height = '0';
+    _ringState[dir].targetR = 0;
+    _ensureRingTicking();
   }
 }
 
