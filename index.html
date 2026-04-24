@@ -1038,30 +1038,39 @@ body.r-mode-editing .r-click-zone {
 /* Idle outline ring — thin perimeter, no fill. With non-scaling-stroke,
    the stroke width stays constant in CSS pixels regardless of how the
    SVG container scales — so the border looks consistent whether the
-   ring is small or large. */
+   ring is small or large. Transitions color between dim (.hover, cursor
+   in zone but not yet in ring) and brand (.armed, cursor inside ring). */
 .r-edge-ring-track {
   fill: none;
   stroke: var(--ink);
   stroke-opacity: 0.35;
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
+  transition: stroke 180ms ease, stroke-opacity 180ms ease;
 }
-/* Hold fill — sweeps clockwise from top (12 o'clock) to fill the arc as
-   the user holds. Stroke-dasharray and stroke-dashoffset are set in JS,
-   not CSS — they need to match the *rendered* circumference (in CSS
-   pixels, since non-scaling-stroke makes them screen-pixel-based), which
-   changes with ring size. The rAF tick updates them per-frame for the
-   idle ring; startHold locks them at the click-time radius. */
-.r-edge-ring-fill {
-  fill: none;
+/* Armed — cursor is inside the half-disc, a click will register. Outline
+   shifts from dim ink to brand as a subtle affordance. */
+.r-edge-ring.armed .r-edge-ring-track {
   stroke: var(--brand);
-  stroke-width: 2;
-  stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
-  /* dasharray + dashoffset set inline in JS — see _renderRing and startHold.
-     Path natively starts at 12 o'clock and ends at 6 o'clock along the
-     visible side, so no rotation needed. Sweep direction is built into
-     the arc command (sweep-flag in d attr). */
+  stroke-opacity: 1;
+}
+
+/* Interior fill disc. Sits inside the ring and scales from 0 to 1 during
+   a hold, giving the sense that the ring is "filling up" from the center
+   outward like ink bleeding into paper. Transform origin is the SVG's
+   center so the disc grows symmetrically from the middle.
+   Note: the SVG viewBox is 0 0 80 80 centered on cx=40, cy=40. The disc
+   visually shows only in the half-circle that's on-screen (the other
+   half is behind the viewport edge), so the growing disc reads as a
+   half-disc filling up a half-ring. */
+.r-edge-ring-fill {
+  fill: var(--brand);
+  stroke: none;
+  transform: scale(0);
+  transform-origin: 40px 40px;  /* SVG center */
+  /* Transition applied inline by startHold — eased fill over HOLD_MS,
+     then reset to scale(0) on cancel/completion. Default is no transition
+     so idle-state scale changes don't animate. */
 }
 
 /* Swipe-to-turn edge stripe. Chartreuse vertical bar flush against the
@@ -2378,31 +2387,33 @@ body.r-mode-editing .r-inner {
     <!-- Edge-anchored half-circle hold indicators. Each ring sits flush
          against its side of the screen (left edge for prev, right edge
          for next). Size scales with cursor proximity to the edge.
-         The SVG renders ONLY the visible half-arc — not a full circle
-         clipped by the viewport. This matters for the fill animation:
-         a full circle would sweep its dash through the off-screen half,
-         creating an invisible "delay" in the perceived progress. The
-         half-arc path means the dash sweep maps 1:1 to what the user sees.
-         Path goes from 12 o'clock (top) → through the visible side →
-         to 6 o'clock (bottom). Sweep direction matches gravity. -->
+         The SVG renders:
+         - a half-arc <path> for the outline (track) — only the visible
+           side of the full circle is drawn, so there's no off-screen
+           portion of the stroke
+         - a <circle> for the interior fill — sits inside the ring and
+           scales from 0 to 1 during a hold to "fill up" the ring
+         The outline color transitions from dim to brand when the cursor
+         is actually inside the half-disc (.armed class), signaling to
+         the user that a click will now register. -->
     <div class="r-edge-ring r-edge-ring-prev" id="r-edge-ring-prev" aria-hidden="true">
       <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
-        <!-- Visible half is the RIGHT semicircle (left edge of screen,
-             ring extends rightward into the page). M at 12 o'clock,
-             arc through 3 o'clock, end at 6 o'clock. -->
+        <!-- Outline half-arc. Visible half is the RIGHT semicircle (left
+             edge of screen). 12 → 3 → 6 o'clock. -->
         <path class="r-edge-ring-track" d="M 40 2 A 38 38 0 0 1 40 78"></path>
-        <path class="r-edge-ring-fill"  d="M 40 2 A 38 38 0 0 1 40 78"></path>
+        <!-- Interior fill disc. Clipped to the visible half by the path's
+             geometry — we only use the right half of this circle visually
+             because the left half is off-screen with the rest of the SVG.
+             Starts at scale 0; startHold transitions to scale 1. -->
+        <circle class="r-edge-ring-fill" cx="40" cy="40" r="38"></circle>
       </svg>
     </div>
     <div class="r-edge-ring r-edge-ring-next" id="r-edge-ring-next" aria-hidden="true">
       <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
-        <!-- Visible half is the LEFT semicircle (right edge of screen,
-             ring extends leftward into the page). M at 12 o'clock,
-             arc through 9 o'clock, end at 6 o'clock. The sweep-flag (0)
-             differs from the prev ring (1), making the arc go the OTHER
-             way around the circle. -->
+        <!-- Visible half is the LEFT semicircle (right edge of screen).
+             12 → 9 → 6 o'clock. The sweep-flag (0) differs from prev. -->
         <path class="r-edge-ring-track" d="M 40 2 A 38 38 0 0 0 40 78"></path>
-        <path class="r-edge-ring-fill"  d="M 40 2 A 38 38 0 0 0 40 78"></path>
+        <circle class="r-edge-ring-fill" cx="40" cy="40" r="38"></circle>
       </svg>
     </div>
     <!-- Swipe-to-turn edge glow. Tall narrow ember bloom on whichever side
@@ -5258,12 +5269,6 @@ function _cursorInsideRing(dir, cursorX, cursorY) {
 }
 
 // Apply current state to the DOM. Called from the rAF loop.
-// Also keeps the fill's stroke-dasharray in sync with the current rendered
-// radius — necessary because vector-effect: non-scaling-stroke makes the
-// stroke (and its dash pattern) measure in screen pixels, so dasharray
-// has to equal the rendered circumference (2 * π * currentR) in CSS pixels
-// rather than a fixed user-unit value. Without this update the dashes
-// would look subtly wrong as the ring scales.
 function _renderRing(dir) {
   const ring = _ringForDir(dir);
   if (!ring) return;
@@ -5272,19 +5277,6 @@ function _renderRing(dir) {
   ring.style.width = size + 'px';
   ring.style.height = size + 'px';
   ring.style.top = s.currentY + 'px';
-  // Update fill dash to match rendered HALF-circumference. The path is
-  // a half-arc (only the visible side of the half-disc), so the dasharray
-  // value is half what it would be for a full circle. Skip during a hold —
-  // the fill is mid-transition from full-offset to 0, and updating
-  // dasharray under it would make the fill jump.
-  if (_holdTimer) return;
-  const fill = _fillForDir(dir);
-  if (!fill) return;
-  const halfCirc = Math.PI * s.currentR;
-  fill.style.strokeDasharray = String(halfCirc);
-  // Idle state — keep fill invisible (offset = arc length).
-  // startHold overrides this with its transition.
-  fill.style.strokeDashoffset = String(halfCirc);
 }
 
 // rAF loop: ease both rings' current values toward their targets each
@@ -5349,21 +5341,15 @@ function showHover(dir, x, y) {
   const state = _ringState[dir];
   if (!ring) return;
 
-  ring.classList.remove('active', 'exiting');
+  ring.classList.remove('active', 'exiting', 'armed');
   ring.classList.add('hover');
-  // ALWAYS reset the fill on entry — covers the case where a previous
-  // hold completed (dashoffset got left at 0 = fully colored) and the
-  // user re-entered the zone. Without this reset, the new hover-state
-  // ring would render with full color stroke from the start.
-  // Use the bounce-destination half-circumference so the dash math is
-  // right throughout the entry bounce (rAF won't be writing during
-  // popping=true, so we need a value that keeps the fill invisible at
-  // the end size too). Path is a half-circle → π * r.
+  // ALWAYS reset the fill disc on entry — covers the case where a
+  // previous hold completed (disc got left at scale(1)) and the user
+  // re-entered the zone. Without this reset, the new hover-state ring
+  // would render fully filled from the start.
   if (fill) {
-    const halfCirc = Math.PI * EDGE_RING_INITIAL_R;
     fill.style.transition = 'none';
-    fill.style.strokeDasharray = String(halfCirc);
-    fill.style.strokeDashoffset = String(halfCirc);
+    fill.style.transform = 'scale(0)';
   }
 
   // Initial pop-in: jump current Y to cursor (no Y easing on entry — that
@@ -5430,7 +5416,7 @@ function hideHover() {
   // trigger the opacity-out transition (140ms) which races and beats the
   // size shrink (420ms), making the ring "just disappear" instead of
   // bouncing out.
-  ring.classList.remove('hover', 'active');
+  ring.classList.remove('hover', 'active', 'armed');
   ring.classList.add('exiting');
 
   // Exit bounce — mirror of the entry bounce, played as a one-shot CSS
@@ -5466,22 +5452,16 @@ function startHold(dir, x, y) {
   const fill = _fillForDir(dir);
   if (!ring || !fill) return;
   // Don't reposition during hold — the ring stays where the user clicked,
-  // even if the cursor drifts a little. The fill animation is the focal
-  // point now, not pursuit.
-  // Compute the dash arc length based on the CURRENTLY RENDERED ring
-  // radius. The path is a half-circle (visible arc only), so the dash
-  // value is HALF the circumference: π * r. Stays in CSS pixels via
-  // vector-effect: non-scaling-stroke.
-  const halfCirc = Math.PI * _ringState[dir].currentR;
+  // even if the cursor drifts a little. The interior fill is the focal
+  // point now.
+  // Start the disc at scale(0) — no transition, just a snap to 0 — then
+  // kick off the transition to scale(1) over HOLD_MS. Soft ease matches
+  // the rest of the reader's "flowy" feel.
   fill.style.transition = 'none';
-  fill.style.strokeDasharray = String(halfCirc);
-  fill.style.strokeDashoffset = String(halfCirc);
+  fill.style.transform = 'scale(0)';
   void fill.getBoundingClientRect();  // reflow
-  // Soft ease on the fill rather than linear — matches the rest of the
-  // experience's "flowy" feel. Fill starts a little slow, picks up
-  // through the middle, eases into completion.
-  fill.style.transition = `stroke-dashoffset ${HOLD_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`;
-  fill.style.strokeDashoffset = '0';
+  fill.style.transition = `transform ${HOLD_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`;
+  fill.style.transform = 'scale(1)';
   ring.classList.remove('hover', 'exiting');
   ring.classList.add('active');
   _holdTimer = setTimeout(() => {
@@ -5502,17 +5482,21 @@ function cancelHold(completed) {
   const fill = _fillForDir(dir);
   if (!ring) return;
   ring.classList.remove('active');
-  // ALWAYS reset the fill — including when the hold completed. Previously
-  // we skipped the reset on completion, which left dashoffset at 0 (full
-  // color), so the color would persist on the ring after the page turned
-  // and would re-appear next time the ring grew. The page turn happens
-  // instantly anyway — there's no celebration moment to preserve.
-  // Use half-circumference for the visible arc (path is a half-circle).
+  // Interior fill handling:
+  // - If completed (page turn fired): snap back to scale(0) instantly so
+  //   the next hold starts from empty. No user-visible "post-turn" state.
+  // - If canceled (user released before completion): ease back to scale(0)
+  //   so there's a gentle "pulling back" feel rather than a pop.
   if (fill) {
-    const halfCirc = Math.PI * _ringState[dir].currentR;
-    fill.style.transition = 'none';
-    fill.style.strokeDasharray = String(halfCirc);
-    fill.style.strokeDashoffset = String(halfCirc);
+    if (completed) {
+      fill.style.transition = 'none';
+      fill.style.transform = 'scale(0)';
+    } else {
+      // Reverse shrink — slightly faster than the hold grow so it feels
+      // like the hold is being undone, not re-reversed.
+      fill.style.transition = `transform 200ms cubic-bezier(0.4, 0, 0.2, 1)`;
+      fill.style.transform = 'scale(0)';
+    }
   }
   if (_hoverDir === dir) {
     ring.classList.add('hover');
@@ -5579,6 +5563,14 @@ function cancelHold(completed) {
         // the zone — size scales with cursor proximity to the edge.
         if (dir !== _hoverDir) showHover(dir, e.clientX, e.clientY);
         else _updateEdgeRing(dir, e.clientX, e.clientY);
+        // Toggle .armed based on whether the cursor is actually inside
+        // the visible half-disc. Uses rendered radius (what the user
+        // sees), so armed state matches click eligibility exactly.
+        const ring = _ringForDir(dir);
+        if (ring) {
+          const inside = _cursorInsideRing(dir, e.clientX, e.clientY);
+          ring.classList.toggle('armed', inside);
+        }
       } else if (_hoverDir) {
         hideHover();
       }
