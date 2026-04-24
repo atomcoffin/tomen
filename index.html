@@ -1440,6 +1440,89 @@ body.r-mode-editing .r-inner {
   margin: 0 auto;
 }
 
+/* ===== Two-tier Appearance panel =====
+   Primary surface shows the four most-adjusted controls (theme, face,
+   size, line height). Secondary surface (brightness, width, paragraphs,
+   spacing, alignment) hides behind a "More" toggle and expands in place.
+   The split reduces the common-case scanning load from 9 controls to 4
+   while preserving access to the rest for the rare case.
+
+   Single-column layout at all widths — the panel is a bottom sheet, not
+   a desktop settings dialog. Horizontal space would just stretch the
+   segmented controls without adding clarity. */
+.settings-primary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+/* The "More" toggle button itself. Low-weight — this is a progressive
+   disclosure affordance, not a primary action. Dashed border signals
+   "there's more behind this" without competing visually with the real
+   controls above it. */
+.settings-more-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 22px auto 0;
+  padding: 8px 16px;
+  background: transparent;
+  border: 0.5px dashed var(--stone);
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--stone);
+  cursor: pointer;
+  max-width: 560px;
+  width: 100%;
+  transition: color 140ms ease, border-color 140ms ease;
+  opacity: 0.75;
+}
+.settings-more-toggle:hover {
+  opacity: 1;
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.settings-more-toggle .ph {
+  font-size: 14px;
+  transition: transform 180ms ease;
+}
+.settings-more-toggle.expanded .ph {
+  transform: rotate(180deg);
+}
+
+/* Secondary surface — shown only when the toggle is clicked. Thin rule
+   at the top visually separates it from the primary surface so the two
+   tiers read as distinct, not continuous. */
+.settings-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 560px;
+  margin: 18px auto 0;
+  padding-top: 18px;
+  border-top: 0.5px dashed var(--border);
+}
+.settings-advanced[hidden] {
+  display: none;
+}
+
+/* Font size slider endpoints — small/large A glyphs rather than a numeric
+   readout. Communicates "this is a size control" at a glance without
+   making you read a number. */
+.slider-icon-text {
+  color: var(--stone);
+  font-family: var(--font-ui);
+  line-height: 1;
+  min-width: 14px;
+  text-align: center;
+  user-select: none;
+}
+
 /* Layout group spans both columns because it has more rows than the others
    and looks balanced as a wide section below the two top groups. */
 .settings-group-wide {
@@ -2236,82 +2319,90 @@ body.r-mode-editing .r-inner {
   <div class="settings settings-redesign" onclick="event.stopPropagation()">
     <div class="settings-handle"></div>
 
-    <div class="settings-grid">
-      <div class="settings-group">
-        <div class="settings-group-header">Display</div>
-        <div class="settings-row">
-          <div class="settings-row-label">Theme</div>
-          <div class="seg-row">
-            <button class="seg-btn active" data-theme="" onclick="setTheme('')">Light</button>
-            <button class="seg-btn" data-theme="sepia" onclick="setTheme('sepia')">Sepia</button>
-            <button class="seg-btn" data-theme="dark" onclick="setTheme('dark')">Dark</button>
-          </div>
-        </div>
-        <div class="settings-row">
-          <div class="settings-row-label">Brightness</div>
-          <div class="slider-row">
-            <i class="ph ph-sun slider-icon" aria-hidden="true"></i>
-            <input type="range" min="0" max="100" value="100" id="sl-brightness" oninput="setBrightness(this.value)">
-            <span class="slider-value" id="brightness-display">100</span>
-          </div>
+    <!-- Primary surface: the four most-adjusted controls. Shown every time
+         the panel opens. No group headers — groups would be fiction at
+         four controls. The controls are visually distinct enough on their
+         own (Theme = segmented, Face = segmented, Size + Line height =
+         sliders) that you scan by shape, not by group label. -->
+    <div class="settings-primary">
+      <div class="settings-row">
+        <div class="settings-row-label">Theme</div>
+        <div class="seg-row">
+          <button class="seg-btn active" data-theme="" onclick="setTheme('')">Light</button>
+          <button class="seg-btn" data-theme="sepia" onclick="setTheme('sepia')">Sepia</button>
+          <button class="seg-btn" data-theme="dark" onclick="setTheme('dark')">Dark</button>
         </div>
       </div>
-
-      <div class="settings-group">
-        <div class="settings-group-header">Typography</div>
-        <div class="settings-row">
-          <div class="settings-row-label">Face</div>
-          <div class="seg-row">
-            <button class="seg-btn active" data-face="serif" onclick="setReadingFace('serif')">Serif</button>
-            <button class="seg-btn" data-face="sans" onclick="setReadingFace('sans')">Sans</button>
-            <button class="seg-btn" data-face="mono" onclick="setReadingFace('mono')">Mono</button>
-          </div>
-        </div>
-        <div class="settings-row">
-          <div class="settings-row-label">Size</div>
-          <div class="slider-row">
-            <input type="range" min="14" max="28" value="18" id="sl-fontsize" oninput="setFontSize(this.value)">
-            <span class="slider-value" id="fs-display">18</span>
-          </div>
-        </div>
-        <div class="settings-row">
-          <div class="settings-row-label">Line height</div>
-          <div class="slider-row">
-            <input type="range" min="14" max="24" value="18" id="sl-lineheight" oninput="setLineHeight(this.value)">
-            <span class="slider-value" id="lh-display">1.8</span>
-          </div>
+      <div class="settings-row">
+        <div class="settings-row-label">Face</div>
+        <div class="seg-row">
+          <button class="seg-btn active" data-face="serif" onclick="setReadingFace('serif')">Serif</button>
+          <button class="seg-btn" data-face="sans" onclick="setReadingFace('sans')">Sans</button>
+          <button class="seg-btn" data-face="mono" onclick="setReadingFace('mono')">Mono</button>
         </div>
       </div>
+      <div class="settings-row">
+        <div class="settings-row-label">Size</div>
+        <div class="slider-row">
+          <span class="slider-icon-text" aria-hidden="true" style="font-size:11px">A</span>
+          <input type="range" min="14" max="28" value="18" id="sl-fontsize" oninput="setFontSize(this.value)">
+          <span class="slider-icon-text" aria-hidden="true" style="font-size:16px">A</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-label">Line height</div>
+        <div class="slider-row">
+          <input type="range" min="14" max="24" value="18" id="sl-lineheight" oninput="setLineHeight(this.value)">
+        </div>
+      </div>
+    </div>
 
-      <div class="settings-group settings-group-wide">
-        <div class="settings-group-header">Layout</div>
-        <div class="settings-row">
-          <div class="settings-row-label">Reading width</div>
-          <div class="slider-row">
-            <input type="range" min="800" max="1600" step="50" value="1200" id="sl-width" oninput="setReadingWidth(this.value)">
-            <span class="slider-value" id="rw-display">1200</span>
-          </div>
+    <!-- Secondary surface: controls you set once and rarely change. Toggled
+         by .settings-more-toggle. When expanded, .settings-advanced shows
+         with a top border acting as a visual separator from the primary
+         surface — signals that this is a different tier, not just more rows. -->
+    <button class="settings-more-toggle" id="settings-more-toggle" onclick="toggleAdvancedSettings()">
+      <span id="settings-more-label">More</span>
+      <i class="ph ph-caret-down" id="settings-more-icon" aria-hidden="true"></i>
+    </button>
+
+    <div class="settings-advanced" id="settings-advanced" hidden>
+      <div class="settings-row">
+        <div class="settings-row-label">Brightness</div>
+        <div class="slider-row">
+          <i class="ph ph-sun slider-icon" aria-hidden="true"></i>
+          <input type="range" min="0" max="100" value="100" id="sl-brightness" oninput="setBrightness(this.value)">
+          <span class="slider-value" id="brightness-display">100</span>
         </div>
-        <div class="settings-row">
-          <div class="settings-row-label">Paragraphs</div>
-          <div class="seg-row">
-            <button class="seg-btn active" data-pstyle="block" onclick="setParagraphStyle('block')">Block</button>
-            <button class="seg-btn" data-pstyle="indent" onclick="setParagraphStyle('indent')">Indent</button>
-          </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-label">Width</div>
+        <div class="seg-row">
+          <button class="seg-btn" data-width="900" onclick="setReadingWidth(900)">Narrow</button>
+          <button class="seg-btn active" data-width="1200" onclick="setReadingWidth(1200)">Medium</button>
+          <button class="seg-btn" data-width="1500" onclick="setReadingWidth(1500)">Wide</button>
         </div>
-        <div class="settings-row">
-          <div class="settings-row-label">Paragraph spacing</div>
-          <div class="slider-row">
-            <input type="range" min="5" max="20" step="1" value="10" id="sl-pspacing" oninput="setParagraphSpacing(this.value)">
-            <span class="slider-value" id="ps-display">1.0</span>
-          </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-label">Paragraphs</div>
+        <div class="seg-row">
+          <button class="seg-btn active" data-pstyle="block" onclick="setParagraphStyle('block')">Block</button>
+          <button class="seg-btn" data-pstyle="indent" onclick="setParagraphStyle('indent')">Indent</button>
         </div>
-        <div class="settings-row">
-          <div class="settings-row-label">Alignment</div>
-          <div class="seg-row">
-            <button class="seg-btn active" data-align="justify" onclick="setTextAlign('justify')">Justify</button>
-            <button class="seg-btn" data-align="left" onclick="setTextAlign('left')">Left</button>
-          </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-label">Spacing</div>
+        <div class="seg-row">
+          <button class="seg-btn" data-pspacing="7" onclick="setParagraphSpacing(7)">Tight</button>
+          <button class="seg-btn active" data-pspacing="10" onclick="setParagraphSpacing(10)">Normal</button>
+          <button class="seg-btn" data-pspacing="14" onclick="setParagraphSpacing(14)">Loose</button>
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-label">Alignment</div>
+        <div class="seg-row">
+          <button class="seg-btn active" data-align="justify" onclick="setTextAlign('justify')">Justify</button>
+          <button class="seg-btn" data-align="left" onclick="setTextAlign('left')">Left</button>
         </div>
       </div>
     </div>
@@ -6033,7 +6124,40 @@ function tryHighlightByText(rootEl, mark) {
 }
 
 // ===== SETTINGS =====
-function toggleSettings() { $('ov-settings').classList.toggle('open'); }
+function toggleSettings() {
+  const ov = $('ov-settings');
+  const willOpen = !ov.classList.contains('open');
+  ov.classList.toggle('open');
+  // Reset the Advanced section to collapsed every time the panel opens.
+  // The two-tier design's whole point is that common-case opens start
+  // fast — reaching for a primary control shouldn't require the user
+  // to visually skim past the advanced section first. If the user
+  // actually wants the advanced controls, one tap on "More" reveals
+  // them; we don't persist that state because it's case-specific.
+  if (willOpen) {
+    const adv = $('settings-advanced');
+    const btn = $('settings-more-toggle');
+    const label = $('settings-more-label');
+    if (adv) adv.hidden = true;
+    if (btn) btn.classList.remove('expanded');
+    if (label) label.textContent = 'More';
+  }
+}
+
+// Expand/collapse the advanced section of the Appearance panel. Flips the
+// hidden attr on .settings-advanced, rotates the chevron, and swaps the
+// label text between "More" and "Less". Pure UI toggle — no state
+// persistence, no side effects on preferences.
+function toggleAdvancedSettings() {
+  const adv = $('settings-advanced');
+  const btn = $('settings-more-toggle');
+  const label = $('settings-more-label');
+  if (!adv || !btn || !label) return;
+  const expand = adv.hidden;
+  adv.hidden = !expand;
+  btn.classList.toggle('expanded', expand);
+  label.textContent = expand ? 'Less' : 'More';
+}
 
 // ===== PROFILE =====
 function toggleProfile() {
@@ -6367,13 +6491,33 @@ function loadPref(name) {
 // Configure the width slider's range + step for the current bucket. Called on
 // init and on bucket transitions. Clamps the current value if it falls outside
 // the new range (e.g. switching from desktop's 1200 to phone's 280-440 range).
+// Also updates the segmented Width buttons (Narrow/Medium/Wide) in the
+// Appearance panel so their data-width attrs match the bucket's real pixel
+// targets — a phone's "Wide" is 440, a desktop's "Wide" is 1500.
 function applyWidthSliderRangeForBucket() {
+  const bucket = getDeviceBucket();
   const sl = $('sl-width');
-  if (!sl) return;
-  const { widthSlider } = _READER_CONFIG[getDeviceBucket()];
-  sl.min = widthSlider.min;
-  sl.max = widthSlider.max;
-  sl.step = widthSlider.step;
+  if (sl) {
+    const { widthSlider } = _READER_CONFIG[bucket];
+    sl.min = widthSlider.min;
+    sl.max = widthSlider.max;
+    sl.step = widthSlider.step;
+  }
+  // Update segmented Width buttons' data-width and onclick handlers for
+  // the current bucket. Values are picked to give meaningful Narrow /
+  // Medium / Wide distinctions within each bucket's usable range.
+  const bucketWidths = bucket === 'phone'
+    ? { narrow: 320, medium: 380, wide: 440 }
+    : { narrow: 900, medium: 1200, wide: 1500 };
+  const segs = document.querySelectorAll('.seg-btn[data-width]');
+  if (segs.length === 3) {
+    const labels = ['narrow', 'medium', 'wide'];
+    segs.forEach((b, i) => {
+      const v = bucketWidths[labels[i]];
+      b.dataset.width = String(v);
+      b.setAttribute('onclick', `setReadingWidth(${v})`);
+    });
+  }
 }
 
 // One-time migration: earlier versions stored prefs globally under names like
@@ -6422,6 +6566,20 @@ function setReadingWidth(v) {
   document.documentElement.style.setProperty('--reading-width', v + 'px');
   if ($('rw-display')) $('rw-display').textContent = v;
   if ($('sl-width')) $('sl-width').value = v;
+  // Sync the segmented Width buttons (Narrow/Medium/Wide) to mark the
+  // one closest to the current px value as active. The three buttons
+  // carry their target px in data-width; nearest neighbor wins.
+  const segs = document.querySelectorAll('.seg-btn[data-width]');
+  if (segs.length > 0) {
+    const target = parseInt(v, 10);
+    let bestBtn = null;
+    let bestDist = Infinity;
+    segs.forEach(b => {
+      const d = Math.abs(parseInt(b.dataset.width, 10) - target);
+      if (d < bestDist) { bestDist = d; bestBtn = b; }
+    });
+    segs.forEach(b => b.classList.toggle('active', b === bestBtn));
+  }
   savePref('readingWidth', v);
   updateQuickThumbs();
   remeasureReader();
@@ -6465,6 +6623,18 @@ function setParagraphSpacing(value) {
   if (slider && slider.value != String(v)) slider.value = v;
   const display = $('ps-display');
   if (display) display.textContent = (v / 10).toFixed(1);
+  // Sync the segmented Spacing buttons (Tight/Normal/Loose) — nearest
+  // neighbor wins based on data-pspacing attribute.
+  const segs = document.querySelectorAll('.seg-btn[data-pspacing]');
+  if (segs.length > 0) {
+    let bestBtn = null;
+    let bestDist = Infinity;
+    segs.forEach(b => {
+      const d = Math.abs(parseInt(b.dataset.pspacing, 10) - v);
+      if (d < bestDist) { bestDist = d; bestBtn = b; }
+    });
+    segs.forEach(b => b.classList.toggle('active', b === bestBtn));
+  }
   remeasureReader();
 }
 
