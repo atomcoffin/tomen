@@ -956,12 +956,15 @@ body.r-ui-visible .r-footer-ref {
   position: absolute;
   top: 0; bottom: 0;
   width: 40%;
-  cursor: none;
   z-index: 3;
   background: transparent;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
+  /* Cursor stays as the OS pointer — no more cursor: none. The edge-ring
+     handles all visual feedback for proximity / hold; hiding the cursor
+     was making the reader feel possessed and made cursor recovery on
+     leaving the zone awkward. */
 }
 .r-click-zone.prev { left: 0; }
 .r-click-zone.next { right: 0; }
@@ -973,49 +976,79 @@ body.r-mode-editing .r-click-zone {
   pointer-events: none;
 }
 
-/* Hold-to-turn circular indicator. Positioned via inline left/top at cursor.
-   Two visible states: 'hover' (empty ring shown at 55% opacity when cursor is
-   over a click zone) and 'active' (full opacity while pressed, ring fills). */
-.r-hold-ring {
-  position: absolute;
-  width: 66px; height: 66px;
+/* Hold-to-turn ring system, edge-anchored variant.
+   Each ring is a half-circle visually anchored to the left or right edge
+   of the viewport. Implementation: a square SVG of side 2R is positioned
+   so half is offscreen — only the on-screen half is visible. The SVG
+   circle inside is centered on the offscreen edge so its visible half
+   forms a half-disc whose flat side is the screen edge.
+
+   The ring's *visual size* is driven entirely by JS via inline width/height
+   on the .r-edge-ring element. JS also sets `top` to follow the cursor's
+   Y position. The SVG inside scales to fill, so the perimeter and stroke
+   thickness scale together — at small sizes the ring is a faint hint, at
+   max size it's a confident target.
+
+   Two states beyond the size scaling:
+   - .hover (faint outline visible)
+   - .active (full opacity, fill animation playing) */
+.r-edge-ring {
+  position: fixed;
+  top: 0;  /* set inline by JS to follow cursor Y */
+  width: 0;  /* set inline by JS based on cursor proximity to edge */
+  height: 0;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 140ms ease;
+  transition: opacity 140ms ease, width 80ms ease-out, height 80ms ease-out;
   z-index: 5;
+  transform: translateY(-50%);  /* center vertically on cursor Y */
+  /* will-change kept narrow — width/height/top change frequently, opacity
+     changes on hover/leave. */
+  will-change: width, height, top, opacity;
+}
+.r-edge-ring-prev {
+  left: 0;
+  /* Translate the box so its center sits ON the left edge — only the
+     right (visible) half of the disc shows inside the viewport. */
   transform: translate(-50%, -50%);
 }
-.r-hold-ring.hover { opacity: 0.75; }
-.r-hold-ring.active { opacity: 1; }
-.r-hold-ring svg {
+.r-edge-ring-next {
+  right: 0;
+  /* Same, mirrored: center sits ON the right edge, only left half visible. */
+  transform: translate(50%, -50%);
+}
+.r-edge-ring.hover { opacity: 0.55; }
+.r-edge-ring.active { opacity: 1; }
+.r-edge-ring svg {
   width: 100%; height: 100%;
   overflow: visible;
+  display: block;
 }
-.r-hold-track {
-  display: none;
+/* Idle outline ring — thin perimeter, no fill. */
+.r-edge-ring-track {
+  fill: none;
+  stroke: var(--ink);
+  stroke-opacity: 0.35;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
-.r-hold-fill {
+/* Hold fill — sweeps clockwise from top (12 o'clock) to fill the arc as
+   the user holds. Stroke-dasharray = circumference; stroke-dashoffset
+   transitions from full to 0 over HOLD_MS. */
+.r-edge-ring-fill {
   fill: none;
   stroke: var(--brand);
-  stroke-width: 1.2;
+  stroke-width: 1.5;
   stroke-linecap: round;
-  stroke-dasharray: 106.8;  /* 2 * PI * r (r=17) */
-  stroke-dashoffset: 106.8;
+  vector-effect: non-scaling-stroke;
+  /* circumference = 2 * PI * 38 ≈ 238.76 */
+  stroke-dasharray: 238.76;
+  stroke-dashoffset: 238.76;
+  /* Rotate so the dash starts at 12 o'clock and sweeps clockwise. */
   transform: rotate(-90deg);
   transform-origin: center;
-  /* Transition set inline when the hold starts */
+  /* Transition set inline when the hold starts. */
 }
-.r-hold-arrow {
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  color: var(--brand-ink);
-  font-size: 20px;
-  line-height: 1;
-  display: none;
-}
-.r-hold-ring.dir-prev .r-hold-arrow-prev { display: block; }
-.r-hold-ring.dir-next .r-hold-arrow-next { display: block; }
 
 /* Swipe-to-turn edge stripe. Chartreuse vertical bar flush against the
    edge being turned (left for prev, right for next), spanning top to
@@ -2328,17 +2361,27 @@ body.r-mode-editing .r-inner {
     <div class="r-click-zone next" data-dir="next" onclick="bookAreaTapped(event)"></div>
     <!-- Book + chapter reminder at bottom. -->
     <div class="r-footer-ref" id="r-footer-ref" aria-hidden="true"></div>
-    <!-- Hold-to-turn circular indicator, positioned at cursor on hover/press.
-         The ring is an SVG (needs vector stroke animation for fill progress).
-         The arrow is a Phosphor caret icon layered over it, swapped by
-         direction class. -->
-    <div class="r-hold-ring" id="r-hold-ring" aria-hidden="true">
-      <svg viewBox="0 0 40 40">
-        <circle class="r-hold-track" cx="20" cy="20" r="17"></circle>
-        <circle class="r-hold-fill" cx="20" cy="20" r="17"></circle>
+    <!-- Edge-anchored half-circle hold indicators. Each ring sits flush
+         against its side of the screen (left edge for prev, right edge
+         for next). Size scales with cursor proximity to the edge: 0 when
+         cursor is at the inner boundary of the click zone, max when the
+         cursor reaches the edge. The ring's Y position tracks the cursor's
+         Y. Click and hold *inside the visible half-disc* fills the arc
+         clockwise and turns the page when full.
+         The visible half-circle is achieved by sizing the SVG element
+         to 2R x 2R and offsetting half its width offscreen so only one
+         half shows. The arc lives at the visible perimeter. -->
+    <div class="r-edge-ring r-edge-ring-prev" id="r-edge-ring-prev" aria-hidden="true">
+      <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
+        <circle class="r-edge-ring-track" cx="40" cy="40" r="38"></circle>
+        <circle class="r-edge-ring-fill"  cx="40" cy="40" r="38"></circle>
       </svg>
-      <i class="ph ph-caret-left r-hold-arrow r-hold-arrow-prev"></i>
-      <i class="ph ph-caret-right r-hold-arrow r-hold-arrow-next"></i>
+    </div>
+    <div class="r-edge-ring r-edge-ring-next" id="r-edge-ring-next" aria-hidden="true">
+      <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
+        <circle class="r-edge-ring-track" cx="40" cy="40" r="38"></circle>
+        <circle class="r-edge-ring-fill"  cx="40" cy="40" r="38"></circle>
+      </svg>
     </div>
     <!-- Swipe-to-turn edge glow. Tall narrow ember bloom on whichever side
          the user is swiping toward. Opacity scales with swipe progress. -->
@@ -5093,61 +5136,126 @@ document.addEventListener('keydown', (e) => {
 })();
 
 // ===== PAGE-TURN HOLD MACHINERY =====
-// Shared state + helpers for the circular hold-to-turn indicator, used by
-// both mouse (click-and-hold) and touch (press-and-hold).
+// Shared state + helpers for the edge-anchored hold-to-turn indicators.
+// Two rings — one anchored to each edge of the viewport — visible only
+// when the cursor is over the corresponding click zone.
+// Mouse-only: touch users get the swipe gesture for page turns, no
+// equivalent hold-ring UI on touch (would conflict with scroll/swipe).
 const HOLD_MS = 400;
+// Max ring radius in CSS pixels. The visible half-disc reaches this far
+// into the page area when the cursor is at the screen edge. Tuned big
+// enough to be a confident target, small enough not to dominate the
+// viewport.
+const EDGE_RING_MAX_R = 80;
+// Minimum visible radius before the ring becomes interactive. Below this,
+// the ring is too small to deliberately click — treat as "not present"
+// even if size > 0. Avoids accidental triggers from drift through the
+// far edge of the click zone.
+const EDGE_RING_MIN_R = 18;
+// Ring fill circumference in SVG units (2 * PI * 38).
+const EDGE_RING_CIRC = 238.76;
+
 let _holdTimer = null;
 let _holdDir = null;
 let _hoverDir = null;
 
-function _ring() { return $('r-hold-ring'); }
-function _fill() { return _ring()?.querySelector('.r-hold-fill'); }
+function _ringForDir(dir) {
+  return $(dir === 'prev' ? 'r-edge-ring-prev' : 'r-edge-ring-next');
+}
+function _fillForDir(dir) {
+  return _ringForDir(dir)?.querySelector('.r-edge-ring-fill');
+}
 
-function _positionRing(x, y) {
-  const r = _ring();
-  if (!r) return;
-  const rc = $('r-content').getBoundingClientRect();
-  r.style.left = (x - rc.left) + 'px';
-  r.style.top  = (y - rc.top) + 'px';
+// Compute the ring's current visible radius for a given cursor position.
+// Returns 0 if the cursor is outside the click zone or not in either zone.
+// Curve is slightly eased — distance is normalized to [0..1] across the
+// click zone width, then raised to a small power so the ring stays small
+// across most of the zone and grows quickly only as the cursor approaches
+// the edge. Keeps the ring unobtrusive during normal cursor wandering.
+function _computeRingRadius(dir, cursorX) {
+  const vw = window.innerWidth;
+  let distFromEdge;
+  if (dir === 'prev') {
+    distFromEdge = cursorX;
+  } else {
+    distFromEdge = vw - cursorX;
+  }
+  // Click zone is 40% of viewport width; ring scales across this range.
+  const zoneWidth = vw * 0.40;
+  if (distFromEdge < 0 || distFromEdge > zoneWidth) return 0;
+  const proximity = 1 - (distFromEdge / zoneWidth);  // 0 at zone edge, 1 at screen edge
+  // Ease — power > 1 means stays small longer, then grows. 1.5 is gentle.
+  const eased = Math.pow(proximity, 1.5);
+  return EDGE_RING_MAX_R * eased;
 }
-function _setDirClass(dir) {
-  const r = _ring();
-  if (!r) return;
-  r.classList.remove('dir-prev', 'dir-next');
-  if (dir) r.classList.add('dir-' + dir);
+
+// Test whether the cursor is "inside" the visible half-disc of a ring.
+// Since the ring's center sits ON the screen edge at the cursor's Y,
+// inside-ness reduces to: distFromEdge <= currentRadius.
+function _cursorInsideRing(dir, cursorX, cursorY) {
+  const r = _computeRingRadius(dir, cursorX);
+  if (r < EDGE_RING_MIN_R) return false;
+  const vw = window.innerWidth;
+  const distFromEdge = dir === 'prev' ? cursorX : (vw - cursorX);
+  return distFromEdge <= r;
 }
+
+// Position and size the edge ring for the given direction. Sets size based
+// on cursor proximity, top to follow cursor Y. The other direction's ring
+// is hidden.
+function _updateEdgeRing(dir, cursorX, cursorY) {
+  const ring = _ringForDir(dir);
+  const otherRing = _ringForDir(dir === 'prev' ? 'next' : 'prev');
+  if (otherRing) { otherRing.style.opacity = ''; otherRing.classList.remove('hover', 'active'); }
+  if (!ring) return;
+  const r = _computeRingRadius(dir, cursorX);
+  const size = r * 2;
+  ring.style.width = size + 'px';
+  ring.style.height = size + 'px';
+  ring.style.top = cursorY + 'px';
+}
+
 function showHover(dir, x, y) {
-  const r = _ring(), f = _fill();
-  if (!r || !f) return;
   _hoverDir = dir;
-  _setDirClass(dir);
-  _positionRing(x, y);
-  f.style.transition = 'none';
-  f.style.strokeDashoffset = '106.8';
-  r.classList.remove('active');
-  r.classList.add('hover');
+  _updateEdgeRing(dir, x, y);
+  const ring = _ringForDir(dir);
+  const fill = _fillForDir(dir);
+  if (ring) {
+    ring.classList.remove('active');
+    ring.classList.add('hover');
+  }
+  if (fill) {
+    fill.style.transition = 'none';
+    fill.style.strokeDashoffset = String(EDGE_RING_CIRC);
+  }
 }
+
 function hideHover() {
+  if (_hoverDir) {
+    const ring = _ringForDir(_hoverDir);
+    if (ring && !_holdTimer) {
+      ring.classList.remove('hover', 'active');
+      ring.style.width = '0';
+      ring.style.height = '0';
+    }
+  }
   _hoverDir = null;
-  const r = _ring();
-  if (!r) return;
-  if (!_holdTimer) r.classList.remove('hover', 'active');
-  _setDirClass(null);
 }
+
 function startHold(dir, x, y) {
   cancelHold();
   _holdDir = dir;
-  const r = _ring(), f = _fill();
-  if (!r || !f) return;
-  _setDirClass(dir);
-  _positionRing(x, y);
-  f.style.transition = 'none';
-  f.style.strokeDashoffset = '106.8';
-  f.offsetHeight;  // reflow
-  f.style.transition = `stroke-dashoffset ${HOLD_MS}ms linear`;
-  f.style.strokeDashoffset = '0';
-  r.classList.remove('hover');
-  r.classList.add('active');
+  const ring = _ringForDir(dir);
+  const fill = _fillForDir(dir);
+  if (!ring || !fill) return;
+  _updateEdgeRing(dir, x, y);
+  fill.style.transition = 'none';
+  fill.style.strokeDashoffset = String(EDGE_RING_CIRC);
+  void fill.getBoundingClientRect();  // reflow
+  fill.style.transition = `stroke-dashoffset ${HOLD_MS}ms linear`;
+  fill.style.strokeDashoffset = '0';
+  ring.classList.remove('hover');
+  ring.classList.add('active');
   _holdTimer = setTimeout(() => {
     _holdTimer = null;
     if (dir === 'next') readerNext();
@@ -5156,18 +5264,26 @@ function startHold(dir, x, y) {
     cancelHold(true);
   }, HOLD_MS);
 }
+
 function cancelHold(completed) {
   if (_holdTimer) { clearTimeout(_holdTimer); _holdTimer = null; }
+  const dir = _holdDir;
   _holdDir = null;
-  const r = _ring(), f = _fill();
-  if (!r) return;
-  r.classList.remove('active');
-  if (f && !completed) {
-    f.style.transition = 'none';
-    f.style.strokeDashoffset = '106.8';
+  if (!dir) return;
+  const ring = _ringForDir(dir);
+  const fill = _fillForDir(dir);
+  if (!ring) return;
+  ring.classList.remove('active');
+  if (fill && !completed) {
+    fill.style.transition = 'none';
+    fill.style.strokeDashoffset = String(EDGE_RING_CIRC);
   }
-  if (_hoverDir) r.classList.add('hover');
-  else r.classList.remove('hover');
+  if (_hoverDir === dir) ring.classList.add('hover');
+  else {
+    ring.classList.remove('hover');
+    ring.style.width = '0';
+    ring.style.height = '0';
+  }
 }
 
 // ===== MOUSE CLICK-AND-HOLD =====
@@ -5199,8 +5315,10 @@ function cancelHold(completed) {
       const zone = e.target.closest && e.target.closest('.r-click-zone');
       if (zone) {
         const dir = zone.dataset.dir;
+        // Always recompute ring size + position on each mousemove inside
+        // the zone — size scales with cursor proximity to the edge.
         if (dir !== _hoverDir) showHover(dir, e.clientX, e.clientY);
-        else _positionRing(e.clientX, e.clientY);
+        else _updateEdgeRing(dir, e.clientX, e.clientY);
       } else if (_hoverDir) {
         hideHover();
       }
@@ -5211,6 +5329,13 @@ function cancelHold(completed) {
       if (!zone || e.button !== 0) return;
       const dir = zone.dataset.dir;
       if (!dir) return;
+      // Only register the press if the cursor is actually inside the
+      // visible half-disc — being in the click zone is necessary but
+      // not sufficient. The ring grows with proximity, so the user
+      // has to deliberately approach the edge to trigger a turn. This
+      // is the whole point of the new design: click-zone breadth for
+      // detection, ring narrowness for intent.
+      if (!_cursorInsideRing(dir, e.clientX, e.clientY)) return;
       startHold(dir, e.clientX, e.clientY);
       e.preventDefault();
     });
