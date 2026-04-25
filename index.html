@@ -1065,12 +1065,15 @@ body.r-mode-editing .r-click-zone {
 .r-edge-ring-fill {
   fill: var(--brand);
   stroke: none;
-  transform: scale(0);
-  transform-origin: 40px 40px;  /* SVG center */
-  opacity: 0;
-  /* Transitions applied inline by startHold — transform AND opacity
-     ease together over HOLD_MS so the disc blooms in (grows + fades in)
-     rather than appearing at full opacity the moment it starts scaling. */
+  /* Iris fill — disc is always rendered at full size and full opacity,
+     but a radial clip-path controls how much is visible. clip-path
+     expands from circle(0%) at center to circle(50%) covering the full
+     disc during a hold. Reads as "pressure expanding outward from the
+     fingertip" — closer to a press metaphor than scale-from-0 was. */
+  clip-path: circle(0% at 50% 50%);
+  -webkit-clip-path: circle(0% at 50% 50%);
+  /* Transition applied inline by startHold — ease the clip-path from
+     0% to 50% over HOLD_MS, snap back to 0% on cancel/completion. */
 }
 
 /* Swipe-to-turn edge stripe. Chartreuse vertical bar flush against the
@@ -5321,8 +5324,8 @@ function _initEdgeRings() {
     const fill = _fillForDir(dir);
     if (fill) {
       fill.style.transition = 'none';
-      fill.style.transform = 'scale(0)';
-      fill.style.opacity = '0';
+      fill.style.clipPath = 'circle(0% at 50% 50%)';
+      fill.style.webkitClipPath = 'circle(0% at 50% 50%)';
     }
   }
 }
@@ -5335,8 +5338,10 @@ function _updateEdgeRing(dir, cursorX, cursorY) {
   const otherState = _ringState[otherDir];
   const otherRing = _ringForDir(otherDir);
   if (otherRing) { otherRing.classList.remove('hover', 'active', 'armed'); }
-  // Other-side ring returns to baseline, not 0 — it's always visible now.
+  // Other-side ring returns to baseline at mid-screen — don't leave it
+  // floating at the cursor's previous Y from when it was last active.
   otherState.targetR = EDGE_RING_BASELINE_R;
+  otherState.targetY = window.innerHeight / 2;
 
   const state = _ringState[dir];
   state.targetR = _computeTargetRadius(dir, cursorX);
@@ -5353,11 +5358,11 @@ function showHover(dir, x, y) {
 
   ring.classList.remove('active', 'exiting', 'armed');
   ring.classList.add('hover');
-  // Reset the fill disc in case a prior hold completed and left it scaled.
+  // Reset the fill iris in case a prior hold left it in a non-empty state.
   if (fill) {
     fill.style.transition = 'none';
-    fill.style.transform = 'scale(0)';
-    fill.style.opacity = '0';
+    fill.style.clipPath = 'circle(0% at 50% 50%)';
+    fill.style.webkitClipPath = 'circle(0% at 50% 50%)';
   }
   // Set target values — rAF loop will ease from wherever the ring
   // currently is (likely baseline) to the new cursor-driven target.
@@ -5378,9 +5383,12 @@ function hideHover() {
   if (_holdTimer) return;
 
   ring.classList.remove('hover', 'active', 'armed');
-  // Target baseline, not 0 — the ring is a persistent affordance now.
-  // rAF loop eases currentR toward baseline smoothly.
+  // Target baseline radius AND mid-screen Y — the rest state is "small
+  // hint at vertical center of edge," not "small hint stuck wherever the
+  // cursor abandoned it." rAF eases both currentR and currentY toward
+  // their new targets in parallel for a smooth return.
   state.targetR = EDGE_RING_BASELINE_R;
+  state.targetY = window.innerHeight / 2;
   _ensureRingTicking();
 }
 
@@ -5390,18 +5398,19 @@ function startHold(dir, x, y) {
   const ring = _ringForDir(dir);
   const fill = _fillForDir(dir);
   if (!ring || !fill) return;
-  // Start the disc at scale(0), opacity 0 — no transition, just a snap
-  // to the empty state — then kick off the transition to scale(1),
-  // opacity 1 over HOLD_MS. Opacity fading in parallel with the scale
-  // keeps the brand color from appearing abruptly at full intensity;
-  // instead it blooms in gently.
+  // Iris fill — snap clip-path to circle(0%) (fully clipped, invisible)
+  // with no transition, then transition to circle(50%) (fully revealed)
+  // over HOLD_MS. The disc itself is always full-size and full-opacity,
+  // so what the user sees is a sharp brand-color circle expanding
+  // outward from the center.
   fill.style.transition = 'none';
-  fill.style.transform = 'scale(0)';
-  fill.style.opacity = '0';
+  fill.style.clipPath = 'circle(0% at 50% 50%)';
+  fill.style.webkitClipPath = 'circle(0% at 50% 50%)';
   void fill.getBoundingClientRect();  // reflow
-  fill.style.transition = `transform ${HOLD_MS}ms cubic-bezier(0.4, 0, 0.2, 1), opacity ${HOLD_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`;
-  fill.style.transform = 'scale(1)';
-  fill.style.opacity = '1';
+  const easing = `${HOLD_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`;
+  fill.style.transition = `clip-path ${easing}, -webkit-clip-path ${easing}`;
+  fill.style.clipPath = 'circle(50% at 50% 50%)';
+  fill.style.webkitClipPath = 'circle(50% at 50% 50%)';
   ring.classList.remove('hover', 'exiting');
   ring.classList.add('active');
   _holdTimer = setTimeout(() => {
@@ -5423,18 +5432,20 @@ function cancelHold(completed) {
   if (!ring) return;
   ring.classList.remove('active');
   // Interior fill handling:
-  // - If completed (page turn fired): snap back to scale(0) + opacity 0
-  //   instantly so the next hold starts from empty.
-  // - If canceled (user released before completion): ease back smoothly.
+  // - If completed (page turn fired): snap clip back to 0% instantly so
+  //   the next hold starts from empty.
+  // - If canceled (user released before completion): ease the clip back
+  //   to 0% smoothly so the iris closes rather than popping shut.
   if (fill) {
     if (completed) {
       fill.style.transition = 'none';
-      fill.style.transform = 'scale(0)';
-      fill.style.opacity = '0';
+      fill.style.clipPath = 'circle(0% at 50% 50%)';
+      fill.style.webkitClipPath = 'circle(0% at 50% 50%)';
     } else {
-      fill.style.transition = `transform 200ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease`;
-      fill.style.transform = 'scale(0)';
-      fill.style.opacity = '0';
+      const easing = `200ms cubic-bezier(0.4, 0, 0.2, 1)`;
+      fill.style.transition = `clip-path ${easing}, -webkit-clip-path ${easing}`;
+      fill.style.clipPath = 'circle(0% at 50% 50%)';
+      fill.style.webkitClipPath = 'circle(0% at 50% 50%)';
     }
   }
   const state = _ringState[dir];
@@ -5443,9 +5454,10 @@ function cancelHold(completed) {
     // back to its proximity-driven size.
     ring.classList.add('hover');
   } else {
-    // Cursor has left — target baseline, rAF eases the shrink.
+    // Cursor has left — target baseline at mid-screen Y, rAF eases both.
     ring.classList.remove('hover', 'armed');
     state.targetR = EDGE_RING_BASELINE_R;
+    state.targetY = window.innerHeight / 2;
     _ensureRingTicking();
   }
 }
