@@ -2438,6 +2438,119 @@ body.lib-select-mode .spine {
   top: 4px; right: 50%; transform: translateX(50%);
 }
 
+/* Library tag filter strip. Hidden by default (no tags exist); shows
+   as a horizontally-scrollable row of pill chips when the library has
+   any tag. "All" pill clears the filter. Active chip uses brand color. */
+.lib-tag-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 8px;
+  padding: 4px 24px 12px;
+  scrollbar-width: thin;
+}
+.lib-tag-strip[hidden] { display: none; }
+.lib-tag-chip {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border);
+  background: transparent;
+  font-family: var(--font-ui); font-size: 12px; color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.lib-tag-chip:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+.lib-tag-chip.active {
+  background: var(--brand);
+  border-color: var(--brand-deep);
+  color: var(--brand-text);
+  font-weight: 500;
+}
+
+/* Tag editor — bottom sheet, mirrors note-editor styling so the two
+   modal patterns feel like one family. */
+.tag-editor {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--card);
+  border-radius: 20px 20px 0 0;
+  padding: 8px 24px 32px;
+  z-index: 201;
+  transform: translateY(100%);
+  transition: transform 0.25s var(--ease);
+  max-height: 75vh;
+  display: flex; flex-direction: column;
+}
+.overlay.open .tag-editor { transform: translateY(0); }
+.tag-editor-label {
+  margin: 8px 0 12px;
+  font-family: var(--font-read); font-size: 16px; font-weight: 500;
+  color: var(--ink);
+}
+.tag-editor-input-row {
+  display: flex; gap: 8px;
+  margin-bottom: 14px;
+}
+.tag-editor-input {
+  flex: 1;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border);
+  background: transparent;
+  font-family: var(--font-ui); font-size: 13px; color: var(--ink);
+  outline: none;
+  transition: border-color 140ms ease;
+}
+.tag-editor-input:focus { border-color: var(--brand-ink); }
+.tag-editor-add {
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border);
+  background: transparent;
+  font-family: var(--font-ui); font-size: 13px; color: var(--ink);
+  cursor: pointer;
+}
+.tag-editor-add:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+.tag-editor-chips {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+  padding-bottom: 8px;
+}
+.tag-editor-chips:empty::before {
+  content: 'No tags yet. Add one above to label this book.';
+  color: var(--fog);
+  font-family: var(--font-ui); font-size: 12px;
+}
+.tag-editor-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 10px 5px 12px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border);
+  background: transparent;
+  font-family: var(--font-ui); font-size: 12px; color: var(--stone);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.tag-editor-chip.active {
+  background: var(--brand);
+  border-color: var(--brand-deep);
+  color: var(--brand-text);
+  font-weight: 500;
+}
+.tag-editor-chip-x {
+  margin-left: 2px;
+  font-size: 10px;
+  opacity: 0.7;
+  background: none; border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+.tag-editor-chip-x:hover { opacity: 1; }
+
 /* Loading */
 .loading {
   position: fixed; inset: 0; background: var(--paper);
@@ -2700,6 +2813,10 @@ body.lib-select-mode .spine {
       </button>
     </div>
   </div>
+  <!-- Tag filter strip. Hidden when the library has no tags yet; pops in
+       the moment the user adds one to any book. Single-tag filter — pick
+       a chip to show only books with that tag, "All" clears. -->
+  <div class="lib-tag-strip" id="lib-tag-strip" role="toolbar" aria-label="Filter by tag" hidden></div>
   <div class="lib-body" id="lib-body"></div>
   <input type="file" id="file-input" accept=".epub,.txt,.html,.htm,.md,.markdown" multiple onchange="handleFiles(event)">
   <!-- Bulk select action bar. Slides up from the bottom when the user
@@ -3100,6 +3217,28 @@ body.lib-select-mode .spine {
      at the back of the book. -->
 <div class="note-popover" id="note-popover" role="dialog" aria-modal="false" aria-label="Footnote"></div>
 
+<!-- Tag editor overlay. Per-book tag picker — chip toggles for existing
+     tags across the library, an input to add a new one, save-as-you-go
+     (no explicit Save button — close to apply). -->
+<div class="overlay" id="ov-tags" role="dialog" aria-modal="true" aria-label="Tags" onclick="closeTagEditor()">
+  <div class="tag-editor" onclick="event.stopPropagation()">
+    <div class="note-editor-handle"></div>
+    <div class="tag-editor-label" id="tag-editor-label">Tags</div>
+    <div class="tag-editor-input-row">
+      <input type="text" class="tag-editor-input" id="tag-editor-input"
+        placeholder="Add a tag"
+        aria-label="Add a tag"
+        maxlength="40"
+        onkeydown="if (event.key === 'Enter') { addTagFromInput(); event.preventDefault(); }">
+      <button class="tag-editor-add" onclick="addTagFromInput()">Add</button>
+    </div>
+    <div class="tag-editor-chips" id="tag-editor-chips"></div>
+    <div class="note-editor-actions">
+      <button class="note-editor-btn primary" onclick="closeTagEditor()">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- Image viewer. Tapping a figure / inline image in the reader opens
      a full-viewport overlay with the image centered. Tap the backdrop
      or the close button to dismiss. Touch-action: pinch-zoom lets the
@@ -3311,7 +3450,11 @@ function bookMetaFromBook(book) {
     // Ambient reading-time stat (cumulative seconds). Accumulated by a
     // visibility- and idle-aware tick while the reader is active. Read
     // by the library views to show "X min read" alongside progress.
-    readingSeconds: book.readingSeconds || 0
+    readingSeconds: book.readingSeconds || 0,
+    // User-defined tags. Free-form strings, lowercased+trimmed on save
+    // for stable de-duplication across the library. No separate tag
+    // store — the global tag list is derived from this union at render.
+    tags: Array.isArray(book.tags) ? book.tags : []
   };
 }
 
@@ -3450,6 +3593,9 @@ function openBookMenu(ev, bookId) {
   if (!book) return;
   const menu = $('book-menu');
   menu.innerHTML = `
+    <button class="book-menu-item" role="menuitem" onclick="openTagEditor('${bookId}')">
+      <i class="ph ph-tag"></i>Tags…
+    </button>
     <button class="book-menu-item" role="menuitem" onclick="enterLibSelectMode('${bookId}')">
       <i class="ph ph-list-checks"></i>Select books
     </button>
@@ -3506,6 +3652,147 @@ function _updateLibActionBar() {
   const n = _libSelectedIds.size;
   if (countEl) countEl.textContent = `${n} selected`;
   if (delBtn) delBtn.disabled = n === 0;
+}
+
+// ===== TAGS =====
+// Free-form, user-defined tags per book. The "global tag list" is just
+// the union of all books' tags — no separate store. Tag strings are
+// lowercased + trimmed on add so "Fiction" / "fiction " merge cleanly.
+let _tagEditorBookId = null;
+let _activeTagFilter = null; // single-tag filter on the library, or null
+
+function _allLibraryTags() {
+  const set = new Set();
+  for (const b of library) {
+    if (Array.isArray(b.tags)) {
+      for (const t of b.tags) if (t) set.add(t);
+    }
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+function _normalizeTag(s) {
+  return (s || '').toLowerCase().trim().replace(/\s+/g, ' ').slice(0, 40);
+}
+
+function openTagEditor(bookId) {
+  closeBookMenu();
+  const book = library.find(b => b.id === bookId);
+  if (!book) return;
+  _tagEditorBookId = bookId;
+  const labelEl = $('tag-editor-label');
+  if (labelEl) labelEl.textContent = `Tags · ${book.title || ''}`;
+  const input = $('tag-editor-input');
+  if (input) input.value = '';
+  _renderTagEditorChips();
+  $('ov-tags').classList.add('open');
+  if (input) requestAnimationFrame(() => input.focus());
+}
+
+function closeTagEditor() {
+  $('ov-tags').classList.remove('open');
+  _tagEditorBookId = null;
+  // Re-render library + filter strip in case tags changed.
+  _renderTagFilterStrip();
+  renderLibrary();
+}
+
+function _renderTagEditorChips() {
+  const wrap = $('tag-editor-chips');
+  if (!wrap) return;
+  const book = library.find(b => b.id === _tagEditorBookId);
+  if (!book) { wrap.innerHTML = ''; return; }
+  const bookTags = new Set((book.tags || []).map(_normalizeTag));
+  // Combine library-wide tags with this book's tags so a book-only tag
+  // doesn't disappear from the chip list when toggled off.
+  const allTags = new Set(_allLibraryTags());
+  for (const t of bookTags) allTags.add(t);
+  const sorted = [...allTags].sort((a, b) => a.localeCompare(b));
+  if (sorted.length === 0) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = sorted.map(t => {
+    const active = bookTags.has(t);
+    const safe = esc(t);
+    // Only show the delete X on UNCHECKED chips so toggling and deleting
+    // aren't visually merged — and only delete from the global pool
+    // (which means: drop the tag from every book that has it).
+    const xBtn = !active
+      ? `<button class="tag-editor-chip-x" onclick="event.stopPropagation(); deleteTagGlobally('${safe.replace(/'/g, "\\'")}')" aria-label="Delete tag from library"><i class="ph ph-x"></i></button>`
+      : '';
+    return `<button class="tag-editor-chip${active ? ' active' : ''}" onclick="toggleTagForCurrentBook('${safe.replace(/'/g, "\\'")}')">${safe}${xBtn}</button>`;
+  }).join('');
+}
+
+function addTagFromInput() {
+  const input = $('tag-editor-input');
+  if (!input) return;
+  const tag = _normalizeTag(input.value);
+  if (!tag) return;
+  input.value = '';
+  toggleTagForCurrentBook(tag, true); // force-add even if it already exists
+}
+
+function toggleTagForCurrentBook(tag, forceAdd) {
+  const book = library.find(b => b.id === _tagEditorBookId);
+  if (!book) return;
+  if (!Array.isArray(book.tags)) book.tags = [];
+  const norm = _normalizeTag(tag);
+  if (!norm) return;
+  const idx = book.tags.indexOf(norm);
+  if (idx >= 0 && !forceAdd) {
+    book.tags.splice(idx, 1);
+  } else if (idx < 0) {
+    book.tags.push(norm);
+  }
+  // Persist to IDB; library array already mutated in place.
+  saveBookMeta(book).catch(err => {
+    console.error('saveBookMeta (tags) failed:', err);
+    showErrorToast("Couldn't save tags.");
+  });
+  _renderTagEditorChips();
+}
+
+function deleteTagGlobally(tag) {
+  const norm = _normalizeTag(tag);
+  if (!norm) return;
+  // Remove from every book that has it; persist in parallel.
+  const writes = [];
+  for (const b of library) {
+    if (!Array.isArray(b.tags)) continue;
+    const i = b.tags.indexOf(norm);
+    if (i >= 0) {
+      b.tags.splice(i, 1);
+      writes.push(saveBookMeta(b).catch(err => console.error('tag delete persist failed:', err)));
+    }
+  }
+  // If the filter was on this tag, clear it.
+  if (_activeTagFilter === norm) _activeTagFilter = null;
+  _renderTagEditorChips();
+  Promise.all(writes).catch(() => {});
+}
+
+function _renderTagFilterStrip() {
+  const strip = $('lib-tag-strip');
+  if (!strip) return;
+  const tags = _allLibraryTags();
+  if (tags.length === 0) {
+    strip.hidden = true;
+    strip.innerHTML = '';
+    _activeTagFilter = null;
+    return;
+  }
+  strip.hidden = false;
+  const all = `<button class="lib-tag-chip${_activeTagFilter === null ? ' active' : ''}" onclick="setTagFilter(null)">All</button>`;
+  const chips = tags.map(t => {
+    const safe = esc(t);
+    return `<button class="lib-tag-chip${_activeTagFilter === t ? ' active' : ''}" onclick="setTagFilter('${safe.replace(/'/g, "\\'")}')">${safe}</button>`;
+  }).join('');
+  strip.innerHTML = all + chips;
+}
+
+function setTagFilter(tag) {
+  _activeTagFilter = tag ? _normalizeTag(tag) : null;
+  _renderTagFilterStrip();
+  renderLibrary();
 }
 
 function confirmDeleteSelected() {
@@ -4020,11 +4307,15 @@ function getSortedLibrary() {
   // Filter first, then sort. The filter is a no-op if the query is empty,
   // so unfiltered calls keep the original behavior.
   const q = normalizeForSearch(librarySearchQuery);
-  const pool = q
+  let pool = q
     ? library.filter(b =>
         normalizeForSearch(b.title).includes(q) ||
         normalizeForSearch(b.author).includes(q))
     : [...library];
+  // Tag filter stacks on top of the text search. Both must match.
+  if (_activeTagFilter) {
+    pool = pool.filter(b => Array.isArray(b.tags) && b.tags.includes(_activeTagFilter));
+  }
   const sorted = q ? pool : pool;  // pool is already a fresh array in both branches
   switch (currentSort) {
     case 'title':
@@ -4064,6 +4355,9 @@ function getSortedLibrary() {
 
 function renderLibrary() {
   const body = $('lib-body');
+  // Tag strip mirrors current library state on every render — cheap and
+  // keeps it accurate after add/remove/delete without manual sync calls.
+  _renderTagFilterStrip();
   if (library.length === 0) {
     body.innerHTML = `<div class="empty-lib">
       <i class="ph ph-book-open-text"></i>
@@ -4081,6 +4375,17 @@ function renderLibrary() {
       <h3>No matches</h3>
       <p>Nothing in your library matches "${esc(librarySearchQuery.trim())}".</p>
       <button class="empty-lib-action" onclick="clearLibrarySearch()">Clear search</button>
+    </div>`;
+    return;
+  }
+  // Active-tag empty state — only fires if no search is active (search
+  // empty state above takes precedence). Suggests clearing the tag.
+  if (sorted.length === 0 && _activeTagFilter) {
+    body.innerHTML = `<div class="empty-lib">
+      <i class="ph ph-tag"></i>
+      <h3>No books with this tag</h3>
+      <p>Nothing in your library is tagged "${esc(_activeTagFilter)}".</p>
+      <button class="empty-lib-action" onclick="setTagFilter(null)">Show all</button>
     </div>`;
     return;
   }
@@ -8411,6 +8716,13 @@ function goToSearchResult(chapterIdx, offset) {
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape' && $('ov-search')?.classList.contains('open')) {
     toggleSearch();
+  }
+});
+
+// Escape closes the tag editor too.
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && $('ov-tags')?.classList.contains('open')) {
+    closeTagEditor();
   }
 });
 
