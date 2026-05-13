@@ -324,6 +324,72 @@ html, body {
 .book-menu-item.danger:hover { background: rgba(196, 68, 68, 0.08); color: #A33; }
 .book-menu-item.danger .ph { color: inherit; }
 
+/* Dictionary popover. Floats near the looked-up word in the reader.
+   Width is bounded so long definitions don't sprawl across the whole
+   page; height isn't capped — long entries scroll inside the popover.
+   Shadow and tone deliberately match book-menu / mark-menu so the
+   reader chrome reads as one family. */
+.dict-popover {
+  position: fixed;
+  display: none;
+  width: min(360px, calc(100vw - 16px));
+  max-height: 50vh;
+  overflow-y: auto;
+  background: var(--card);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
+  padding: 16px 18px 12px;
+  z-index: 350;
+  font-family: var(--font-ui);
+  color: var(--ink);
+}
+.dict-popover.open { display: block; }
+.dict-word {
+  font-family: var(--font-display-active);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+.dict-phonetic {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--stone);
+  margin-top: 2px;
+}
+.dict-pos {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--stone);
+  margin: 12px 0 4px;
+}
+.dict-defs { font-size: 13.5px; line-height: 1.55; padding: 0; margin: 0; }
+.dict-defs li {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 4px;
+  color: var(--ink);
+}
+.dict-empty,
+.dict-err {
+  color: var(--stone);
+  font-size: 13px;
+  margin-top: 8px;
+}
+.dict-foot {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--border);
+  font-size: 10px;
+  color: var(--fog);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  display: flex;
+  justify-content: space-between;
+}
+
 /* Confirm dialog. Modal interrupt for destructive actions. Sits on its own
    z-index above all other overlays. The backdrop dims the rest of the
    screen and absorbs clicks, so the only way out is the dialog buttons.
@@ -2726,6 +2792,12 @@ body.r-mode-editing .r-inner {
      tapping a highlight in the rendered book. Shares .book-menu styling
      so the popover looks consistent. Populated dynamically per open. -->
 <div class="book-menu" id="mark-menu" role="menu" aria-label="Mark options"></div>
+
+<!-- Dictionary popover. Opened by long-press (touch) or double-click
+     (desktop) on a word in the reader. Pulls definitions from
+     Wiktionary's public REST API; results are cached in-memory for the
+     session so repeat lookups are instant. -->
+<div class="dict-popover" id="dict-popover" role="dialog" aria-modal="false" aria-label="Dictionary"></div>
 
 <!-- Confirm dialog. Modal interrupt for destructive actions. Reused for
      any destructive confirmation (delete book, clear marks, etc.) by
@@ -7402,6 +7474,220 @@ function showLoading(show, msg) {
   else if (show) $('loading-text').textContent = 'Opening book…';
 }
 
+// ===== DICTIONARY =====
+// Long-press a word (touch) or double-click a word (desktop) in reading
+// mode to look up its definition. Pulls from Wiktionary's free REST API.
+// Results cached in-memory for the session — repeat lookups of the same
+// word are instant. Cache deliberately isn't persisted (definitions
+// don't need durability, and a transient API blip shouldn't poison
+// long-term storage).
+const _dictCache = new Map();
+let _dictLongPressTimer = null;
+let _dictLongPressOrigin = null;
+let _dictLongPressFired = false;
+const _DICT_LONGPRESS_MS = 500;
+const _DICT_LONGPRESS_TOLERANCE_PX = 8;
+
+// Given a viewport (x, y), find the word under the point and return both
+// the cleaned word string and a Range covering its glyphs (used to anchor
+// the popover). Returns null if the point isn't on text or the resolved
+// position isn't on a word character.
+function _wordAtPoint(x, y) {
+  const range = caretRangeAtPoint(x, y);
+  if (!range) return null;
+  const node = range.startContainer;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+  const text = node.data;
+  // Unicode-aware "is part of a word." Includes letters, digits,
+  // apostrophes (straight and curly), and intra-word hyphens.
+  const isWord = (ch) => /[\p{L}\p{N}'’\-]/u.test(ch);
+  let i = range.startOffset;
+  if (i >= text.length) i = text.length - 1;
+  // Caret might sit between characters; try one back if current isn't word.
+  if (i < 0 || !isWord(text[i])) {
+    if (i > 0 && isWord(text[i - 1])) i--;
+    else return null;
+  }
+  let start = i;
+  while (start > 0 && isWord(text[start - 1])) start--;
+  let end = i;
+  while (end < text.length && isWord(text[end])) end++;
+  // Trim leading/trailing apostrophes and hyphens — Wiktionary expects
+  // bare word forms ("don't" stays, but "-word-" loses the hyphens).
+  const word = text.slice(start, end).replace(/^[\-'’]+|[\-'’]+$/g, '');
+  if (!word) return null;
+  const wordRange = document.createRange();
+  wordRange.setStart(node, start);
+  wordRange.setEnd(node, end);
+  return { word, range: wordRange };
+}
+
+async function _lookupWord(word) {
+  const key = word.toLowerCase();
+  if (_dictCache.has(key)) return _dictCache.get(key);
+  try {
+    const res = await fetch(
+      `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(key)}`
+    );
+    if (!res.ok) {
+      const out = { notFound: res.status === 404, error: res.status !== 404 };
+      _dictCache.set(key, out);
+      return out;
+    }
+    const data = await res.json();
+    // Wiktionary returns sections keyed by language code; we surface only
+    // English entries to keep the popover focused on the reader's language.
+    const entries = Array.isArray(data.en) ? data.en : [];
+    const out = { entries };
+    _dictCache.set(key, out);
+    return out;
+  } catch (err) {
+    return { error: true };
+  }
+}
+
+function _showDictionary(word, rangeRect) {
+  const pop = $('dict-popover');
+  if (!pop) return;
+  // Render a skeleton immediately so the popover appears without waiting
+  // on the network — feels responsive on the long-press release.
+  pop.innerHTML = `
+    <div class="dict-word">${esc(word)}</div>
+    <div class="dict-defs"><div class="dict-empty">Looking up…</div></div>
+    <div class="dict-foot"><span>Wiktionary</span><span>Tap outside to close</span></div>
+  `;
+  pop.classList.add('open');
+  _positionDictPopover(pop, rangeRect);
+  _lookupWord(word).then(result => {
+    _renderDictionaryResult(pop, result);
+    // Re-position after content settles in case height changed.
+    _positionDictPopover(pop, rangeRect);
+  });
+}
+
+function _renderDictionaryResult(pop, result) {
+  const defsEl = pop.querySelector('.dict-defs');
+  if (!defsEl) return;
+  if (result.error && !result.notFound) {
+    defsEl.innerHTML = '<div class="dict-err">Could not reach Wiktionary.</div>';
+    return;
+  }
+  if (result.notFound || !result.entries || result.entries.length === 0) {
+    defsEl.innerHTML = '<div class="dict-empty">No definition found.</div>';
+    return;
+  }
+  // Cap displayed entries (parts of speech) and definitions per entry so
+  // the popover doesn't become a wall of text. The user can open
+  // Wiktionary directly if they need the full entry.
+  const html = result.entries.slice(0, 4).map(entry => {
+    const pos = esc(entry.partOfSpeech || '');
+    const defs = (entry.definitions || []).slice(0, 3).map(d => {
+      const raw = d.definition || '';
+      // Definitions arrive as pre-rendered HTML with wiki-internal links,
+      // citations, and examples. Strip tags for a compact plain-text view.
+      const plain = raw.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+      return plain ? `<li>${esc(plain)}</li>` : '';
+    }).join('');
+    if (!defs) return '';
+    return `${pos ? `<div class="dict-pos">${pos}</div>` : ''}<ul class="dict-defs-list">${defs}</ul>`;
+  }).join('');
+  defsEl.innerHTML = html || '<div class="dict-empty">No definition found.</div>';
+}
+
+function _positionDictPopover(pop, rangeRect) {
+  const popRect = pop.getBoundingClientRect();
+  let left = rangeRect.left + rangeRect.width / 2 - popRect.width / 2;
+  let top = rangeRect.top - popRect.height - 10;
+  if (left < 8) left = 8;
+  if (left + popRect.width > window.innerWidth - 8) {
+    left = window.innerWidth - popRect.width - 8;
+  }
+  // If the popover would go off the top, flip below the word.
+  if (top < 8) top = rangeRect.bottom + 10;
+  if (top + popRect.height > window.innerHeight - 8) {
+    top = Math.max(8, window.innerHeight - popRect.height - 8);
+  }
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+}
+
+function _hideDictionary() {
+  const pop = $('dict-popover');
+  if (pop) pop.classList.remove('open');
+}
+
+function _setupDictionaryHandlers() {
+  const inners = [$('r-inner'), $('r-inner-right')].filter(Boolean);
+  for (const inner of inners) {
+    // Touch long-press. Track origin point so a press that drifts past
+    // the tolerance (i.e., the user is scrolling/swiping) cancels the
+    // dictionary intent. Mouse uses dblclick (below), so this filters
+    // pointerType === 'mouse' out.
+    inner.addEventListener('pointerdown', (ev) => {
+      if (isEditing && isEditing()) return;
+      if (ev.pointerType === 'mouse') return;
+      _dictLongPressOrigin = { x: ev.clientX, y: ev.clientY };
+      _dictLongPressFired = false;
+      clearTimeout(_dictLongPressTimer);
+      _dictLongPressTimer = setTimeout(() => {
+        _dictLongPressTimer = null;
+        const hit = _wordAtPoint(_dictLongPressOrigin.x, _dictLongPressOrigin.y);
+        if (!hit) return;
+        _dictLongPressFired = true;
+        const rect = hit.range.getBoundingClientRect();
+        _showDictionary(hit.word, rect);
+      }, _DICT_LONGPRESS_MS);
+    });
+    inner.addEventListener('pointermove', (ev) => {
+      if (!_dictLongPressOrigin || !_dictLongPressTimer) return;
+      const dx = ev.clientX - _dictLongPressOrigin.x;
+      const dy = ev.clientY - _dictLongPressOrigin.y;
+      if (dx * dx + dy * dy > _DICT_LONGPRESS_TOLERANCE_PX * _DICT_LONGPRESS_TOLERANCE_PX) {
+        clearTimeout(_dictLongPressTimer);
+        _dictLongPressTimer = null;
+        _dictLongPressOrigin = null;
+      }
+    });
+    const cancelLongPress = () => {
+      clearTimeout(_dictLongPressTimer);
+      _dictLongPressTimer = null;
+      _dictLongPressOrigin = null;
+    };
+    inner.addEventListener('pointerup', cancelLongPress);
+    inner.addEventListener('pointercancel', cancelLongPress);
+    inner.addEventListener('pointerleave', cancelLongPress);
+
+    // Desktop double-click — native selection-style word lookup.
+    inner.addEventListener('dblclick', (ev) => {
+      if (isEditing && isEditing()) return;
+      const hit = _wordAtPoint(ev.clientX, ev.clientY);
+      if (!hit) return;
+      const rect = hit.range.getBoundingClientRect();
+      _showDictionary(hit.word, rect);
+      ev.preventDefault();
+    });
+  }
+  // Outside-tap dismisses. Capture phase so it fires before any
+  // descendant tap handler can re-open something. Doesn't preventDefault
+  // — we only want to dismiss the popover, not swallow the gesture.
+  document.addEventListener('pointerdown', (ev) => {
+    const pop = $('dict-popover');
+    if (!pop || !pop.classList.contains('open')) return;
+    if (pop.contains(ev.target)) return;
+    _hideDictionary();
+  }, true);
+  // Escape dismisses if open. stopPropagation so the reader's
+  // back-to-library Escape doesn't also fire.
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    const pop = $('dict-popover');
+    if (pop && pop.classList.contains('open')) {
+      _hideDictionary();
+      ev.stopPropagation();
+    }
+  });
+}
+
 // ===== KEYBOARD =====
 document.addEventListener('keydown', e => {
   if (!$('screen-reader').classList.contains('active')) return;
@@ -7473,6 +7759,12 @@ function renderGreeting() {
   $('sort-select').value = currentSort;
 
   setView(currentView);
+
+  // Wire dictionary gestures on the (now-present) slot inners. Safe to
+  // call once at init — the inner elements are the persistent containers
+  // that receive innerHTML on each renderChapter, so the listeners
+  // survive content swaps.
+  _setupDictionaryHandlers();
 })();
 </script>
 
