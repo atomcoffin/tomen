@@ -1765,7 +1765,10 @@ body.r-mode-editing .r-inner {
 }
 .overlay.open .settings { transform: translateY(0); }
 .settings-handle { width: 32px; height: 3px; background: var(--fog); border-radius: 2px; margin: 0 auto 20px; opacity: 0.35; }
-.settings-section { margin-bottom: 22px; }
+.settings-section {
+  max-width: 640px;
+  margin: 0 auto 18px;
+}
 .settings-label {
   font-size: 10px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 1.2px; color: var(--fog); margin-bottom: 10px;
@@ -1905,7 +1908,7 @@ body.r-mode-editing .r-inner {
    Active state = a brand ring around the chip + brand-colored name. */
 .theme-swatches {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 8px;
 }
 .theme-swatch {
@@ -2135,7 +2138,7 @@ body.r-mode-editing .r-inner {
     gap: 12px;
   }
   .theme-swatches {
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 4px;
   }
   .seg-btn {
@@ -3398,23 +3401,25 @@ body.lib-select-mode .spine {
         </button>
       </div>
     </div>
-    <div class="settings-section">
-      <div class="settings-label">Reading pace</div>
-      <div class="seg-row">
-        <button class="seg-btn" data-pace="immersed" onclick="setReadingPace('immersed')">Immersed</button>
-        <button class="seg-btn active" data-pace="steady" onclick="setReadingPace('steady')">Steady</button>
-        <button class="seg-btn" data-pace="brisk" onclick="setReadingPace('brisk')">Brisk</button>
+    <div class="set-pair settings-section">
+      <div class="set-cell">
+        <div class="settings-label">Reading pace</div>
+        <div class="seg-row">
+          <button class="seg-btn" data-pace="immersed" onclick="setReadingPace('immersed')">Immersed</button>
+          <button class="seg-btn active" data-pace="steady" onclick="setReadingPace('steady')">Steady</button>
+          <button class="seg-btn" data-pace="brisk" onclick="setReadingPace('brisk')">Brisk</button>
+        </div>
+        <div class="settings-hint">Tunes reading time estimates.</div>
       </div>
-      <div class="settings-hint">Used to estimate reading time remaining. Adjust if estimates feel off.</div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-label">Default typography</div>
-      <div class="seg-row">
-        <button class="seg-btn default-face-btn" data-face="serif" onclick="setGlobalReadingFace('serif')">Serif</button>
-        <button class="seg-btn default-face-btn" data-face="sans" onclick="setGlobalReadingFace('sans')">Sans</button>
-        <button class="seg-btn default-face-btn" data-face="mono" onclick="setGlobalReadingFace('mono')">Mono</button>
+      <div class="set-cell">
+        <div class="settings-label">Default typography</div>
+        <div class="seg-row">
+          <button class="seg-btn default-face-btn" data-face="serif" onclick="setGlobalReadingFace('serif')">Serif</button>
+          <button class="seg-btn default-face-btn" data-face="sans" onclick="setGlobalReadingFace('sans')">Sans</button>
+          <button class="seg-btn default-face-btn" data-face="mono" onclick="setGlobalReadingFace('mono')">Mono</button>
+        </div>
+        <div class="settings-hint">Default for books without their own.</div>
       </div>
-      <div class="settings-hint">The face used when a book has no typeface of its own. Change a book's face from its Appearance panel while reading.</div>
     </div>
     <div class="settings-section">
       <div class="settings-label">Backup</div>
@@ -3428,7 +3433,7 @@ body.lib-select-mode .spine {
           <span>Export marks</span>
         </button>
       </div>
-      <div class="settings-hint">Library is a full JSON backup of books, progress, and marks. Marks export to Markdown — paste into Obsidian, Readwise, Notion, or any notes app.</div>
+      <div class="settings-hint">Library is a full JSON backup. Marks export to Markdown for any notes app.</div>
     </div>
     <div class="settings-section">
       <div class="settings-label">About Tomen</div>
