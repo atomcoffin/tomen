@@ -1557,23 +1557,15 @@ body.r-ui-visible .r-footer-ref {
   width: 0;  /* set inline by JS via rAF easing loop */
   height: 0;
   pointer-events: none;
-  /* Solar bloom — small solid core, large fuzzy atmospheric halo.
-     The plateau ends at 30% of radius (compact core) and the rest of
-     the radius is a long fade to transparent (generous halo).
-     Idle uses --stone, a warm mid-gray, so the bloom reads as an
-     unobtrusive presence rather than a "page-turn here" label. The
-     hold animation transitions this entire gradient to the theme's
-     brand color over HOLD_MS — the color shift IS the commitment.
-     Armed (cursor inside) is the in-between state: mid-brand bloom
-     hinting that a click would commit. */
-  background: radial-gradient(
-    circle at center,
-    color-mix(in srgb, var(--stone) 55%, transparent) 0%,
-    color-mix(in srgb, var(--stone) 50%, transparent) 30%,
-    color-mix(in srgb, var(--stone) 22%, transparent) 60%,
-    color-mix(in srgb, var(--stone) 6%, transparent) 88%,
-    transparent 100%
-  );
+  /* Solid disc — flat fill, clean edge, no gradient. Matches Tomen's
+     elsewhere-everywhere design language of definite shapes (theme
+     swatches, the update dot, brand bullets in spines). Idle uses
+     --stone, a warm mid-gray, so the disc reads as a quiet chip in
+     the margin rather than a "page-turn here" billboard. Armed
+     shifts to mid-brand; active goes full brand. The hold animation
+     is this background interpolating from armed to active over
+     HOLD_MS — the color shift IS the commitment. */
+  background: color-mix(in srgb, var(--stone) 38%, transparent);
   border-radius: 50%;
   transition: background 180ms ease;
   z-index: 5;
@@ -1592,47 +1584,18 @@ body.r-ui-visible .r-footer-ref {
   transform: translate(50%, -50%);
 }
 /* Cursor is inside the visible half-disc (a click would register).
-   The bloom's color shifts from the idle --stone gray toward --brand,
-   signaling that the affordance is "live." Same gradient structure
-   as idle for clean interpolation. */
+   Hue shifts from idle --stone to mid-brand — the disc has "noticed"
+   you and is signaling that a click would land. */
 .r-edge-ring.armed {
-  background: radial-gradient(
-    circle at center,
-    color-mix(in srgb, var(--brand) 70%, transparent) 0%,
-    color-mix(in srgb, var(--brand) 62%, transparent) 30%,
-    color-mix(in srgb, var(--brand) 28%, transparent) 60%,
-    color-mix(in srgb, var(--brand) 8%, transparent) 88%,
-    transparent 100%
-  );
+  background: color-mix(in srgb, var(--brand) 65%, transparent);
 }
-/* Hold in progress. Full-saturation brand at the core, halo retained
-   at the perimeter for continuity with the other states. The hold
-   animation is the transition INTO this gradient — see startHold for
-   the timing override that stretches that transition to HOLD_MS so
-   the color shift unfolds over the commit duration. */
+/* Hold in progress. Full-saturation brand. The hold animation is the
+   background transitioning from .armed to .active — see startHold
+   for the timing override that stretches that transition to HOLD_MS
+   so the color build unfolds over the commit window. */
 .r-edge-ring.active {
-  background: radial-gradient(
-    circle at center,
-    var(--brand) 0%,
-    color-mix(in srgb, var(--brand) 95%, transparent) 30%,
-    color-mix(in srgb, var(--brand) 42%, transparent) 60%,
-    color-mix(in srgb, var(--brand) 12%, transparent) 88%,
-    transparent 100%
-  );
+  background: var(--brand);
 }
-.r-edge-ring svg {
-  width: 100%; height: 100%;
-  overflow: visible;
-  display: block;
-}
-/* Outline ring + iris fill both removed — the bloom IS the visual,
-   and the hold animation is a color shift of the bloom (background
-   gradient transitioning to the brand-state) rather than a disc
-   growing inside the SVG. The SVG elements are kept in the DOM
-   simply because the existing markup carries them; both inner shapes
-   are hidden so they don't interfere with the bloom. */
-.r-edge-ring-track,
-.r-edge-ring-fill { display: none; }
 
 /* Debug mode — reveals interaction zones.
    Toggle with Shift+D while the reader is active. */
@@ -3354,38 +3317,14 @@ body.lib-select-mode .spine {
     </div>
     <!-- Book + chapter reminder at bottom. -->
     <div class="r-footer-ref" id="r-footer-ref" aria-hidden="true"></div>
-    <!-- Edge-anchored half-circle hold indicators. Each ring sits flush
-         against its side of the screen (left edge for prev, right edge
-         for next). Size scales with cursor proximity to the edge.
-         The SVG renders:
-         - a half-arc <path> for the outline (track) — only the visible
-           side of the full circle is drawn, so there's no off-screen
-           portion of the stroke
-         - a <circle> for the interior fill — sits inside the ring and
-           scales from 0 to 1 during a hold to "fill up" the ring
-         The outline color transitions from dim to brand when the cursor
-         is actually inside the half-disc (.armed class), signaling to
-         the user that a click will now register. -->
-    <div class="r-edge-ring r-edge-ring-prev" id="r-edge-ring-prev" aria-hidden="true">
-      <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
-        <!-- Outline half-arc. Visible half is the RIGHT semicircle (left
-             edge of screen). 12 → 3 → 6 o'clock. -->
-        <path class="r-edge-ring-track" d="M 40 2 A 38 38 0 0 1 40 78"></path>
-        <!-- Interior fill disc. Clipped to the visible half by the path's
-             geometry — we only use the right half of this circle visually
-             because the left half is off-screen with the rest of the SVG.
-             Starts at scale 0; startHold transitions to scale 1. -->
-        <circle class="r-edge-ring-fill" cx="40" cy="40" r="38"></circle>
-      </svg>
-    </div>
-    <div class="r-edge-ring r-edge-ring-next" id="r-edge-ring-next" aria-hidden="true">
-      <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
-        <!-- Visible half is the LEFT semicircle (right edge of screen).
-             12 → 9 → 6 o'clock. The sweep-flag (0) differs from prev. -->
-        <path class="r-edge-ring-track" d="M 40 2 A 38 38 0 0 0 40 78"></path>
-        <circle class="r-edge-ring-fill" cx="40" cy="40" r="38"></circle>
-      </svg>
-    </div>
+    <!-- Edge-anchored half-disc page-turn affordances. Each div sits
+         flush against its side of the screen (left edge for prev,
+         right edge for next), shows the on-screen half of a CSS-rendered
+         circle, and rides the cursor's vertical position via the rAF
+         tracking loop. Size scales with cursor proximity; background
+         color shifts on .armed and again on .active. -->
+    <div class="r-edge-ring r-edge-ring-prev" id="r-edge-ring-prev" aria-hidden="true"></div>
+    <div class="r-edge-ring r-edge-ring-next" id="r-edge-ring-next" aria-hidden="true"></div>
   </div>
   <!-- Reading toolbar (bottom). Three groups: navigation within book
        (Contents + Marks) on the left, Appearance (visual/reading settings)
@@ -6800,11 +6739,17 @@ document.addEventListener('keydown', (e) => {
 const HOLD_MS = 400;
 // Max ring radius in CSS pixels — the visible half-disc reaches this far
 // into the page when the cursor is at (or very near) the screen edge.
-const EDGE_RING_MAX_R = 130;
-// Baseline radius — the persistent bloom always visible at each edge.
-const EDGE_RING_BASELINE_R = 44;
+// Diameter at max is 2 × this. A solid disc reads as visually denser
+// than a gradient bloom of the same size, so these values are
+// significantly smaller than the bloom era required.
+const EDGE_RING_MAX_R = 75;
+// Baseline radius — the persistent solid disc always visible at each
+// edge. Both discs ride the cursor's vertical position via the rAF
+// tick, so the affordance is a small chip in your peripheral vision
+// at the cursor's eye level.
+const EDGE_RING_BASELINE_R = 24;
 // Minimum rendered radius for a click to count as "armed."
-const EDGE_RING_MIN_R = 70;
+const EDGE_RING_MIN_R = 50;
 // Activation distance — the X-distance from the screen edge at which
 // the ring starts growing from baseline toward max. Outside this, the
 // ring stays at baseline; inside, the ring grows along a power curve
