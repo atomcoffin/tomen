@@ -1535,34 +1535,6 @@ body.r-ui-visible .r-footer-ref {
    they meet at center, each taking half the screen. Zones absorb hold and
    swipe gestures for page-turn; single taps still reach the menu-open handler
    on each zone. */
-.r-click-zone {
-  position: absolute;
-  top: 0; bottom: 0;
-  /* 1/3 of viewport width per zone — leaves the middle 1/3 as a "safe"
-     area for tap-to-toggle-UI and selection without triggering the edge
-     ring. JS uses EDGE_ZONE_FRACTION (= 1/3) for the proximity math, so
-     these stay in sync. */
-  width: 33.333%;
-  z-index: 3;
-  background: transparent;
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
-  /* Cursor stays as the OS pointer — no more cursor: none. The edge-ring
-     handles all visual feedback for proximity / hold; hiding the cursor
-     was making the reader feel possessed and made cursor recovery on
-     leaving the zone awkward. */
-}
-.r-click-zone.prev { left: 0; }
-.r-click-zone.next { right: 0; }
-
-/* In editing mode, click-zones should not absorb events — taps on the outer
-   text need to reach .r-inner so sentence-select can fire. Page-turn logic
-   is already disabled by readerInteractionBlocked() during editing. */
-body.r-mode-editing .r-click-zone {
-  pointer-events: none;
-}
-
 /* Hold-to-turn ring system, edge-anchored variant.
    Each ring is a half-circle visually anchored to the left or right edge
    of the viewport. Implementation: a square SVG of side 2R is positioned
@@ -1606,11 +1578,12 @@ body.r-mode-editing .r-click-zone {
   /* Same, mirrored: center sits ON the right edge, only left half visible. */
   transform: translate(50%, -50%);
 }
-/* Cursor in the click zone — ring is brighter and scaling toward cursor. */
-.r-edge-ring.hover { opacity: 0.7; }
-/* Cursor is inside the visible half-disc (a click would register). */
+/* Cursor is inside the visible half-disc (a click would register).
+   Growth state itself is communicated by SIZE — the ring's diameter
+   eases from baseline up toward max as the cursor approaches the edge,
+   so a separate "hover" opacity tier isn't needed. */
 .r-edge-ring.armed { opacity: 0.9; }
-/* Hold is active (mousedown, disc filling). */
+/* Hold is active (mousedown / touchend at armed). */
 .r-edge-ring.active { opacity: 1; }
 .r-edge-ring svg {
   width: 100%; height: 100%;
@@ -1659,46 +1632,10 @@ body.r-mode-editing .r-click-zone {
      0% to 50% over HOLD_MS, snap back to 0% on cancel/completion. */
 }
 
-/* Swipe-to-turn edge stripe. Chartreuse vertical bar flush against the
-   edge being turned (left for prev, right for next), spanning top to
-   bottom. Width is driven by --swipe-progress (0 to 1) set by JS during
-   the swipe, growing from 0px to 6px during normal swipe and reaching
-   8px once the swipe passes the threshold for committing the page turn.
-   The .threshold-reached class fires the wider state with a brief
-   transition so the user gets clear visual confirmation that lifting
-   their finger now will actually turn the page.
-   Pointer-events: none — this is purely a visual indicator, no
-   interactivity of its own. */
-.r-swipe-ring {
-  position: absolute;
-  top: 0; bottom: 0;
-  pointer-events: none;
-  background: var(--brand);
-  width: calc(var(--swipe-progress, 0) * 6px);
-  opacity: 0.9;
-  transition: width 60ms linear, opacity 80ms linear;
-  z-index: 5;
-  /* Subtle outer glow so the stripe feels lit rather than painted on,
-     especially against dark theme. Stays inside the page bounds since
-     it's a box-shadow with small spread. */
-  box-shadow: 0 0 12px color-mix(in srgb, var(--brand) 50%, transparent);
-}
-.r-swipe-ring.dir-prev { left: 0; right: auto; }
-.r-swipe-ring.dir-next { right: 0; left: auto; }
-.r-swipe-ring.threshold-reached {
-  width: 8px;
-  opacity: 1;
-}
-
-/* Debug mode — reveals click/touch interaction zones.
+/* Debug mode — reveals interaction zones.
    Toggle with Shift+D while the reader is active. */
-body.r-debug .r-click-zone.prev {
-  background: rgba(63, 138, 255, 0.18) !important;
+body.r-debug .r-edge-ring {
   outline: 2px dashed rgba(63, 138, 255, 0.55) !important;
-}
-body.r-debug .r-click-zone.next {
-  background: rgba(255, 138, 63, 0.18) !important;
-  outline: 2px dashed rgba(255, 138, 63, 0.55) !important;
 }
 body.r-debug .r-book {
   outline: 1px dashed rgba(100, 100, 100, 0.3) !important;
@@ -3225,7 +3162,6 @@ body.lib-select-mode .spine {
   }
   .r-slot-right { display: none; }
   .r-spread { column-gap: 0; }
-  .r-click-zone { width: 50%; }
   /* Mobile toolbar padding — top and bottom each have their own rules so the
      bottom toolbar preserves safe-area-inset-bottom padding (home indicator
      on iPhone sits inside that inset; without it, buttons land in the
@@ -3400,7 +3336,6 @@ body.lib-select-mode .spine {
     </div>
   </div>
   <div class="r-content" id="r-content">
-    <div class="r-click-zone prev" data-dir="prev" onclick="bookAreaTapped(event)"></div>
     <div class="r-book" id="r-book" onclick="bookAreaTapped(event)">
       <!-- Dual-slot page model. Each slot is an independent page viewport
            containing the full chapter HTML. Left slot is authoritative for
@@ -3415,7 +3350,6 @@ body.lib-select-mode .spine {
         </div>
       </div>
     </div>
-    <div class="r-click-zone next" data-dir="next" onclick="bookAreaTapped(event)"></div>
     <!-- Book + chapter reminder at bottom. -->
     <div class="r-footer-ref" id="r-footer-ref" aria-hidden="true"></div>
     <!-- Edge-anchored half-circle hold indicators. Each ring sits flush
@@ -3450,9 +3384,6 @@ body.lib-select-mode .spine {
         <circle class="r-edge-ring-fill" cx="40" cy="40" r="38"></circle>
       </svg>
     </div>
-    <!-- Swipe-to-turn edge glow. Tall narrow ember bloom on whichever side
-         the user is swiping toward. Opacity scales with swipe progress. -->
-    <div class="r-swipe-ring" id="r-swipe-ring" aria-hidden="true"></div>
   </div>
   <!-- Reading toolbar (bottom). Three groups: navigation within book
        (Contents + Marks) on the left, Appearance (visual/reading settings)
@@ -6699,31 +6630,44 @@ document.addEventListener('keydown', (e) => {
     return el ? el.dataset.strip : null;  // 'font' | 'line' | 'width'
   }
 
-  const swipeRing = () => $('r-swipe-ring');
-
-  function showSwipeProgress(dx, thresh) {
-    const ring = swipeRing();
-    if (!ring) return;
-    const dir = dx < 0 ? 'next' : 'prev';
-    ring.classList.toggle('dir-prev', dir === 'prev');
-    ring.classList.toggle('dir-next', dir === 'next');
-    // Ratio is 0 at no swipe, 1 at threshold-reached. CSS uses --swipe-progress
-    // to interpolate width from 0 to 6px. Pow(0.7) curve so the stripe grows
-    // a bit faster early on, then plateaus near threshold — matches how the
-    // user's swipe feels (small motion = obvious response, then diminishing).
+  // Drive the half-disc edge rings (same elements the mouse uses) from
+  // touch-swipe progress. Direction comes from the swipe sign — a swipe
+  // right (positive dx) pulls the previous page in, so the LEFT (prev)
+  // ring is the one that grows. Y tracks the finger so the ring rides
+  // along under the user's fingertip. The other ring stays at baseline.
+  // Past threshold, the active ring picks up .armed for the visual
+  // confirmation that releasing now will commit the turn.
+  let _swipeRingDir = null;
+  function showSwipeProgress(dx, thresh, touchY) {
+    const dir = dx > 0 ? 'prev' : 'next';
+    const otherDir = dir === 'prev' ? 'next' : 'prev';
     const ratio = Math.min(1, Math.abs(dx) / thresh);
-    const eased = Math.pow(ratio, 0.7);
-    ring.style.setProperty('--swipe-progress', eased.toFixed(3));
-    // Pop to wider/fuller state once committed — clear "you can let go now"
-    // signal. Threshold reached at ratio = 1 (i.e., dx >= thresh in either
-    // direction).
-    ring.classList.toggle('threshold-reached', ratio >= 1);
+    const eased = Math.pow(ratio, 0.8);
+    const targetR = EDGE_RING_BASELINE_R + (EDGE_RING_MAX_R - EDGE_RING_BASELINE_R) * eased;
+    _ringState[dir].targetR = targetR;
+    _ringState[dir].targetY = touchY;
+    _ringState[otherDir].targetR = EDGE_RING_BASELINE_R;
+    _ringState[otherDir].targetY = touchY;
+    const ring = _ringForDir(dir);
+    const otherRing = _ringForDir(otherDir);
+    if (ring) ring.classList.toggle('armed', ratio >= 1);
+    if (otherRing) otherRing.classList.remove('armed');
+    _swipeRingDir = dir;
+    _ensureRingTicking();
   }
   function hideSwipeProgress() {
-    const ring = swipeRing();
-    if (!ring) return;
-    ring.style.removeProperty('--swipe-progress');
-    ring.classList.remove('threshold-reached');
+    // Release the active ring back to baseline + mid-screen so it
+    // doesn't sit floating where the finger lifted. rAF eases both
+    // size and position.
+    const midY = window.innerHeight / 2;
+    for (const dir of ['prev', 'next']) {
+      _ringState[dir].targetR = EDGE_RING_BASELINE_R;
+      _ringState[dir].targetY = midY;
+      const ring = _ringForDir(dir);
+      if (ring) ring.classList.remove('armed');
+    }
+    _swipeRingDir = null;
+    _ensureRingTicking();
   }
 
   rc.addEventListener('touchstart', (e) => {
@@ -6756,7 +6700,7 @@ document.addEventListener('keydown', (e) => {
     }
 
     if (mode === 'horizontal') {
-      showSwipeProgress(dx, swipeThreshold());
+      showSwipeProgress(dx, swipeThreshold(), t.clientY);
     } else if (mode === 'h-font' || mode === 'h-line' || mode === 'width') {
       const step = mode === 'h-font' ? H_STEP_FONT
                  : mode === 'h-line' ? H_STEP_LINE
@@ -6844,40 +6788,50 @@ document.addEventListener('keydown', (e) => {
 })();
 
 // ===== PAGE-TURN HOLD MACHINERY =====
-// Shared state + helpers for the edge-anchored hold-to-turn indicators.
-// Two rings — one anchored to each edge of the viewport — visible only
-// when the cursor is over the corresponding click zone.
-// Mouse-only: touch users get the swipe gesture for page turns, no
-// equivalent hold-ring UI on touch (would conflict with scroll/swipe).
+// Shared state + helpers for the edge-anchored half-disc indicators.
+// Two rings, one at each edge of the viewport, always visible at a
+// baseline idle size that rides the cursor (or touch finger) on Y.
+//   - Mouse: cursor X-distance to each edge drives that ring's size;
+//            click-and-hold-while-armed plays the iris fill, then turns.
+//   - Touch: horizontal swipe distance drives the ring on the side
+//            being pulled in; release at threshold turns the page.
 const HOLD_MS = 400;
-// Max ring radius in CSS pixels — the visible half-disc reaches this
-// far into the page area when the cursor is at the screen edge.
-// Reduced from 220 → 150; the ring was visually dominant at 220.
-const EDGE_RING_MAX_R = 150;
+// Max ring radius in CSS pixels — the visible half-disc reaches this far
+// into the page when the cursor is at (or very near) the screen edge.
+// Diameter at max is 2 × this. Tuned in concert with EDGE_RING_BASELINE_R
+// for a small idle "I'm here" hint that grows into a confident click
+// target as the cursor approaches.
+const EDGE_RING_MAX_R = 60;
 // Baseline radius — the small persistent indicator always visible at
-// each edge, even when the cursor isn't in the click zone. Signals to
-// the user that the page-turn affordance is always available without
-// being noisy. Reads as a quiet hint, not a UI element.
-const EDGE_RING_BASELINE_R = 14;
-// Minimum radius for the ring to be considered an interactive target.
-// Set above the baseline so stray clicks on the small persistent
-// indicator don't trigger page turns — the user has to move the cursor
-// close enough to grow the ring to a deliberate size.
-const EDGE_RING_MIN_R = 30;
+// each edge. With Y-tracking enabled, both rings ride the cursor's
+// vertical position even when the cursor is nowhere near an edge, so
+// the rings feel like companions you can approach rather than UI
+// elements that appear and disappear.
+const EDGE_RING_BASELINE_R = 9;
+// Minimum rendered radius for a click to count as "armed." Sits above
+// the baseline so stray clicks on the small idle indicator don't
+// register — the user has to move the cursor close enough to grow the
+// ring to a deliberate size first.
+const EDGE_RING_MIN_R = 24;
+// Activation distance — the X-distance from the screen edge at which
+// the ring starts growing from baseline toward max. Outside this, the
+// ring stays at baseline; inside, the ring grows along a power curve
+// (accelerating near the edge for a tactile "magnetic pull" feel).
+const EDGE_RING_ACTIVATION_DIST = 220;
 // rAF easing factor for size/position pursuit. Each frame, the ring's
 // rendered values move (target - current) * EASE toward the target.
 // Lower = more lag (molasses), higher = snappier.
-const EDGE_RING_EASE = 0.07;
-// Click zone width as a fraction of viewport width. Page is divided into
-// 3rds: 1/3 prev | 1/3 safe (no page-turn) | 1/3 next.
-const EDGE_ZONE_FRACTION = 1 / 3;
+const EDGE_RING_EASE = 0.25;
 // Stop the rAF loop when both size and Y are within this many pixels of
 // target — avoids burning CPU on infinitesimal residuals.
 const EDGE_RING_SETTLE_THRESHOLD = 0.4;
 
 let _holdTimer = null;
 let _holdDir = null;
-let _hoverDir = null;
+// Last known cursor position. Updated by the reader mousemove handler
+// and read by the rAF tick when re-evaluating armed state.
+let _lastCursorX = 0;
+let _lastCursorY = 0;
 
 // Per-direction render state for the rAF easing loop. `target` values are
 // what the cursor implies right now (baseline when idle, larger when
@@ -6896,21 +6850,18 @@ function _fillForDir(dir) {
   return _ringForDir(dir)?.querySelector('.r-edge-ring-fill');
 }
 
-// Compute the ring's *target* radius for a given cursor position. The rAF
-// loop eases the rendered radius toward this. Returns 0 when the cursor
-// is outside the click zone (which causes the loop to ease the ring back
-// down to nothing and stop).
+// Compute the ring's *target* radius for a given cursor X position. The
+// rAF loop eases the rendered radius toward this. The ring stays at
+// baseline outside the activation distance and grows along a power
+// curve as the cursor approaches the edge — accelerating near the
+// edge so the final commitment feels like a magnetic pull.
 function _computeTargetRadius(dir, cursorX) {
   const vw = window.innerWidth;
   const distFromEdge = dir === 'prev' ? cursorX : (vw - cursorX);
-  const zoneWidth = vw * EDGE_ZONE_FRACTION;
-  // Outside the click zone: ring is at its baseline "always visible" size.
-  // This replaces the old "ring vanishes when cursor leaves zone" model —
-  // the ring is a persistent affordance now, not a transient one.
-  if (distFromEdge < 0 || distFromEdge > zoneWidth) return EDGE_RING_BASELINE_R;
-  const proximity = 1 - (distFromEdge / zoneWidth);  // 0 at zone outer edge, 1 at screen edge
-  // Slight ease — power > 1 means the ring grows slowly across most of
-  // the zone and accelerates near the edge.
+  if (distFromEdge < 0 || distFromEdge > EDGE_RING_ACTIVATION_DIST) {
+    return EDGE_RING_BASELINE_R;
+  }
+  const proximity = 1 - (distFromEdge / EDGE_RING_ACTIVATION_DIST);
   const eased = Math.pow(proximity, 1.4);
   return EDGE_RING_BASELINE_R + (EDGE_RING_MAX_R - EDGE_RING_BASELINE_R) * eased;
 }
@@ -6938,8 +6889,11 @@ function _renderRing(dir) {
 }
 
 // rAF loop: ease both rings' current values toward their targets each
-// frame. Stops when both rings are settled (close to target and target
-// is non-zero, OR target is 0 and current is also ~0 = fully hidden).
+// frame. Re-syncs armed classes per frame too — the rendered radius
+// (what the user actually sees and clicks) changes during an in-flight
+// grow, so a ring can cross the "armed" threshold even when the cursor
+// hasn't moved since the last mousemove event. Stops when both rings
+// are settled.
 function _ringTick() {
   let stillAnimating = false;
   for (const dir of ['prev', 'next']) {
@@ -6952,12 +6906,12 @@ function _ringTick() {
       _renderRing(dir);
       stillAnimating = true;
     } else if (Math.abs(dR) > 0 || Math.abs(dY) > 0) {
-      // Snap to settled state and render one final frame.
       s.currentR = s.targetR;
       s.currentY = s.targetY;
       _renderRing(dir);
     }
   }
+  _syncArmedClasses(_lastCursorX, _lastCursorY);
   if (stillAnimating) {
     _ringRafId = requestAnimationFrame(_ringTick);
   } else {
@@ -6972,9 +6926,11 @@ function _ensureRingTicking() {
 // Initialize the edge rings to their baseline state — visible at each
 // edge, mid-screen vertically, at BASELINE_R radius. Called when the
 // reader opens so the rings are immediately visible as small hints
-// rather than appearing only when the cursor approaches an edge.
+// before the cursor has revealed its position.
 function _initEdgeRings() {
   const midY = window.innerHeight / 2;
+  _lastCursorX = 0;
+  _lastCursorY = midY;
   for (const dir of ['prev', 'next']) {
     const state = _ringState[dir];
     state.currentR = EDGE_RING_BASELINE_R;
@@ -6983,7 +6939,7 @@ function _initEdgeRings() {
     state.targetY = midY;
     const ring = _ringForDir(dir);
     if (ring) {
-      ring.classList.remove('hover', 'active', 'armed', 'exiting');
+      ring.classList.remove('active', 'armed', 'exiting');
       const size = EDGE_RING_BASELINE_R * 2;
       ring.style.width = size + 'px';
       ring.style.height = size + 'px';
@@ -6998,65 +6954,49 @@ function _initEdgeRings() {
   }
 }
 
-// Set the target values for a ring based on cursor position. The rAF
-// loop will catch up. The opposite-direction ring is told to shrink
-// to 0 (rAF will ease it down).
-function _updateEdgeRing(dir, cursorX, cursorY) {
-  const otherDir = dir === 'prev' ? 'next' : 'prev';
-  const otherState = _ringState[otherDir];
-  const otherRing = _ringForDir(otherDir);
-  if (otherRing) { otherRing.classList.remove('hover', 'active', 'armed'); }
-  // Other-side ring returns to baseline at mid-screen — don't leave it
-  // floating at the cursor's previous Y from when it was last active.
-  otherState.targetR = EDGE_RING_BASELINE_R;
-  otherState.targetY = window.innerHeight / 2;
-
-  const state = _ringState[dir];
-  state.targetR = _computeTargetRadius(dir, cursorX);
-  state.targetY = cursorY;
-  _ensureRingTicking();
-}
-
-function showHover(dir, x, y) {
-  _hoverDir = dir;
-  const ring = _ringForDir(dir);
-  const fill = _fillForDir(dir);
-  const state = _ringState[dir];
-  if (!ring) return;
-
-  ring.classList.remove('active', 'exiting', 'armed');
-  ring.classList.add('hover');
-  // Reset the fill iris in case a prior hold left it in a non-empty state.
-  if (fill) {
-    fill.style.transition = 'none';
-    fill.style.clipPath = 'circle(0% at 50% 50%)';
-    fill.style.webkitClipPath = 'circle(0% at 50% 50%)';
+// Continuous-tracking update: feed cursor position into BOTH rings.
+// Each ring's targetY = cursor Y; each ring's targetR = its own
+// X-distance-to-edge math. The closer edge naturally grows; the far
+// one stays at baseline. Replaces the old zone-bounded showHover /
+// hideHover / _updateEdgeRing trio with a single per-mousemove call.
+function _trackCursor(cursorX, cursorY) {
+  _lastCursorX = cursorX;
+  _lastCursorY = cursorY;
+  for (const dir of ['prev', 'next']) {
+    const state = _ringState[dir];
+    state.targetR = _computeTargetRadius(dir, cursorX);
+    state.targetY = cursorY;
   }
-  // Set target values — rAF loop will ease from wherever the ring
-  // currently is (likely baseline) to the new cursor-driven target.
-  state.targetR = _computeTargetRadius(dir, x);
-  state.targetY = y;
+  _syncArmedClasses(cursorX, cursorY);
   _ensureRingTicking();
 }
 
-function hideHover() {
-  if (!_hoverDir) return;
-  const dir = _hoverDir;
-  _hoverDir = null;
-  const ring = _ringForDir(dir);
-  const state = _ringState[dir];
-  if (!ring) return;
-  // Don't shrink if a hold is in progress — the active ring should stay
-  // at its click-time size until the hold completes or cancels.
-  if (_holdTimer) return;
+// Toggle the .armed class on each ring based on whether the cursor is
+// currently inside its rendered half-disc. Called from the cursor
+// handler and from the rAF tick (because the rendered radius changes
+// frame-by-frame and an in-flight grow can cross the armed threshold
+// after the cursor has stopped moving).
+function _syncArmedClasses(cursorX, cursorY) {
+  for (const dir of ['prev', 'next']) {
+    const ring = _ringForDir(dir);
+    if (!ring) continue;
+    const inside = _cursorInsideRing(dir, cursorX, cursorY);
+    ring.classList.toggle('armed', inside);
+  }
+}
 
-  ring.classList.remove('hover', 'active', 'armed');
-  // Target baseline radius AND mid-screen Y — the rest state is "small
-  // hint at vertical center of edge," not "small hint stuck wherever the
-  // cursor abandoned it." rAF eases both currentR and currentY toward
-  // their new targets in parallel for a smooth return.
-  state.targetR = EDGE_RING_BASELINE_R;
-  state.targetY = window.innerHeight / 2;
+// Reset both rings to their idle resting state — baseline radius at
+// mid-screen. Called when the cursor leaves the window or the user
+// blurs the tab so the rings don't sit floating wherever the cursor
+// last was.
+function _restEdgeRings() {
+  const midY = window.innerHeight / 2;
+  for (const dir of ['prev', 'next']) {
+    _ringState[dir].targetR = EDGE_RING_BASELINE_R;
+    _ringState[dir].targetY = midY;
+    const ring = _ringForDir(dir);
+    if (ring) ring.classList.remove('armed');
+  }
   _ensureRingTicking();
 }
 
@@ -7116,18 +7056,10 @@ function cancelHold(completed) {
       fill.style.webkitClipPath = 'circle(0% at 50% 50%)';
     }
   }
-  const state = _ringState[dir];
-  if (_hoverDir === dir) {
-    // Cursor still in zone — restore hover state, let rAF pull the ring
-    // back to its proximity-driven size.
-    ring.classList.add('hover');
-  } else {
-    // Cursor has left — target baseline at mid-screen Y, rAF eases both.
-    ring.classList.remove('hover', 'armed');
-    state.targetR = EDGE_RING_BASELINE_R;
-    state.targetY = window.innerHeight / 2;
-    _ensureRingTicking();
-  }
+  // Ring's size + position keep tracking the cursor via the continuous
+  // mousemove handler, so we don't need to manually retarget here.
+  // Just re-sync the armed class against the now-released state.
+  _syncArmedClasses(_lastCursorX, _lastCursorY);
 }
 
 // ===== MOUSE CLICK-AND-HOLD =====
@@ -7157,38 +7089,32 @@ let _detachReaderHoldHandlers = () => {};
 (() => {
   let attached = false;
   const onMouseMove = (e) => {
-    if (readerInteractionBlocked()) { if (_hoverDir) hideHover(); return; }
+    if (readerInteractionBlocked()) return;
     // While a hold is in progress, freeze the ring — the fill animation
-    // is the focal point and a moving/scaling ring distracts from it
-    // (and creates visual artifacts during the dashoffset transition).
+    // is the focal point and a moving/scaling ring distracts from it.
     if (_holdTimer) return;
-    const zone = e.target.closest && e.target.closest('.r-click-zone');
-    if (zone) {
-      const dir = zone.dataset.dir;
-      if (dir !== _hoverDir) showHover(dir, e.clientX, e.clientY);
-      else _updateEdgeRing(dir, e.clientX, e.clientY);
-      const ring = _ringForDir(dir);
-      if (ring) {
-        const inside = _cursorInsideRing(dir, e.clientX, e.clientY);
-        ring.classList.toggle('armed', inside);
-      }
-    } else if (_hoverDir) {
-      hideHover();
-    }
+    // Continuous tracking — both rings update their Y to follow the
+    // cursor and their R based on X-distance to their respective edge.
+    // No more zone test; the ring's grown footprint is the hit target.
+    _trackCursor(e.clientX, e.clientY);
   };
   const onMouseDown = (e) => {
     if (readerInteractionBlocked()) return;
-    const zone = e.target.closest && e.target.closest('.r-click-zone');
-    if (!zone || e.button !== 0) return;
-    const dir = zone.dataset.dir;
-    if (!dir) return;
-    if (!_cursorInsideRing(dir, e.clientX, e.clientY)) return;
-    startHold(dir, e.clientX, e.clientY);
-    e.preventDefault();
+    if (e.button !== 0) return;
+    // Pure proximity hit-test against each ring's current half-disc.
+    // First armed ring wins (in practice only one is ever armed at a
+    // time since they're at opposite edges).
+    for (const dir of ['prev', 'next']) {
+      if (_cursorInsideRing(dir, e.clientX, e.clientY)) {
+        startHold(dir, e.clientX, e.clientY);
+        e.preventDefault();
+        return;
+      }
+    }
   };
   const onMouseUp = () => cancelHold();
-  const onMouseLeave = () => { hideHover(); cancelHold(); };
-  const onBlur = () => { hideHover(); cancelHold(); };
+  const onMouseLeave = () => { cancelHold(); _restEdgeRings(); };
+  const onBlur = () => { cancelHold(); _restEdgeRings(); };
 
   const attach = () => {
     if (attached) return;
