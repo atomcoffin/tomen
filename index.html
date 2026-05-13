@@ -3941,6 +3941,10 @@ async function saveBookContent(book) {
 function bookMetaFromBook(book) {
   return {
     id: book.id, title: book.title, author: book.author, cover: book.cover,
+    // Cover-storage version. 1 (or missing) = raw blob, full resolution.
+    // 2 = shrunken JPEG via shrinkCoverDataURL. Drives the background
+    // migration on init so existing libraries get re-encoded once.
+    coverV: book.coverV || 1,
     progress: book.progress || 0, chapterIndex: book.chapterIndex || 0,
     spreadIndex: book.spreadIndex || 0,
     scrollPos: book.scrollPos || 0, chapterCount: (book.chapters || []).length,
@@ -4456,6 +4460,51 @@ async function loadLibrary() {
   library = await dbGetAll('books');
 }
 
+// Background-migrate cover images from raw EPUB blobs (v1) to shrunken
+// JPEG data URLs (v2). Runs once per session — picks up any books still
+// at v1, shrinks each cover, writes the new data URL + coverV=2 back to
+// IDB, and updates the in-memory book object. Yields to the event loop
+// between books so a large migration doesn't lock the UI; the user can
+// scroll/click while it works. The DOM isn't refreshed mid-migration
+// (the in-flight grid view keeps showing the old cover strings until
+// the user navigates), so the perf benefit lands on the next page load
+// rather than mid-session — but that's by design: a full re-render
+// while migrating would itself be expensive.
+let _coverMigrationRunning = false;
+async function _migrateCoverImages() {
+  if (_coverMigrationRunning) return;
+  if (!library || library.length === 0) return;
+  const candidates = library.filter(b => b.cover && (b.coverV || 1) < 2);
+  if (candidates.length === 0) return;
+  _coverMigrationRunning = true;
+  try {
+    for (const book of candidates) {
+      try {
+        const shrunken = await shrinkCoverDataURL(book.cover);
+        if (shrunken) {
+          book.cover = shrunken;
+          book.coverV = 2;
+          await saveBookMeta(book);
+        } else {
+          // Couldn't shrink (corrupt image, etc.) — mark as v2 anyway so
+          // we don't retry every session. The original raw cover stays.
+          book.coverV = 2;
+          await saveBookMeta(book);
+        }
+      } catch (err) {
+        console.warn('[tomen] cover migration skipped for', book.id, err);
+      }
+      // Yield between books so a 40-book migration doesn't freeze the
+      // tab. Each shrink itself involves image decode + canvas paint +
+      // toDataURL — non-trivial work that we don't want stacked back-
+      // to-back without giving the rest of the page a turn.
+      await new Promise(r => setTimeout(r, 0));
+    }
+  } finally {
+    _coverMigrationRunning = false;
+  }
+}
+
 // Generate a color from a string (fallback for books without covers)
 function strColor(str) {
   const colors = [
@@ -4467,6 +4516,46 @@ function strColor(str) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
+}
+
+// Shrink a cover data URL to a max width (preserving aspect ratio) and
+// re-encode as JPEG for efficient storage. EPUB covers are typically
+// 600-1200px JPEG/PNG; the base64-encoded data URL ends up at 100-500KB
+// per book. With ~40 books that's 5-15MB resident in memory and
+// re-serialized into innerHTML on every library render. Re-encoding to
+// 480px JPEG @ q=0.82 typically shrinks each cover by 80-95% while still
+// looking sharp at the grid-card sizes Tomen renders. Returns null on
+// any failure so callers can fall back to the original data URL.
+async function shrinkCoverDataURL(dataUrl, maxWidth = 480, quality = 0.82) {
+  if (!dataUrl || typeof dataUrl !== 'string') return null;
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        if (!w || !h) { resolve(null); return; }
+        // No upscale — if the original is already smaller than maxWidth,
+        // keep its dimensions but still re-encode as JPEG (a photographic
+        // cover stored as PNG wastes a lot of bytes; even a small PNG is
+        // bigger than the same image as a quality-0.82 JPEG).
+        const scale = w > maxWidth ? maxWidth / w : 1;
+        const targetW = Math.round(w * scale);
+        const targetH = Math.round(h * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(null); return; }
+        ctx.drawImage(img, 0, 0, targetW, targetH);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
 }
 
 // Extract dominant color from a cover image data URL
@@ -4835,12 +4924,22 @@ function normalizeForSearch(s) {
     .trim();
 }
 
+// Debounce the actual library re-render so typing doesn't fire a full
+// render per keystroke. The query state and the × button visibility
+// update synchronously (so the input remains responsive), but the
+// expensive filter+sort+innerHTML pass waits for the user to pause
+// briefly. 150ms is short enough to feel immediate when you stop
+// typing, long enough to skip the intermediate renders during a burst.
+let _searchDebounceTimer = null;
 function setLibrarySearch(q) {
   librarySearchQuery = q || '';
-  // Update the wrapper's has-value class so the × clear button shows/hides.
   const wrap = $('lib-search');
   if (wrap) wrap.classList.toggle('has-value', !!librarySearchQuery.trim());
-  renderLibrary();
+  clearTimeout(_searchDebounceTimer);
+  _searchDebounceTimer = setTimeout(() => {
+    _searchDebounceTimer = null;
+    renderLibrary();
+  }, 150);
 }
 
 function clearLibrarySearch() {
@@ -5345,6 +5444,7 @@ async function loadTextFile(file, batch = false) {
   await saveBookAtomic(book);
   library.push({
     id: book.id, title: book.title, author: book.author, cover: book.cover,
+    coverV: book.coverV || 2,
     progress: 0, chapterIndex: 0, scrollPos: 0,
     chapterCount: 1, contentSize: html.length,
     fontFace: null
@@ -5740,19 +5840,38 @@ async function loadEpub(file, batch = false) {
     const author = authorEl ? authorEl.textContent : '';
 
     let cover = null;
+    let coverShrunken = false;
+    // Helper: pull raw cover data URL from the zip, then shrink it before
+    // storing. Falls back to the raw URL if shrinkCoverDataURL fails so a
+    // weird image format doesn't lose the cover entirely — the migration
+    // pass below will get another shot at it later.
+    const loadAndShrink = async (cf) => {
+      const raw = await blobToDataURL(await cf.async('blob'));
+      if (!raw) return { url: null, shrunken: false };
+      const small = await shrinkCoverDataURL(raw);
+      return small ? { url: small, shrunken: true } : { url: raw, shrunken: false };
+    };
     const coverMeta = opfDoc.querySelector('meta[name="cover"]');
     if (coverMeta) {
       const coverItem = opfDoc.querySelector(`item[id="${coverMeta.getAttribute('content')}"]`);
       if (coverItem) {
         const cf = zip.file(rootDir + coverItem.getAttribute('href')) || zip.file(coverItem.getAttribute('href'));
-        if (cf) cover = await blobToDataURL(await cf.async('blob'));
+        if (cf) {
+          const result = await loadAndShrink(cf);
+          cover = result.url;
+          coverShrunken = result.shrunken;
+        }
       }
     }
     if (!cover) {
       const ci = opfDoc.querySelector('item[properties="cover-image"]');
       if (ci) {
         const cf = zip.file(rootDir + ci.getAttribute('href')) || zip.file(ci.getAttribute('href'));
-        if (cf) cover = await blobToDataURL(await cf.async('blob'));
+        if (cf) {
+          const result = await loadAndShrink(cf);
+          cover = result.url;
+          coverShrunken = result.shrunken;
+        }
       }
     }
 
@@ -5963,7 +6082,12 @@ async function loadEpub(file, batch = false) {
     const book = {
       id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
       title, author, cover, chapters: bookChapters, toc: finalToc,
-      progress: 0, chapterIndex: 0, scrollPos: 0, spineColor
+      progress: 0, chapterIndex: 0, scrollPos: 0, spineColor,
+      // coverV=2 means "stored as shrunken-JPEG via shrinkCoverDataURL."
+      // Used by _migrateCoverImages to skip re-encoding books that were
+      // imported after the shrink path landed. New imports without a
+      // cover get coverV:2 too — they have nothing to migrate.
+      coverV: cover ? (coverShrunken ? 2 : 1) : 2
     };
     // Post-parse dedup against (title, author). Lowercased + trimmed so a
     // re-import of the same EPUB from a different folder doesn't slip
@@ -5981,6 +6105,7 @@ async function loadEpub(file, batch = false) {
     await saveBookAtomic(book);
     library.push({
       id: book.id, title: book.title, author: book.author, cover: book.cover,
+      coverV: book.coverV || 1,
       progress: 0, chapterIndex: 0, scrollPos: 0,
       chapterCount: bookChapters.length, contentSize, spineColor,
       fontFace: null
@@ -9685,6 +9810,13 @@ function renderGreeting() {
   $('sort-select').value = currentSort;
 
   setView(currentView);
+
+  // Once the library is visible, run the cover-image shrink migration
+  // in the background. The first render shows existing (full-resolution)
+  // covers; subsequent loads will see the shrunken JPEGs. Fire-and-
+  // forget — we never await this, so a slow migration doesn't delay
+  // anything else in init.
+  _migrateCoverImages().catch(err => console.warn('[tomen] cover migration failed:', err));
 
   // Wire dictionary gestures on the (now-present) slot inners. Safe to
   // call once at init — the inner elements are the persistent containers
