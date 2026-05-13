@@ -1179,31 +1179,61 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
 }
 .gc-prog-fill { height: 100%; background: var(--brand); }
 
-/* Summoning animation — when a book is clicked in grid view, the
-   clicked card lifts and gets a brand-colored glow while every
-   other card fades and blurs into the background. The whole grid
-   becomes a stage with one book in the spotlight. The transition
-   takes ~850ms before the reader screen opens, which feels slow
-   enough to read as "this is a deliberate act" without crossing
-   into "the app is broken." */
+/* Summoning animation — when a book is clicked in grid view, it
+   plays a four-beat cinematic transition before the reader screen
+   takes over:
+     1. RISE  (0–35%): book scales up to 1.35x and floats forward
+        — "coming toward the screen"
+     2. SLAM  (35–45%): rapid return past the resting state with a
+        small overshoot, like pressing into the table
+     3. SHAKE (45–72%): four quick horizontal recoil motions from
+        the impact, decaying in amplitude
+     4. HOLD  (72–100%): book settles slightly raised, ready
+   The other books fade + blur out starting at the slam moment so
+   the impact reads as the cause of their disappearance.
+   Total duration ~1000ms — the user explicitly asked for slow so
+   opening a book feels like a deliberate act. */
+@keyframes book-summon {
+  0%   { transform: translateY(0) scale(1); }
+  /* Rise: smooth, accelerating upward into the screen */
+  35%  { transform: translateY(-22px) scale(1.35); }
+  /* Slam: fast return, slight overshoot below resting position */
+  45%  { transform: translateY(6px) scale(0.94); }
+  /* Shake: four decreasing recoil motions */
+  50%  { transform: translateX(-7px) translateY(0) scale(1); }
+  56%  { transform: translateX(8px) translateY(0) scale(1); }
+  62%  { transform: translateX(-5px) translateY(0) scale(1); }
+  68%  { transform: translateX(3px) translateY(0) scale(1); }
+  72%  { transform: translateX(0) translateY(0) scale(1); }
+  /* Hold: settle into the lifted "ready" pose */
+  100% { transform: translateY(-4px) scale(1.04); }
+}
+@keyframes other-books-flee {
+  0%, 35% { opacity: 1; filter: blur(0); }
+  /* Books fade ON the slam — the impact knocks them out of focus */
+  45%     { opacity: 0.6; filter: blur(0.5px); }
+  62%     { opacity: 0.12; filter: blur(2px); }
+  100%    { opacity: 0.12; filter: blur(2px); }
+}
 .view-grid.is-summoning .gc:not(.is-summoned) {
-  opacity: 0.18;
-  filter: blur(1.5px);
-  transition: opacity 280ms ease, filter 280ms ease;
+  animation: other-books-flee 1000ms ease both;
   pointer-events: none;
 }
 .gc.is-summoned {
   position: relative;
   z-index: 5;
-  transform: translateY(-18px) scale(1.045);
-  transition: transform 720ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: book-summon 1000ms cubic-bezier(0.32, 0.72, 0.32, 1) both;
+  /* Disable content-visibility containment for the duration of the
+     summon so the scaled-up book doesn't get clipped by the layout
+     paint box. */
+  content-visibility: visible;
 }
 .gc.is-summoned .gc-cover {
   box-shadow:
     var(--shadow-cover),
     0 24px 48px color-mix(in srgb, var(--brand) 38%, transparent),
     0 0 0 1px color-mix(in srgb, var(--brand) 30%, transparent);
-  transition: box-shadow 720ms ease;
+  transition: box-shadow 360ms ease 280ms;
 }
 
 /* ===== READER ===== */
@@ -6247,7 +6277,7 @@ let totalSpreads = 1;        // computed after layout
 //   - the library is in bulk-select mode (taps toggle selection)
 //   - we can't find the card or grid for some reason (defensive)
 //   - a summon is already in flight (don't double-fire)
-const _SUMMON_DURATION_MS = 850;
+const _SUMMON_DURATION_MS = 1000;
 let _summonInFlight = false;
 function summonAndOpen(ev, id) {
   if (ev) {
