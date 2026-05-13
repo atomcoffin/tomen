@@ -1,5 +1,13 @@
 # Tomen — Design Language v1
 
+> ⚠️ **This document is partially stale.** The *philosophy*, *spacing*, *motion*,
+> and *surface/elevation* principles still hold and are the authoritative
+> design language. The *color palette* and *typography* tables below describe
+> the v1 system; the code has since moved to **chartreuse** as the brand
+> accent (not Ember) and **Thow / Siche Text / Siche Display / Uncut Sans /
+> Dolph YY** as the type system (not Literata / DM Sans / JetBrains Mono).
+> Treat the tables as historical reference until this doc is refreshed.
+
 ## Philosophy
 Quiet confidence. The app disappears when you're reading, and feels intentional when you're not. High-end stationery, not tech startup.
 

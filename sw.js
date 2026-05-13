@@ -6,7 +6,7 @@
 // handler below deletes any cache whose key doesn't match this version.
 // Add new assets (fonts, icons) to ASSETS so they're cached on install.
 // =====================================================================
-const CACHE_VERSION = 'tomen-v1.20.3';
+const CACHE_VERSION = 'tomen-v1.21.0';
 
 const ASSETS = [
   './',
@@ -50,12 +50,25 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Only handle GET over http(s). POSTs throw on cache.put, and schemes
+  // like chrome-extension:// can't be cached at all — passing them through
+  // avoids polluting the console and breaking unrelated extensions.
+  if (event.request.method !== 'GET') return;
+  if (!event.request.url.startsWith('http')) return;
+
   const url = new URL(event.request.url);
+  // Only cache responses that succeeded and weren't redirects/opaque
+  // failures — otherwise a 500 page or an opaque-redirect can overwrite
+  // a previously-good cached entry.
+  const cacheableRes = (res) => res && res.ok && res.type !== 'opaqueredirect';
+
   if (event.request.mode === 'navigate' || url.pathname.endsWith('.html')) {
     event.respondWith(
       fetch(event.request).then(res => {
-        const clone = res.clone();
-        caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
+        if (cacheableRes(res)) {
+          const clone = res.clone();
+          caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
+        }
         return res;
       }).catch(() => caches.match(event.request))
     );
@@ -64,8 +77,10 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then(cached =>
       cached || fetch(event.request).then(res => {
-        const clone = res.clone();
-        caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
+        if (cacheableRes(res)) {
+          const clone = res.clone();
+          caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
+        }
         return res;
       })
     )

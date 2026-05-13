@@ -13,7 +13,7 @@ Positioning: **EPUB-only, beautifully rendered.** Not trying to compete with Kin
 ## Current committed state (end of April 23 2026 session)
 
 ### Service worker cache
-Last shipped version: **`tomen-v1.16.0`**. Bump on every meaningful release.
+Last shipped version: **`tomen-v1.21.0`**. Bump on every meaningful release.
 
 ### Shipped this session
 

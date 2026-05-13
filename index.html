@@ -38,6 +38,32 @@
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* Respect the OS-level reduced-motion preference — collapses all
+   transitions and animations to ~1 frame. Covers page-turn slides,
+   edge-ring fills, settings-sheet slide, fadeSwap, etc. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Keyboard-only focus indicator. Existing `outline: none` rules strip
+   focus for mouse users (intentional, since most controls have hover/
+   active visuals); :focus-visible re-adds a ring only when navigating
+   by keyboard. Chartreuse-on-paper at high enough contrast to read on
+   every theme. */
+.icon-btn:focus-visible,
+.seg-btn:focus-visible,
+.theme-btn:focus-visible,
+.lib-search:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--brand-ink);
+  outline-offset: 2px;
+}
+
 :root {
   --paper: #FAF6F1;
   --linen: #F3EDE5;
@@ -2317,7 +2343,7 @@ body.r-mode-editing .r-inner {
     </div>
     <div class="lib-toolbar">
       <div class="import-wrap">
-        <button class="icon-btn" onclick="toggleImportMenu()" title="Import books">
+        <button class="icon-btn" onclick="toggleImportMenu()" title="Import books" aria-label="Import books">
           <i class="ph ph-upload-simple"></i>
         </button>
         <div class="import-menu" id="import-menu">
@@ -2331,14 +2357,14 @@ body.r-mode-editing .r-inner {
           </button>
         </div>
       </div>
-      <div class="view-switch" id="view-switch">
-        <button class="icon-btn active" data-view="text" onclick="setView('text')" title="Text view">
+      <div class="view-switch" id="view-switch" role="radiogroup" aria-label="Library view">
+        <button class="icon-btn active" data-view="text" onclick="setView('text')" title="Text view" aria-label="Text view" role="radio" aria-checked="true">
           <i class="ph ph-list-dashes"></i>
         </button>
-        <button class="icon-btn" data-view="grid" onclick="setView('grid')" title="Grid view">
+        <button class="icon-btn" data-view="grid" onclick="setView('grid')" title="Grid view" aria-label="Grid view" role="radio" aria-checked="false">
           <i class="ph ph-squares-four"></i>
         </button>
-        <button class="icon-btn" data-view="spine" onclick="setView('spine')" title="Spine view">
+        <button class="icon-btn" data-view="spine" onclick="setView('spine')" title="Spine view" aria-label="Spine view" role="radio" aria-checked="false">
           <i class="ph ph-books"></i>
         </button>
       </div>
@@ -2349,7 +2375,7 @@ body.r-mode-editing .r-inner {
         <option value="recent">Recent</option>
         <option value="progress">Progress</option>
       </select>
-      <button class="icon-btn" onclick="toggleProfile()" title="Profile & settings">
+      <button class="icon-btn" onclick="toggleProfile()" title="Profile & settings" aria-label="Profile and settings">
         <i class="ph ph-user"></i>
       </button>
     </div>
@@ -2479,7 +2505,7 @@ body.r-mode-editing .r-inner {
 <!-- Settings overlay. Three groups (Display / Typography / Layout) with
      compact two-column layout on desktop, stacked single column on mobile.
      Each group has a small uppercase header demarcated by a rule. -->
-<div class="overlay" id="ov-settings" onclick="toggleSettings()">
+<div class="overlay" id="ov-settings" role="dialog" aria-modal="true" aria-label="Appearance" onclick="toggleSettings()">
   <div class="settings settings-redesign" onclick="event.stopPropagation()">
     <div class="settings-handle"></div>
 
@@ -2576,7 +2602,7 @@ body.r-mode-editing .r-inner {
 </div>
 
 <!-- TOC overlay -->
-<div class="overlay" id="ov-toc" onclick="toggleTOC()">
+<div class="overlay" id="ov-toc" role="dialog" aria-modal="true" aria-label="Contents" onclick="toggleTOC()">
   <div class="toc-panel" onclick="event.stopPropagation()">
     <div class="toc-header">Contents</div>
     <div class="toc-list" id="toc-list"></div>
@@ -2584,7 +2610,7 @@ body.r-mode-editing .r-inner {
 </div>
 
 <!-- Marks overlay -->
-<div class="overlay" id="ov-marks" onclick="toggleMarks()">
+<div class="overlay" id="ov-marks" role="dialog" aria-modal="true" aria-label="Marks" onclick="toggleMarks()">
   <div class="marks-panel" onclick="event.stopPropagation()">
     <div class="marks-header">
       <span>Marks</span>
@@ -2601,7 +2627,7 @@ body.r-mode-editing .r-inner {
 <!-- Note editor overlay. Bottom-sheet-style modal for editing the note
      attached to a mark. Opened from the per-mark ⋯ menu. Backdrop click
      cancels (no save). Submit via the Save button only. -->
-<div class="overlay" id="ov-note" onclick="closeNoteEditor()">
+<div class="overlay" id="ov-note" role="dialog" aria-modal="true" aria-label="Note" onclick="closeNoteEditor()">
   <div class="note-editor" onclick="event.stopPropagation()">
     <div class="note-editor-handle"></div>
     <div class="note-editor-label" id="note-editor-label">Note</div>
@@ -2618,7 +2644,7 @@ body.r-mode-editing .r-inner {
 </div>
 
 <!-- Profile overlay -->
-<div class="overlay" id="ov-profile" onclick="toggleProfile()">
+<div class="overlay" id="ov-profile" role="dialog" aria-modal="true" aria-label="Profile and settings" onclick="toggleProfile()">
   <div class="settings" onclick="event.stopPropagation()">
     <div class="settings-handle"></div>
     <div class="settings-section">
@@ -2684,7 +2710,7 @@ body.r-mode-editing .r-inner {
 </div>
 
 <!-- Update toast -->
-<div class="update-toast" id="update-toast">
+<div class="update-toast" id="update-toast" role="status" aria-live="polite">
   New version available
   <button class="u-btn" onclick="applyUpdate()">Update</button>
   <button class="u-dismiss" onclick="document.getElementById('update-toast').classList.remove('visible')">Later</button>
@@ -3267,8 +3293,6 @@ function spineDimensions(book) {
 }
 
 // Keep these as wrappers for backward compatibility
-function spineWidth(book) { return spineDimensions(book).widthPx; }
-function spineHeight(book) { return spineDimensions(book).heightPct; }
 
 // Get the current spine scale from CSS (responsive)
 let spineScale = 1;
@@ -3473,7 +3497,11 @@ function setView(v) {
   currentView = v;
   localStorage.setItem('tomen_view', v);
   document.querySelectorAll('#view-switch .icon-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.view === v);
+    const on = b.dataset.view === v;
+    b.classList.toggle('active', on);
+    // Keep aria-checked in sync with .active so the radiogroup state is
+    // accurate for assistive tech.
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
   });
   $('lib-body').classList.toggle('spine-active', v === 'spine');
   renderLibrary();
@@ -3686,8 +3714,9 @@ function renderSpineView(el, books) {
   // the primary color. Keep the pair in storage — don't mutate existing
   // records.
   const spineData = books.map((b, i) => {
-    const w = spineWidth(b);
-    const hPct = spineHeight(b);
+    const dims = spineDimensions(b);
+    const w = dims.widthPx;
+    const hPct = dims.heightPct;
     const colorPair = b.spineColor || strColor(b.title);
     const color = colorPair[0];
     const progress = Math.max(0, Math.min(100, b.progress || 0));
@@ -4553,7 +4582,16 @@ function resolveHref(base, rel) {
 }
 
 function blobToDataURL(blob) {
-  return new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+  return new Promise(r => {
+    const fr = new FileReader();
+    fr.onload = () => r(fr.result);
+    // On error/abort, resolve null instead of leaving the promise pending —
+    // a bad image blob otherwise hangs loadEpub until the import timeout.
+    // Callers treat null as "no image."
+    fr.onerror = () => r(null);
+    fr.onabort = () => r(null);
+    fr.readAsDataURL(blob);
+  });
 }
 
 // ===== READER =====
@@ -4567,6 +4605,11 @@ let totalSpreads = 1;        // computed after layout
 async function openBookById(id) {
   const meta = library.find(b => b.id === id);
   if (!meta) return;
+  // Reset animation flags before opening — a previous book closed mid-fade
+  // would otherwise leave these set and block all gestures in the new book
+  // until the defensive timeout fires.
+  _animatingTurn = false;
+  _fadeSwapBusy = false;
   localStorage.setItem('tomen_lastRead', id);
   showLoading(true, 'Opening book…');
   try {
@@ -4625,6 +4668,10 @@ async function openBookById(id) {
 function showLibrary() {
   exitEditingMode();
   saveProgress();
+  // Clear stale per-mark menu / note-editor refs so a re-opened book
+  // doesn't see lingering ids from the previous session's UI.
+  _markMenuId = null;
+  _noteEditorMarkId = null;
   $('screen-reader').classList.remove('active');
   $('screen-lib').classList.add('active');
   document.body.classList.remove('r-ui-visible');
@@ -4780,7 +4827,7 @@ function measureSpreads() {
 // Programmatic jumps (resize, chapter render, go-to-location) pass
 // animate=false and snap instantly with both slots in sync.
 let _animatingTurn = false;
-function applySpread(animate = false, direction = 1) {
+function applySpread(animate = false) {
   const leftInner = $('r-inner');
   const rightInner = $('r-inner-right');
   if (!leftInner || !rightInner) return;
@@ -4862,7 +4909,7 @@ function readerNext() {
   if (_animatingTurn) return;
   if (currentSpread < totalSpreads - 1) {
     currentSpread++;
-    applySpread(true, 1);
+    applySpread(true);
     updateProgress();
     saveProgress();
   } else if (currentChapterIndex < chapters.length - 1) {
@@ -4883,7 +4930,7 @@ function readerPrev() {
   if (_animatingTurn) return;
   if (currentSpread > 0) {
     currentSpread--;
-    applySpread(true, -1);
+    applySpread(true);
     updateProgress();
     saveProgress();
   } else if (currentChapterIndex > 0) {
@@ -4952,6 +4999,9 @@ let _saveProgressTm = null;
 let _saveProgressPending = false;
 function saveProgress() {
   if (!currentBook) return;
+  // Guard against malformed books with zero chapters — would otherwise
+  // divide by zero and write NaN progress to IDB.
+  if (!chapters || !chapters.length) return;
   // Update in-memory state immediately so the UI (progress bar, library) is
   // always accurate. Only the disk write is debounced.
   currentBook.chapterIndex = currentChapterIndex;
@@ -5644,6 +5694,11 @@ function showGestureToast(text) {
     el = document.createElement('div');
     el.id = 'gesture-toast';
     el.className = 'gesture-toast';
+    // role=status + aria-live=polite so screen readers announce the brief
+    // gesture-driven setting changes ("Font size: 19") without preempting
+    // current speech.
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
     document.body.appendChild(el);
   }
   el.textContent = text;
@@ -5663,6 +5718,10 @@ function showErrorToast(text) {
     el = document.createElement('div');
     el.id = 'error-toast';
     el.className = 'error-toast';
+    // role=alert + aria-live=assertive so screen readers interrupt to
+    // announce errors the user needs to act on (save failed, storage full).
+    el.setAttribute('role', 'alert');
+    el.setAttribute('aria-live', 'assertive');
     document.body.appendChild(el);
   }
   el.textContent = text;
@@ -5816,6 +5875,10 @@ function caretRangeAtPoint(x, y) {
 // entries inside them indent. Depth caps at 3 to prevent deeply nested
 // reference books from making the panel unreadable.
 function buildTOC() {
+  if (!toc || !toc.length) {
+    $('toc-list').innerHTML = '<div class="marks-empty">This book has no table of contents.</div>';
+    return;
+  }
   $('toc-list').innerHTML = toc.map(item => {
     const depth = Math.min(item.depth || 0, 3);
     const cls = `toc-item${item.index === currentChapterIndex ? ' active' : ''}${depth > 0 ? ' toc-item-nested' : ''}`;
@@ -7160,6 +7223,11 @@ function showLoading(show, msg) {
 // ===== KEYBOARD =====
 document.addEventListener('keydown', e => {
   if (!$('screen-reader').classList.contains('active')) return;
+  // Don't escape to library when an overlay is open — the per-overlay
+  // Escape handlers (and backdrop click) own that case. Without this guard
+  // a user pressing Escape inside ov-settings/ov-toc/ov-marks/ov-profile
+  // would skip past the overlay and land back on the library.
+  if (document.querySelector('.overlay.open')) return;
   if (e.key === 'Escape') showLibrary();
 });
 
