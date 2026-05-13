@@ -390,6 +390,49 @@ html, body {
   justify-content: space-between;
 }
 
+/* Footnote popover. Same overall shape as dict-popover but uses the
+   reading face for the body so the footnote text reads as a continuation
+   of the page rather than as UI chrome. */
+.note-popover {
+  position: fixed;
+  display: none;
+  width: min(380px, calc(100vw - 16px));
+  max-height: 50vh;
+  overflow-y: auto;
+  background: var(--card);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
+  padding: 16px 18px 12px;
+  z-index: 350;
+  color: var(--ink);
+}
+.note-popover.open { display: block; }
+.note-popover-body {
+  font-family: var(--font-read-active);
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  /* Preserve paragraph breaks from the source footnote without rendering
+     raw HTML — keep the safety of textContent. */
+  white-space: pre-wrap;
+}
+.note-popover-foot {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--border);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--fog);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.note-popover-empty {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--stone);
+}
+
 /* Confirm dialog. Modal interrupt for destructive actions. Sits on its own
    z-index above all other overlays. The backdrop dims the rest of the
    screen and absorbs clicks, so the only way out is the dialog buttons.
@@ -2910,6 +2953,12 @@ body.r-mode-editing .r-inner {
      session so repeat lookups are instant. -->
 <div class="dict-popover" id="dict-popover" role="dialog" aria-modal="false" aria-label="Dictionary"></div>
 
+<!-- Footnote popover. Opened by tapping a same-document anchor link in
+     the reader (typical EPUB footnote/endnote patterns). Surfaces the
+     target text in-place instead of navigating away to a notes chapter
+     at the back of the book. -->
+<div class="note-popover" id="note-popover" role="dialog" aria-modal="false" aria-label="Footnote"></div>
+
 <!-- Confirm dialog. Modal interrupt for destructive actions. Reused for
      any destructive confirmation (delete book, clear marks, etc.) by
      calling confirmDialog({ title, message, dangerLabel, onConfirm }). -->
@@ -4904,6 +4953,9 @@ async function openBookById(id) {
   // Drop the search index cache — chapter indices are book-scoped, and
   // reusing an entry from a previous book would point at the wrong text.
   _chapterTextCache.clear();
+  // Footnote target ids are book-scoped too. Clear before the new book
+  // is loaded so a stale "fn1" entry can't resolve to the previous book.
+  _noteCache.clear();
   localStorage.setItem('tomen_lastRead', id);
   showLoading(true, 'Opening book…');
   try {
@@ -4990,6 +5042,7 @@ function showLibrary() {
   toc = [];
   // Search index pointed at the previous book — drop it.
   _chapterTextCache.clear();
+  _noteCache.clear();
   const li = $('r-inner');
   const ri = $('r-inner-right');
   if (li) li.innerHTML = '';
@@ -7989,6 +8042,121 @@ document.addEventListener('keydown', (ev) => {
   }
 });
 
+// ===== FOOTNOTES =====
+// EPUB footnote/endnote links use <a href="#id"> or <a href="file.xhtml#id">
+// to point at the note's target. Default browser behavior would scroll
+// within the current page (broken with our column layout) or navigate
+// to a wholly different chapter (breaks reading flow). Instead we
+// resolve the target text in-place and float a small popover so the
+// reader can glance at the note and dismiss without losing position.
+const _noteCache = new Map(); // id → { text, chapterIndex } or null (miss)
+
+// A link is a footnote candidate if it has a fragment AND isn't external.
+// We don't try to be cleverer (epub:type / role / class heuristics) —
+// any internal anchor link is intercepted, since the default behavior
+// is broken anyway under the dual-slot column layout.
+function _isFootnoteLink(a) {
+  const href = a.getAttribute('href') || '';
+  if (!href) return false;
+  if (/^(https?|mailto|tel|file|data|blob):/i.test(href)) return false;
+  return href.includes('#');
+}
+
+// Resolve a footnote href to its target text. Scans chapters lazily on
+// first miss and caches the result. Returns { text, chapterIndex } or
+// null if not found anywhere in the book.
+function _resolveFootnoteText(href) {
+  const hashIdx = href.indexOf('#');
+  if (hashIdx === -1) return null;
+  const id = decodeURIComponent(href.slice(hashIdx + 1));
+  if (!id) return null;
+  if (_noteCache.has(id)) return _noteCache.get(id);
+  if (!Array.isArray(chapters) || chapters.length === 0) return null;
+  for (let ci = 0; ci < chapters.length; ci++) {
+    const html = chapters[ci]?.html || '';
+    // Quick string filter so we don't parse every chapter for every
+    // lookup. Both quote styles since the EPUB normalizer may have
+    // produced either.
+    if (!html.includes('id="' + id + '"') && !html.includes("id='" + id + "'")) continue;
+    const doc = new DOMParser().parseFromString('<body>' + html + '</body>', 'text/html');
+    const el = doc.getElementById(id);
+    if (el) {
+      // textContent collapses inline formatting; good enough for a
+      // footnote glance, and avoids any risk of re-injecting unsafe
+      // HTML into the popover.
+      const text = (el.textContent || '').trim();
+      const out = { text, chapterIndex: ci };
+      _noteCache.set(id, out);
+      return out;
+    }
+  }
+  _noteCache.set(id, null);
+  return null;
+}
+
+function _showNotePopover(note, anchorRect) {
+  const pop = $('note-popover');
+  if (!pop) return;
+  if (!note || !note.text) {
+    pop.innerHTML = `
+      <div class="note-popover-empty">Note not found in this book.</div>
+      <div class="note-popover-foot">Footnote</div>
+    `;
+  } else {
+    pop.innerHTML = `
+      <div class="note-popover-body">${esc(note.text)}</div>
+      <div class="note-popover-foot">Footnote · tap outside to close</div>
+    `;
+  }
+  pop.classList.add('open');
+  // Reuse the dictionary positioner — same anchor-to-rect logic, same
+  // clamp-to-viewport behavior.
+  _positionDictPopover(pop, anchorRect);
+}
+
+function _hideNotePopover() {
+  const pop = $('note-popover');
+  if (pop) pop.classList.remove('open');
+}
+
+function _setupFootnoteHandlers() {
+  const inners = [$('r-inner'), $('r-inner-right')].filter(Boolean);
+  for (const inner of inners) {
+    inner.addEventListener('click', (ev) => {
+      if (isEditing && isEditing()) return;
+      const a = ev.target.closest && ev.target.closest('a');
+      if (!a || !inner.contains(a)) return;
+      if (!_isFootnoteLink(a)) return;
+      // Internal anchor — intercept whether or not we find the target,
+      // because the browser's default behavior (scroll within the
+      // column-laid-out chapter) would corrupt the reader's position
+      // and there's no clean way to recover.
+      ev.preventDefault();
+      ev.stopPropagation();
+      _hideDictionary();
+      const note = _resolveFootnoteText(a.getAttribute('href') || '');
+      const rect = a.getBoundingClientRect();
+      _showNotePopover(note, rect);
+    });
+  }
+  // Outside-tap dismisses (capture so it fires before bookAreaTapped).
+  document.addEventListener('pointerdown', (ev) => {
+    const pop = $('note-popover');
+    if (!pop || !pop.classList.contains('open')) return;
+    if (pop.contains(ev.target)) return;
+    _hideNotePopover();
+  }, true);
+  // Escape dismisses.
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    const pop = $('note-popover');
+    if (pop && pop.classList.contains('open')) {
+      _hideNotePopover();
+      ev.stopPropagation();
+    }
+  });
+}
+
 // ===== KEYBOARD =====
 document.addEventListener('keydown', e => {
   if (!$('screen-reader').classList.contains('active')) return;
@@ -8066,6 +8234,8 @@ function renderGreeting() {
   // that receive innerHTML on each renderChapter, so the listeners
   // survive content swaps.
   _setupDictionaryHandlers();
+  // Same reasoning for footnote link interception.
+  _setupFootnoteHandlers();
 })();
 </script>
 
