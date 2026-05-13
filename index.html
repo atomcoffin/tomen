@@ -195,9 +195,12 @@ button:focus-visible {
   --shadow-cover: 0 4px 16px rgba(0, 0, 0, 0.55);
   --shadow-float: 0 8px 32px rgba(255, 179, 71, 0.18);
 }
-/* Scanlines — the classic CRT signature. Subtle dark lines repeated
-   every 3px so the page reads through them. Fixed and viewport-wide
-   so the whole app feels like one screen. */
+/* Scanlines — heavier than a typical "subtle" pass. 2px repeat with
+   real opacity so they read as scanlines, not as a memory of one.
+   backdrop-filter blurs what's behind them: the entire app looks like
+   it's seen through old slightly-fogged glass without us having to
+   filter every element. multiply blend means the lines darken what's
+   beneath rather than gray-washing it. */
 body.crt::before {
   content: '';
   position: fixed;
@@ -206,15 +209,28 @@ body.crt::before {
   z-index: 9998;
   background: repeating-linear-gradient(
     0deg,
-    rgba(0, 0, 0, 0.22) 0,
-    rgba(0, 0, 0, 0.22) 1px,
+    rgba(0, 0, 0, 0.42) 0,
+    rgba(0, 0, 0, 0.42) 1px,
     transparent 1px,
-    transparent 3px
+    transparent 2px
   );
   mix-blend-mode: multiply;
+  backdrop-filter: blur(0.5px);
+  -webkit-backdrop-filter: blur(0.5px);
+  /* Subtle flicker — opacity wobbles a barely-perceptible amount on a
+     long cycle. Adds "alive" to the layer without strobing. */
+  animation: crt-flicker 4.7s steps(8, end) infinite;
 }
-/* Vignette — darken the corners like an old curved screen would. The
-   center stays bright; edges fall off to deep black. */
+@keyframes crt-flicker {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.94; }
+  62%      { opacity: 0.99; }
+  68%      { opacity: 0.92; }
+}
+/* Vignette + curved screen bezel. A soft radial darkening for the
+   "tube edges fall off" feel, paired with a heavy box-shadow inset to
+   simulate the rounded corners and bezel of an actual CRT. Border-
+   radius on the pseudo gives the "this is a curved screen" outline. */
 body.crt::after {
   content: '';
   position: fixed;
@@ -223,39 +239,56 @@ body.crt::after {
   z-index: 9997;
   background:
     radial-gradient(ellipse at center,
-      transparent 45%,
-      rgba(0, 0, 0, 0.55) 100%);
+      transparent 35%,
+      rgba(0, 0, 0, 0.5) 75%,
+      rgba(0, 0, 0, 0.85) 100%);
+  border-radius: 24px;
+  box-shadow:
+    inset 0 0 60px 8px rgba(0, 0, 0, 0.7),
+    inset 0 0 18px 2px rgba(255, 179, 71, 0.06);
 }
-/* Phosphor glow on book text. Two-layer text-shadow: a sharp halo for
-   the ink-bleed look, plus a soft outer bloom for the "this is glowing"
-   feel. Tuned so it adds atmosphere without losing letter shape. */
+/* Phosphor glow on book text, intensified. The new third layer is a
+   wider bloom (16px) at low opacity so bright passages of text look
+   like they're radiating into the surrounding paper. */
 body.crt .r-inner {
   text-shadow:
-    0 0 1px rgba(255, 179, 71, 0.45),
-    0 0 6px rgba(255, 179, 71, 0.18);
+    0 0 1px rgba(255, 179, 71, 0.55),
+    0 0 4px rgba(255, 179, 71, 0.3),
+    0 0 16px rgba(255, 179, 71, 0.12);
 }
+/* Chapter headings get the same glow plus a chromatic-aberration
+   doubling: a faint red offset to one side and cyan to the other.
+   On amber text this reads as "RGB phosphor mask not quite aligned"
+   rather than as flatly broken color — the classic CRT artifact. */
 body.crt .r-inner h1,
 body.crt .r-inner h2,
 body.crt .r-inner h3 {
   text-shadow:
-    0 0 1px rgba(255, 208, 128, 0.6),
-    0 0 8px rgba(255, 208, 128, 0.25),
-    0 0 18px rgba(255, 179, 71, 0.1);
+    -0.5px 0 0 rgba(255, 60, 60, 0.32),
+    0.5px 0 0 rgba(80, 220, 255, 0.32),
+    0 0 1px rgba(255, 208, 128, 0.7),
+    0 0 10px rgba(255, 208, 128, 0.35),
+    0 0 24px rgba(255, 179, 71, 0.18);
 }
-/* Mild glow on the chrome too — toolbar titles, library spines, the
-   greeting. Less intense than the body so UI stays sharp. */
+/* Mild glow on chrome — library titles, spines, toolbar title. Less
+   intense than book content so UI text stays legible. */
 body.crt .lib-brand,
 body.crt .tv-title,
 body.crt .r-title,
 body.crt .spine-title {
   text-shadow:
-    0 0 1px rgba(255, 179, 71, 0.35),
-    0 0 4px rgba(255, 179, 71, 0.12);
+    0 0 1px rgba(255, 179, 71, 0.45),
+    0 0 5px rgba(255, 179, 71, 0.2);
 }
-/* The brightness-dim overlay clashes with the CRT vignette — disable
-   it under .crt so the user's brightness slider doesn't double-darken
-   the screen. */
+/* Disable the brightness-dim overlay under CRT — the vignette and
+   scanlines already darken the screen, and stacking another layer
+   on top muddies the phosphor look. */
 body.crt .brightness-dim { display: none; }
+/* Respect prefers-reduced-motion: kill the flicker for users who've
+   opted out of animation. The static layers stay. */
+@media (prefers-reduced-motion: reduce) {
+  body.crt::before { animation: none; }
+}
 
 /* Inkwell — deep teal-navy paper with brand chartreuse accent. Library /
    late-night mood — where Dark theme is pure cold, Inkwell leans slightly
