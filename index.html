@@ -433,6 +433,47 @@ html, body {
   color: var(--stone);
 }
 
+/* Image viewer — full-viewport, dark backdrop, centered image. Hidden
+   by default; .open shows it. touch-action: pinch-zoom on the image
+   lets iOS/Android handle pinch natively without us implementing a
+   custom transform stack. */
+.image-viewer {
+  position: fixed; inset: 0;
+  display: none;
+  align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.88);
+  z-index: 500;
+  padding: 24px;
+  cursor: zoom-out;
+}
+.image-viewer.open { display: flex; }
+.image-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  touch-action: pinch-zoom;
+  user-select: none;
+  -webkit-user-drag: none;
+  border-radius: 4px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+.image-viewer-close {
+  position: absolute;
+  top: calc(16px + env(safe-area-inset-top, 0px));
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  width: 40px; height: 40px;
+  border-radius: 20px;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 20px; line-height: 0;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 140ms ease;
+}
+.image-viewer-close:hover { background: rgba(255, 255, 255, 0.2); }
+.image-viewer-close .ph { line-height: 1; }
+
 /* Confirm dialog. Modal interrupt for destructive actions. Sits on its own
    z-index above all other overlays. The backdrop dims the rest of the
    screen and absorbs clicks, so the only way out is the dialog buttons.
@@ -2963,6 +3004,17 @@ body.r-mode-editing .r-inner {
      target text in-place instead of navigating away to a notes chapter
      at the back of the book. -->
 <div class="note-popover" id="note-popover" role="dialog" aria-modal="false" aria-label="Footnote"></div>
+
+<!-- Image viewer. Tapping a figure / inline image in the reader opens
+     a full-viewport overlay with the image centered. Tap the backdrop
+     or the close button to dismiss. Touch-action: pinch-zoom lets the
+     reader inspect detail without us having to implement custom gestures. -->
+<div class="image-viewer" id="image-viewer" role="dialog" aria-modal="true" aria-label="Image">
+  <button class="image-viewer-close" id="image-viewer-close" aria-label="Close image">
+    <i class="ph ph-x" aria-hidden="true"></i>
+  </button>
+  <img id="image-viewer-img" alt="">
+</div>
 
 <!-- Confirm dialog. Modal interrupt for destructive actions. Reused for
      any destructive confirmation (delete book, clear marks, etc.) by
@@ -8242,6 +8294,62 @@ function _hideNotePopover() {
   if (pop) pop.classList.remove('open');
 }
 
+// ===== IMAGE VIEWER =====
+// Tapping a figure in the reader opens it in a full-viewport overlay so
+// the reader can inspect detail without leaving the page. Pinch-to-zoom
+// is handled natively by the browser via touch-action on the <img>.
+function _openImageViewer(src, alt) {
+  const ov = $('image-viewer');
+  const img = $('image-viewer-img');
+  if (!ov || !img) return;
+  img.src = src;
+  img.alt = alt || '';
+  ov.classList.add('open');
+}
+function _closeImageViewer() {
+  const ov = $('image-viewer');
+  const img = $('image-viewer-img');
+  if (!ov) return;
+  ov.classList.remove('open');
+  // Drop the src so the browser can release the decoded image and so a
+  // later open of a different image doesn't briefly show the old one.
+  if (img) img.src = '';
+}
+function _setupImageViewerHandlers() {
+  const inners = [$('r-inner'), $('r-inner-right')].filter(Boolean);
+  for (const inner of inners) {
+    inner.addEventListener('click', (ev) => {
+      if (isEditing && isEditing()) return;
+      const img = ev.target && ev.target.tagName === 'IMG' ? ev.target : null;
+      if (!img) return;
+      // Skip tiny icons / inline decoration — only bigger images are
+      // worth opening full-screen. Heuristic: at least 80px on a side.
+      const r = img.getBoundingClientRect();
+      if (r.width < 80 || r.height < 80) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      _openImageViewer(img.currentSrc || img.src, img.alt);
+    });
+  }
+  const ov = $('image-viewer');
+  if (ov) {
+    ov.addEventListener('click', (ev) => {
+      // Close on backdrop click. Clicking the image itself or the
+      // close button is fine — both also dismiss, since the close
+      // button is the X and the image's only "action" is also close.
+      _closeImageViewer();
+    });
+  }
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    const ov = $('image-viewer');
+    if (ov && ov.classList.contains('open')) {
+      _closeImageViewer();
+      ev.stopPropagation();
+    }
+  });
+}
+
 function _setupFootnoteHandlers() {
   const inners = [$('r-inner'), $('r-inner-right')].filter(Boolean);
   for (const inner of inners) {
@@ -8359,6 +8467,8 @@ function renderGreeting() {
   _setupDictionaryHandlers();
   // Same reasoning for footnote link interception.
   _setupFootnoteHandlers();
+  // Image viewer click handlers.
+  _setupImageViewerHandlers();
 })();
 </script>
 
