@@ -1106,19 +1106,23 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
      can shrink or grow the cards live. Auto-fill keeps the grid dense
      regardless of the user's setting. */
   grid-template-columns: repeat(auto-fill, minmax(var(--grid-card-min-width, 150px), 1fr));
-  gap: 20px;
+  /* Gap is identical on both axes so the gutter between covers reads
+     the same horizontally and vertically — no title/author below
+     pads the rows out, so this is the only spacing that determines
+     the visual rhythm. */
+  gap: 16px;
 }
 /* content-visibility:auto defers rendering of offscreen cards entirely
    — the browser skips paint, layout, and image decode for any .gc that
-   isn't in (or near) the viewport. For a 40-book grid where only ~12
-   cards are visible at any time, this drops the per-frame work by
-   roughly 3×. contain-intrinsic-size reserves a placeholder height so
-   the scrollbar doesn't jump as cards render in. */
+   isn't in (or near) the viewport. contain-intrinsic-size reserves a
+   placeholder height for cards that haven't rendered yet (covers are
+   2:3 aspect, so the height is roughly 1.5x the column width — using
+   220px as a reasonable middle value for the current size range). */
 .gc {
   cursor: pointer;
   position: relative;
   content-visibility: auto;
-  contain-intrinsic-size: auto 320px;
+  contain-intrinsic-size: auto 220px;
 }
 .gc:hover .gc-cover { transform: translateY(-2px); }
 .gc-cover { cursor: pointer; }
@@ -1174,17 +1178,33 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
   height: 3px; background: rgba(0,0,0,0.1);
 }
 .gc-prog-fill { height: 100%; background: var(--brand); }
-.gc-title {
-  font-size: 13px; font-weight: 600; color: var(--ink);
-  margin-top: 10px; line-height: 1.3;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-}
-.gc-author { font-size: 11px; color: var(--stone); margin-top: 2px; }
-/* Per-cover options button. Floats over top-right of the cover with a
-   semi-translucent dark backing so it's legible against any cover image.
-   Always visible on touch devices; on hover-capable devices we could
-   make it appear on hover only, but always-visible is more discoverable. */
 
+/* Summoning animation — when a book is clicked in grid view, the
+   clicked card lifts and gets a brand-colored glow while every
+   other card fades and blurs into the background. The whole grid
+   becomes a stage with one book in the spotlight. The transition
+   takes ~850ms before the reader screen opens, which feels slow
+   enough to read as "this is a deliberate act" without crossing
+   into "the app is broken." */
+.view-grid.is-summoning .gc:not(.is-summoned) {
+  opacity: 0.18;
+  filter: blur(1.5px);
+  transition: opacity 280ms ease, filter 280ms ease;
+  pointer-events: none;
+}
+.gc.is-summoned {
+  position: relative;
+  z-index: 5;
+  transform: translateY(-18px) scale(1.045);
+  transition: transform 720ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.gc.is-summoned .gc-cover {
+  box-shadow:
+    var(--shadow-cover),
+    0 24px 48px color-mix(in srgb, var(--brand) 38%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--brand) 30%, transparent);
+  transition: box-shadow 720ms ease;
+}
 
 /* ===== READER ===== */
 .r-progress {
@@ -3261,7 +3281,7 @@ body.lib-select-mode .col-item {
   /* Smaller default minimum on phone, but still honoring the user's
      slider override if they've set one. clamp() floors at 110px so a
      desktop-bucket value pushed to 100 doesn't crush phone cards. */
-  .view-grid { grid-template-columns: repeat(auto-fill, minmax(clamp(110px, var(--grid-card-min-width, 110px), 200px), 1fr)); gap: 14px; }
+  .view-grid { grid-template-columns: repeat(auto-fill, minmax(clamp(110px, var(--grid-card-min-width, 110px), 200px), 1fr)); gap: 12px; }
   .tr-title { font-size: 16px; }
   .col-title { font-size: 15px; }
   .icon-btn { width: 32px; height: 32px; }
@@ -5276,11 +5296,14 @@ function renderGridView(el, books) {
            <div class="gcp-author">${esc(b.author || '')}</div>
          </div>`;
     }
-    return `<div class="gc" data-book-id="${b.id}" title="Right-click or long-press for options">
+    // Title shows in the native tooltip on hover; no labels below
+    // covers because the cover IS the identifier. Placeholder cards
+    // (books without covers) still carry the title text inside the
+    // gradient block, so an un-cover'd book is never anonymous.
+    const titleAttr = `${esc(b.title)}${b.author ? ' — ' + esc(b.author) : ''}`;
+    return `<div class="gc" data-book-id="${b.id}" title="${titleAttr}">
       <button class="gc-menu-hint" tabindex="-1" aria-hidden="true" onclick="openBookMenu(event, '${b.id}')"><i class="ph ph-dots-three"></i></button>
-      <div class="gc-cover${sel}" data-book-id="${b.id}" onclick="openBookById('${b.id}')">${coverHtml}${p > 0 ? '<div class="gc-prog"><div class="gc-prog-fill" style="width:' + p + '%"></div></div>' : ''}</div>
-      <div class="gc-title" onclick="openBookById('${b.id}')">${esc(b.title)}</div>
-      <div class="gc-author" onclick="openBookById('${b.id}')">${esc(b.author || 'Unknown')}</div>
+      <div class="gc-cover${sel}" data-book-id="${b.id}" onclick="summonAndOpen(event, '${b.id}')">${coverHtml}${p > 0 ? '<div class="gc-prog"><div class="gc-prog-fill" style="width:' + p + '%"></div></div>' : ''}</div>
     </div>`;
   }).join('') + '</div>';
   _observeBookCovers(el, '.gc-cover[data-book-id]');
@@ -6211,6 +6234,55 @@ function blobToDataURL(blob) {
 
 let currentSpread = 0;       // 0-indexed spread within current chapter
 let totalSpreads = 1;        // computed after layout
+
+// Grid-view click handler — "summons" the book before opening. The
+// clicked card lifts and gets a brand-colored glow while every other
+// card fades and blurs out; after the animation settles (~850ms total)
+// the actual openBookById fires and the reader screen takes over.
+// The deliberate slowness reads as "opening this book is a special
+// thing" rather than a mechanical app transition.
+//
+// Falls through to openBookById directly when:
+//   - long-press has just fired (the menu already handled this tap)
+//   - the library is in bulk-select mode (taps toggle selection)
+//   - we can't find the card or grid for some reason (defensive)
+//   - a summon is already in flight (don't double-fire)
+const _SUMMON_DURATION_MS = 850;
+let _summonInFlight = false;
+function summonAndOpen(ev, id) {
+  if (ev) {
+    if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+  }
+  if (_longPressFired) {
+    _longPressFired = false;
+    return;
+  }
+  if (_libSelectMode) {
+    _toggleLibSelection(id);
+    return;
+  }
+  if (_summonInFlight) return;
+  const grid = document.querySelector('.view-grid');
+  const card = grid && grid.querySelector(`.gc[data-book-id="${CSS.escape(id)}"]`);
+  if (!grid || !card) {
+    openBookById(id);
+    return;
+  }
+  _summonInFlight = true;
+  card.classList.add('is-summoned');
+  grid.classList.add('is-summoning');
+  setTimeout(() => {
+    // The reader transition is what the user sees from here forward;
+    // the cleanup below just defensively unsets the classes in case
+    // the user navigates back to the library quickly.
+    openBookById(id);
+    setTimeout(() => {
+      card.classList.remove('is-summoned');
+      grid.classList.remove('is-summoning');
+      _summonInFlight = false;
+    }, 400);
+  }, _SUMMON_DURATION_MS);
+}
 
 async function openBookById(id) {
   // Long-press just fired the book menu — swallow the click that the
