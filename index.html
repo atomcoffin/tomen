@@ -3770,6 +3770,15 @@ body.lib-select-mode .spine {
 <script>
 // ===== STATE =====
 let library = []; // Metadata only: {id, title, author, cover, progress, chapterIndex, scrollPos}
+// Monotonic version counter bumped on any library mutation that could
+// affect sort/filter output. Used by getSortedLibrary and the tag-strip
+// renderer to skip recomputing when nothing relevant has changed.
+let _libraryVersion = 0;
+function _bumpLibraryVersion() {
+  _libraryVersion++;
+  _sortedLibraryCache = null;
+  _tagStripCache = null;
+}
 let currentBook = null; // Full book with chapters when opened
 let currentChapterIndex = 0;
 let chapters = [];
@@ -4054,6 +4063,7 @@ async function saveLibrary() {
       library[idx].spreadIndex = currentBook.spreadIndex;
       library[idx].scrollPos = currentBook.scrollPos;
       library[idx].readingSeconds = currentBook.readingSeconds || 0;
+      _bumpLibraryVersion();
       await saveBookMeta(library[idx]);
     }
   }
@@ -4079,6 +4089,7 @@ async function deleteBook(id) {
     localStorage.removeItem('tomen_lastRead');
   }
   library = library.filter(b => b.id !== id);
+  _bumpLibraryVersion();
   // Drop the spine layout cache entry for this book so it doesn't
   // linger as orphan memory for the rest of the session.
   _spineLayoutCache.delete(id);
@@ -4252,6 +4263,7 @@ function toggleTagForCurrentBook(tag, forceAdd) {
   } else if (idx < 0) {
     book.tags.push(norm);
   }
+  _bumpLibraryVersion();
   // Persist to IDB; library array already mutated in place.
   saveBookMeta(book).catch(err => {
     console.error('saveBookMeta (tags) failed:', err);
@@ -4273,22 +4285,33 @@ function deleteTagGlobally(tag) {
       writes.push(saveBookMeta(b).catch(err => console.error('tag delete persist failed:', err)));
     }
   }
+  _bumpLibraryVersion();
   // If the filter was on this tag, clear it.
   if (_activeTagFilter === norm) _activeTagFilter = null;
   _renderTagEditorChips();
   Promise.all(writes).catch(() => {});
 }
 
+// Memoized tag-strip renderer. The strip rebuilds only when the set of
+// tags or the active filter actually changes — collecting tags scans
+// every book in the library, and replacing innerHTML thrashes the DOM
+// for no gain when neither has shifted since the last render.
+let _tagStripCache = null;
 function _renderTagFilterStrip() {
   const strip = $('lib-tag-strip');
   if (!strip) return;
   const tags = _allLibraryTags();
   if (tags.length === 0) {
-    strip.hidden = true;
-    strip.innerHTML = '';
+    if (_tagStripCache !== 'empty') {
+      strip.hidden = true;
+      strip.innerHTML = '';
+      _tagStripCache = 'empty';
+    }
     _activeTagFilter = null;
     return;
   }
+  const cacheKey = tags.join('|') + '||' + (_activeTagFilter || '');
+  if (_tagStripCache === cacheKey) return;
   strip.hidden = false;
   const all = `<button class="lib-tag-chip${_activeTagFilter === null ? ' active' : ''}" onclick="setTagFilter(null)">All</button>`;
   const chips = tags.map(t => {
@@ -4296,6 +4319,7 @@ function _renderTagFilterStrip() {
     return `<button class="lib-tag-chip${_activeTagFilter === t ? ' active' : ''}" onclick="setTagFilter('${safe.replace(/'/g, "\\'")}')">${safe}</button>`;
   }).join('');
   strip.innerHTML = all + chips;
+  _tagStripCache = cacheKey;
 }
 
 function setTagFilter(tag) {
@@ -4458,6 +4482,7 @@ async function migrateFromLocalStorage() {
 
 async function loadLibrary() {
   library = await dbGetAll('books');
+  _bumpLibraryVersion();
 }
 
 // Background-migrate cover images from raw EPUB blobs (v1) to shrunken
@@ -4949,7 +4974,18 @@ function clearLibrarySearch() {
   if (input) input.focus();
 }
 
+// Memoization cache for the sorted-filtered result. Keyed on every
+// input that affects the output: library version (bumped on mutations
+// via _bumpLibraryVersion), current sort, search query, active tag
+// filter, and last-read pin. A cache hit returns the prior array
+// reference unchanged, so downstream code that only iterates can
+// skip re-rendering when nothing meaningful has changed.
+let _sortedLibraryCache = null;
 function getSortedLibrary() {
+  const cacheKey = `${_libraryVersion}|${currentSort}|${librarySearchQuery}|${_activeTagFilter || ''}|${getLastReadId() || ''}`;
+  if (_sortedLibraryCache && _sortedLibraryCache.key === cacheKey) {
+    return _sortedLibraryCache.value;
+  }
   // Filter first, then sort. The filter is a no-op if the query is empty,
   // so unfiltered calls keep the original behavior.
   const q = normalizeForSearch(librarySearchQuery);
@@ -4996,6 +5032,7 @@ function getSortedLibrary() {
     }
   }
 
+  _sortedLibraryCache = { key: cacheKey, value: sorted };
   return sorted;
 }
 
@@ -5449,6 +5486,7 @@ async function loadTextFile(file, batch = false) {
     chapterCount: 1, contentSize: html.length,
     fontFace: null
   });
+  _bumpLibraryVersion();
   if (!batch) renderLibrary();
 }
 
@@ -6110,6 +6148,7 @@ async function loadEpub(file, batch = false) {
       chapterCount: bookChapters.length, contentSize, spineColor,
       fontFace: null
     });
+    _bumpLibraryVersion();
     if (!batch) renderLibrary();
   } catch (err) {
     if (err && err.code === 'DUPLICATE') {
@@ -6624,6 +6663,7 @@ function saveProgress() {
     library[idx].spreadIndex = currentBook.spreadIndex;
     library[idx].progress = currentBook.progress;
     library[idx].readingSeconds = currentBook.readingSeconds || 0;
+    _bumpLibraryVersion();
   }
   _saveProgressPending = true;
   if (_saveProgressTm) return;
