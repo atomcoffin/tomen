@@ -293,6 +293,205 @@ body.crt .brightness-dim { display: none; }
   --shadow-float: 0 8px 32px rgba(0, 0, 0, 0.44);
 }
 
+/* ===== Experimental themes =====
+   These prioritize visual concept over pure legibility. Each pairs a
+   palette with one or two layered effects (scanlines, grid lines,
+   offset ink shadows, ink-bleed blur) to evoke a specific medium or
+   era. See the Appearance panel "Experimental" group for the picker. */
+
+/* Terminal — VT100 / early Unix phosphor. Near-black bg, vivid green
+   text, forced monospace, subtle scanlines. CRT's cold hacker cousin:
+   no warm glow, no curved bezel, just a flat green-on-black readout. */
+.terminal {
+  --paper: #050805;
+  --linen: #0A1208;
+  --card: #0F1A0D;
+  --paper-edge: #1A2A20;
+  --ink: #4CFF94;
+  --stone: #2DB870;
+  --fog: #1A8048;
+  --brand: #66FFA8;
+  --brand-ink: #66FFA8;
+  --brand-deep: #33E080;
+  --brand-text: #050805;
+  --border: rgba(76, 255, 148, 0.15);
+  --shadow-cover: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-float: 0 8px 32px rgba(76, 255, 148, 0.14);
+}
+/* Force monospace for book content + UI titles. Terminal is a typeface
+   commitment, not just a palette. */
+body.terminal .r-inner,
+body.terminal .r-inner h1,
+body.terminal .r-inner h2,
+body.terminal .r-inner h3,
+body.terminal .lib-brand,
+body.terminal .tv-title,
+body.terminal .r-title,
+body.terminal .spine-title {
+  font-family: var(--font-read-mono);
+}
+/* Scanlines — tight 2px repeat, lower opacity than CRT so the look is
+   "video terminal" not "fogged tube." */
+body.terminal::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.28) 0,
+    rgba(0, 0, 0, 0.28) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  mix-blend-mode: multiply;
+}
+/* Soft phosphor glow on book text so it feels emissive, not printed. */
+body.terminal .r-inner {
+  text-shadow:
+    0 0 1px rgba(76, 255, 148, 0.55),
+    0 0 6px rgba(76, 255, 148, 0.25);
+}
+body.terminal .brightness-dim { display: none; }
+
+/* Blueprint — Prussian blue drafting paper. White-cream ink, brass-yellow
+   accent (the carpenter's-pencil mark). A faint grid in the page
+   background does the "engineering paper" work. Pure concept theme. */
+.blueprint {
+  --paper: #1E4276;
+  --linen: #1A3A68;
+  --card: #234E84;
+  --paper-edge: #0F2D55;
+  --ink: #EAF2FB;
+  --stone: #B0C0D8;
+  --fog: #7889A4;
+  --brand: #FFC93C;
+  --brand-ink: #FFD968;
+  --brand-deep: #E5B520;
+  --brand-text: #1E4276;
+  --border: rgba(234, 242, 251, 0.16);
+  --shadow-cover: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-float: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+/* Drafting-grid pattern in the page background — two thin white lines
+   per 32px square, very low alpha so it reads as paper texture rather
+   than competing with the text. Only on the reader's page surface
+   (.r-content's bg via the body), not on library covers/chrome. */
+body.blueprint .r-content {
+  background-image:
+    linear-gradient(rgba(234, 242, 251, 0.06) 0.5px, transparent 0.5px),
+    linear-gradient(90deg, rgba(234, 242, 251, 0.06) 0.5px, transparent 0.5px);
+  background-size: 32px 32px;
+}
+
+/* Risograph — warm cream paper, near-black ink, with a fluorescent pink
+   ghost shadow offset slightly to one side. Simulates a two-color riso
+   print where the second pass is slightly out of register. The pink
+   stays subtle on body text (1px offset) and grows on headings so
+   chapter titles really pop. Indie-zine vibe. */
+.riso {
+  --paper: #F2EAD5;
+  --linen: #EBE2C8;
+  --card: #F7F0DC;
+  --paper-edge: #D8CDA8;
+  --ink: #1A1610;
+  --stone: #5A5040;
+  --fog: #908675;
+  --brand: #FF4080;
+  --brand-ink: #C8306A;
+  --brand-deep: #E03070;
+  --brand-text: #F2EAD5;
+  --border: rgba(26, 22, 16, 0.1);
+  --shadow-cover: 0 4px 16px rgba(255, 64, 128, 0.12);
+  --shadow-float: 0 8px 32px rgba(255, 64, 128, 0.18);
+}
+/* Offset pink ghost on body text — like a two-color riso print where
+   the second pass is a hair out of register. Body gets a 1px offset
+   (subtle); headings get 2px so chapter titles read as Print Object. */
+body.riso .r-inner p,
+body.riso .r-inner li,
+body.riso .r-inner blockquote {
+  text-shadow: 1px 1px 0 rgba(255, 64, 128, 0.55);
+}
+body.riso .r-inner h1,
+body.riso .r-inner h2,
+body.riso .r-inner h3 {
+  text-shadow: 2px 2px 0 rgba(255, 64, 128, 0.7);
+}
+
+/* Mimeograph — cream paper, violet-blue spirit-duplicator ink. A very
+   soft ink-bleed simulated via text-shadow so the letters feel slightly
+   soaked into the paper. The signature look of 1960s school handouts
+   and zines printed on a mimeo machine. */
+.mimeo {
+  --paper: #F5EEDC;
+  --linen: #EDE5D0;
+  --card: #FAF4E5;
+  --paper-edge: #DCD0B0;
+  --ink: #382B7C;
+  --stone: #5B4FA0;
+  --fog: #8985B0;
+  --brand: #382B7C;
+  --brand-ink: #221A55;
+  --brand-deep: #2D2070;
+  --brand-text: #F5EEDC;
+  --border: rgba(56, 43, 124, 0.1);
+  --shadow-cover: 0 4px 16px rgba(56, 43, 124, 0.12);
+  --shadow-float: 0 8px 32px rgba(56, 43, 124, 0.18);
+}
+/* Subtle ink bleed — soft halo around every letter so the text feels
+   like it was pressed through wet paper. Kept very low so reading
+   isn't tiring. */
+body.mimeo .r-inner {
+  text-shadow:
+    0 0 0.6px rgba(56, 43, 124, 0.45),
+    0.3px 0 0.4px rgba(56, 43, 124, 0.25);
+}
+
+/* Brutalist — pure white, pure black, signal-red accent. The Anti-Theme:
+   override --radius to 0 so nothing has rounded corners, override
+   transitions and shadows where we can. Forces monospace as the manifesto
+   typeface. Designed to look intentionally uncomfortable next to the
+   other themes — that's the point. */
+.brutalist {
+  --paper: #FFFFFF;
+  --linen: #F2F2F2;
+  --card: #FFFFFF;
+  --paper-edge: #E0E0E0;
+  --ink: #000000;
+  --stone: #333333;
+  --fog: #777777;
+  --brand: #FF0000;
+  --brand-ink: #CC0000;
+  --brand-deep: #FF0000;
+  --brand-text: #FFFFFF;
+  --border: #000000;
+  --shadow-cover: none;
+  --shadow-float: none;
+  --radius: 0;
+  --radius-sm: 0;
+}
+/* Force monospace. The theme's whole point is rejecting decorative
+   typography — the only "designed" element is the grid. */
+body.brutalist .r-inner,
+body.brutalist .r-inner h1,
+body.brutalist .r-inner h2,
+body.brutalist .r-inner h3,
+body.brutalist .lib-brand,
+body.brutalist .tv-title,
+body.brutalist .r-title,
+body.brutalist .spine-title {
+  font-family: var(--font-read-mono);
+}
+/* Hard black borders on the toolbar instead of brand-tinted ones —
+   matches the no-decoration philosophy. */
+body.brutalist .r-toolbar-top { border-bottom: 1px solid #000000; }
+body.brutalist .r-toolbar-bottom { border-top: 1px solid #000000; }
+body.brutalist .r-toolbar {
+  background: #FFFFFF;
+}
+
 html, body {
   height: 100%; overflow: hidden;
   background: var(--paper);
@@ -1902,8 +2101,39 @@ body.r-mode-editing .r-inner {
    Active state = a brand ring around the chip + brand-colored name. */
 .theme-swatches {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
   gap: 8px;
+}
+.theme-swatches.is-reading { grid-template-columns: repeat(4, 1fr); }
+.theme-swatches.is-experimental { grid-template-columns: repeat(6, 1fr); }
+
+/* Group header — small uppercase caption with a hairline rule trailing
+   off to the right. Separates the practical "Reading" themes from
+   the vibe-first "Experimental" themes without adding chrome weight. */
+.theme-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  color: var(--fog);
+  margin-top: 14px;
+  margin-bottom: 8px;
+}
+.theme-group-header::after {
+  content: '';
+  flex: 1;
+  height: 0.5px;
+  background: var(--border);
+}
+/* First header in a section doesn't need a top margin — the section
+   caption above it already provides spacing. */
+.theme-group-header:first-of-type,
+.set-section > .theme-group-header:first-child,
+.settings-section > .theme-group-header:first-child {
+  margin-top: 0;
 }
 .theme-swatch {
   display: flex;
@@ -1950,6 +2180,16 @@ body.r-mode-editing .r-inner {
 .swatch-chip[data-swatch="inkwell"]::after { background: #B8E635; }
 .swatch-chip[data-swatch="crt"]     { background: #0A0805; }
 .swatch-chip[data-swatch="crt"]::after     { background: #FFD080; }
+.swatch-chip[data-swatch="terminal"]   { background: #050805; }
+.swatch-chip[data-swatch="terminal"]::after   { background: #4CFF94; }
+.swatch-chip[data-swatch="blueprint"]  { background: #1E4276; }
+.swatch-chip[data-swatch="blueprint"]::after  { background: #FFC93C; }
+.swatch-chip[data-swatch="riso"]    { background: #F2EAD5; }
+.swatch-chip[data-swatch="riso"]::after    { background: #FF4080; }
+.swatch-chip[data-swatch="mimeo"]   { background: #F5EEDC; }
+.swatch-chip[data-swatch="mimeo"]::after   { background: #382B7C; }
+.swatch-chip[data-swatch="brutalist"] { background: #FFFFFF; border: 1.5px solid #000000; }
+.swatch-chip[data-swatch="brutalist"]::after { background: #FF0000; }
 
 .theme-swatch.active .swatch-chip {
   box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--brand);
@@ -2131,10 +2371,8 @@ body.r-mode-editing .r-inner {
     grid-template-columns: 1fr;
     gap: 12px;
   }
-  .theme-swatches {
-    grid-template-columns: repeat(5, 1fr);
-    gap: 4px;
-  }
+  .theme-swatches.is-reading { grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .theme-swatches.is-experimental { grid-template-columns: repeat(3, 1fr); gap: 4px; }
   .seg-btn {
     padding: 7px 8px;
     font-size: 12px;
@@ -2144,10 +2382,8 @@ body.r-mode-editing .r-inner {
 /* Very narrow screens — theme swatches go to two rows of three so each
    chip + label has enough room; paragraph cluster also wraps. */
 @media (max-width: 420px) {
-  .theme-swatches {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 6px;
-  }
+  .theme-swatches.is-reading { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .theme-swatches.is-experimental { grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .set-paragraph-cluster {
     grid-template-columns: 1fr 1fr;
     gap: 12px 16px;
@@ -3180,7 +3416,8 @@ body.lib-select-mode .spine {
          brand ring around the chip. -->
     <div class="set-section">
       <div class="set-caption">Theme</div>
-      <div class="theme-swatches">
+      <div class="theme-group-header">Reading</div>
+      <div class="theme-swatches is-reading">
         <button class="theme-swatch active" data-theme="" onclick="setTheme('')" aria-label="Light theme">
           <span class="swatch-chip" data-swatch="light"></span>
           <span class="swatch-name">Light</span>
@@ -3197,9 +3434,32 @@ body.lib-select-mode .spine {
           <span class="swatch-chip" data-swatch="inkwell"></span>
           <span class="swatch-name">Inkwell</span>
         </button>
+      </div>
+      <div class="theme-group-header">Experimental</div>
+      <div class="theme-swatches is-experimental">
         <button class="theme-swatch" data-theme="crt" onclick="setTheme('crt')" aria-label="CRT theme">
           <span class="swatch-chip" data-swatch="crt"></span>
           <span class="swatch-name">CRT</span>
+        </button>
+        <button class="theme-swatch" data-theme="terminal" onclick="setTheme('terminal')" aria-label="Terminal theme">
+          <span class="swatch-chip" data-swatch="terminal"></span>
+          <span class="swatch-name">Terminal</span>
+        </button>
+        <button class="theme-swatch" data-theme="blueprint" onclick="setTheme('blueprint')" aria-label="Blueprint theme">
+          <span class="swatch-chip" data-swatch="blueprint"></span>
+          <span class="swatch-name">Blueprint</span>
+        </button>
+        <button class="theme-swatch" data-theme="riso" onclick="setTheme('riso')" aria-label="Risograph theme">
+          <span class="swatch-chip" data-swatch="riso"></span>
+          <span class="swatch-name">Risograph</span>
+        </button>
+        <button class="theme-swatch" data-theme="mimeo" onclick="setTheme('mimeo')" aria-label="Mimeograph theme">
+          <span class="swatch-chip" data-swatch="mimeo"></span>
+          <span class="swatch-name">Mimeo</span>
+        </button>
+        <button class="theme-swatch" data-theme="brutalist" onclick="setTheme('brutalist')" aria-label="Brutalist theme">
+          <span class="swatch-chip" data-swatch="brutalist"></span>
+          <span class="swatch-name">Brutalist</span>
         </button>
       </div>
     </div>
@@ -3372,7 +3632,8 @@ body.lib-select-mode .spine {
     </div>
     <div class="settings-section">
       <div class="settings-label">Theme</div>
-      <div class="theme-swatches">
+      <div class="theme-group-header">Reading</div>
+      <div class="theme-swatches is-reading">
         <button class="theme-swatch active" data-theme="" onclick="setTheme('')" aria-label="Light theme">
           <span class="swatch-chip" data-swatch="light"></span>
           <span class="swatch-name">Light</span>
@@ -3389,9 +3650,32 @@ body.lib-select-mode .spine {
           <span class="swatch-chip" data-swatch="inkwell"></span>
           <span class="swatch-name">Inkwell</span>
         </button>
+      </div>
+      <div class="theme-group-header">Experimental</div>
+      <div class="theme-swatches is-experimental">
         <button class="theme-swatch" data-theme="crt" onclick="setTheme('crt')" aria-label="CRT theme">
           <span class="swatch-chip" data-swatch="crt"></span>
           <span class="swatch-name">CRT</span>
+        </button>
+        <button class="theme-swatch" data-theme="terminal" onclick="setTheme('terminal')" aria-label="Terminal theme">
+          <span class="swatch-chip" data-swatch="terminal"></span>
+          <span class="swatch-name">Terminal</span>
+        </button>
+        <button class="theme-swatch" data-theme="blueprint" onclick="setTheme('blueprint')" aria-label="Blueprint theme">
+          <span class="swatch-chip" data-swatch="blueprint"></span>
+          <span class="swatch-name">Blueprint</span>
+        </button>
+        <button class="theme-swatch" data-theme="riso" onclick="setTheme('riso')" aria-label="Risograph theme">
+          <span class="swatch-chip" data-swatch="riso"></span>
+          <span class="swatch-name">Risograph</span>
+        </button>
+        <button class="theme-swatch" data-theme="mimeo" onclick="setTheme('mimeo')" aria-label="Mimeograph theme">
+          <span class="swatch-chip" data-swatch="mimeo"></span>
+          <span class="swatch-name">Mimeo</span>
+        </button>
+        <button class="theme-swatch" data-theme="brutalist" onclick="setTheme('brutalist')" aria-label="Brutalist theme">
+          <span class="swatch-chip" data-swatch="brutalist"></span>
+          <span class="swatch-name">Brutalist</span>
         </button>
       </div>
     </div>
@@ -8096,16 +8380,21 @@ document.addEventListener('click', e => {
 // update the OS-level notification bar / status bar color so it blends with
 // Tomen's background rather than showing a default bar.
 const _THEME_PAPER_COLORS = {
-  '':        '#FAF6F1',  // light (default)
-  'paper':   '#E8E1CE',
-  'dark':    '#1A1614',
-  'inkwell': '#152220',
-  'crt':     '#0A0805'
+  '':          '#FAF6F1',  // light (default)
+  'paper':     '#E8E1CE',
+  'dark':      '#1A1614',
+  'inkwell':   '#152220',
+  'crt':       '#0A0805',
+  'terminal':  '#050805',
+  'blueprint': '#1E4276',
+  'riso':      '#F2EAD5',
+  'mimeo':     '#F5EEDC',
+  'brutalist': '#FFFFFF'
 };
 // List of all non-default theme class names. Used by setTheme to remove
 // the previous theme before applying a new one — keeping this as a single
 // source of truth so adding a future theme only requires one edit here.
-const _THEME_CLASSES = ['dark', 'inkwell', 'paper', 'crt'];
+const _THEME_CLASSES = ['dark', 'inkwell', 'paper', 'crt', 'terminal', 'blueprint', 'riso', 'mimeo', 'brutalist'];
 function setTheme(theme) {
   // Remove old theme classes without wiping other body classes (r-ui-visible,
   // r-mode-editing, r-debug, etc.)
