@@ -1557,22 +1557,21 @@ body.r-ui-visible .r-footer-ref {
   width: 0;  /* set inline by JS via rAF easing loop */
   height: 0;
   pointer-events: none;
-  /* Solar-bloom — a near-solid brand disc with a fuzzy atmospheric
-     halo at the perimeter. The first two stops hold the alpha nearly
-     flat through the inner half of the radius so the core reads as
-     solid brand color; the last three stops ramp it down in the outer
-     half to create the "fuzzy edge" / "looking at the sun" character.
-     Visible half (one side is off-screen due to the edge-anchored
-     translate below) reads as a chartreuse disc with a soft halo
-     bleeding into the page margin. Tunes per state via the overrides
-     below — armed and active hold the plateau longer for a stronger
-     core. */
+  /* Solar bloom — small solid core, large fuzzy atmospheric halo.
+     The plateau ends at 30% of radius (compact core) and the rest of
+     the radius is a long fade to transparent (generous halo).
+     Idle uses --stone, a warm mid-gray, so the bloom reads as an
+     unobtrusive presence rather than a "page-turn here" label. The
+     hold animation transitions this entire gradient to the theme's
+     brand color over HOLD_MS — the color shift IS the commitment.
+     Armed (cursor inside) is the in-between state: mid-brand bloom
+     hinting that a click would commit. */
   background: radial-gradient(
     circle at center,
-    color-mix(in srgb, var(--brand) 80%, transparent) 0%,
-    color-mix(in srgb, var(--brand) 75%, transparent) 45%,
-    color-mix(in srgb, var(--brand) 30%, transparent) 75%,
-    color-mix(in srgb, var(--brand) 6%, transparent) 92%,
+    color-mix(in srgb, var(--stone) 55%, transparent) 0%,
+    color-mix(in srgb, var(--stone) 50%, transparent) 30%,
+    color-mix(in srgb, var(--stone) 22%, transparent) 60%,
+    color-mix(in srgb, var(--stone) 6%, transparent) 88%,
     transparent 100%
   );
   border-radius: 50%;
@@ -1593,33 +1592,31 @@ body.r-ui-visible .r-footer-ref {
   transform: translate(50%, -50%);
 }
 /* Cursor is inside the visible half-disc (a click would register).
-   Bloom intensifies: stronger brand at center, reaches further out
-   before fading. Growth state itself is communicated by SIZE (the
-   ring's diameter eases from baseline up toward max as the cursor
-   approaches the edge), so the armed/active states tune intensity
-   rather than dimensions. */
+   The bloom's color shifts from the idle --stone gray toward --brand,
+   signaling that the affordance is "live." Same gradient structure
+   as idle for clean interpolation. */
 .r-edge-ring.armed {
   background: radial-gradient(
     circle at center,
-    color-mix(in srgb, var(--brand) 95%, transparent) 0%,
-    color-mix(in srgb, var(--brand) 90%, transparent) 50%,
-    color-mix(in srgb, var(--brand) 40%, transparent) 78%,
-    color-mix(in srgb, var(--brand) 10%, transparent) 93%,
+    color-mix(in srgb, var(--brand) 70%, transparent) 0%,
+    color-mix(in srgb, var(--brand) 62%, transparent) 30%,
+    color-mix(in srgb, var(--brand) 28%, transparent) 60%,
+    color-mix(in srgb, var(--brand) 8%, transparent) 88%,
     transparent 100%
   );
 }
-/* Hold is active (mousedown / touch release at armed). Plateau extends
-   further out so the core sits at near-full brand saturation; the
-   iris fill (a solid brand circle scaling from clip 0% to clip 50%)
-   animates on top of it and reads as the disc "consolidating" the
-   bloom from atmosphere into commitment. */
+/* Hold in progress. Full-saturation brand at the core, halo retained
+   at the perimeter for continuity with the other states. The hold
+   animation is the transition INTO this gradient — see startHold for
+   the timing override that stretches that transition to HOLD_MS so
+   the color shift unfolds over the commit duration. */
 .r-edge-ring.active {
   background: radial-gradient(
     circle at center,
     var(--brand) 0%,
-    color-mix(in srgb, var(--brand) 92%, transparent) 60%,
-    color-mix(in srgb, var(--brand) 45%, transparent) 82%,
-    color-mix(in srgb, var(--brand) 12%, transparent) 95%,
+    color-mix(in srgb, var(--brand) 95%, transparent) 30%,
+    color-mix(in srgb, var(--brand) 42%, transparent) 60%,
+    color-mix(in srgb, var(--brand) 12%, transparent) 88%,
     transparent 100%
   );
 }
@@ -1628,32 +1625,14 @@ body.r-ui-visible .r-footer-ref {
   overflow: visible;
   display: block;
 }
-/* Outline ring removed — the soft brand bloom on the parent IS the
-   visual. The SVG element + circle is kept (it carries the iris fill
-   for the hold animation), but the track path is hidden. */
-.r-edge-ring-track { display: none; }
-
-/* Interior fill disc. Sits inside the bloom and scales from 0 to 1
-   during a hold — solid brand disc emerging from the soft bloom's
-   center, "pressure expanding outward from the fingertip." Transform
-   origin is the SVG's center so the disc grows symmetrically.
-   Note: the SVG viewBox is 0 0 80 80 centered on cx=40, cy=40. The
-   disc visually shows only in the half on-screen (the other half is
-   behind the viewport edge), so the growing disc reads as a half-disc
-   filling out of the bloom toward the page interior. */
-.r-edge-ring-fill {
-  fill: var(--brand);
-  stroke: none;
-  /* Iris fill — disc is always rendered at full size and full opacity,
-     but a radial clip-path controls how much is visible. clip-path
-     expands from circle(0%) at center to circle(50%) covering the full
-     disc during a hold. Reads as "pressure expanding outward from the
-     fingertip" — closer to a press metaphor than scale-from-0 was. */
-  clip-path: circle(0% at 50% 50%);
-  -webkit-clip-path: circle(0% at 50% 50%);
-  /* Transition applied inline by startHold — ease the clip-path from
-     0% to 50% over HOLD_MS, snap back to 0% on cancel/completion. */
-}
+/* Outline ring + iris fill both removed — the bloom IS the visual,
+   and the hold animation is a color shift of the bloom (background
+   gradient transitioning to the brand-state) rather than a disc
+   growing inside the SVG. The SVG elements are kept in the DOM
+   simply because the existing markup carries them; both inner shapes
+   are hidden so they don't interfere with the bloom. */
+.r-edge-ring-track,
+.r-edge-ring-fill { display: none; }
 
 /* Debug mode — reveals interaction zones.
    Toggle with Shift+D while the reader is active. */
@@ -6821,20 +6800,11 @@ document.addEventListener('keydown', (e) => {
 const HOLD_MS = 400;
 // Max ring radius in CSS pixels — the visible half-disc reaches this far
 // into the page when the cursor is at (or very near) the screen edge.
-// Diameter at max is 2 × this. Sized big enough to land as a confident
-// target on every theme.
-const EDGE_RING_MAX_R = 100;
+const EDGE_RING_MAX_R = 130;
 // Baseline radius — the persistent bloom always visible at each edge.
-// Both rings ride the cursor's vertical position via the rAF tick, so
-// at any moment a glance toward either margin should land on a soft
-// chartreuse haze. Big enough to read clearly in peripheral vision on
-// every theme without competing with the text.
-const EDGE_RING_BASELINE_R = 32;
-// Minimum rendered radius for a click to count as "armed." Sits well
-// above baseline so stray clicks on the idle bloom don't register —
-// the user has to move the cursor close enough to grow the bloom into
-// a deliberate target first.
-const EDGE_RING_MIN_R = 50;
+const EDGE_RING_BASELINE_R = 44;
+// Minimum rendered radius for a click to count as "armed."
+const EDGE_RING_MIN_R = 70;
 // Activation distance — the X-distance from the screen edge at which
 // the ring starts growing from baseline toward max. Outside this, the
 // ring stays at baseline; inside, the ring grows along a power curve
@@ -6842,11 +6812,10 @@ const EDGE_RING_MIN_R = 50;
 const EDGE_RING_ACTIVATION_DIST = 220;
 // rAF easing factor for size/position pursuit. Each frame, the ring's
 // rendered values move (target - current) * EASE toward the target.
-// At 0.10 the ring settles in roughly 10-12 frames (~170-200ms) —
-// noticeable lag that reads as "the ring is processing your motion"
-// without feeling sluggish. Higher = snappier (felt glued to cursor);
-// lower = molasses (felt unresponsive). 0.10 is the alive zone.
-const EDGE_RING_EASE = 0.10;
+// At 0.06 the ring settles in roughly 18 frames (~300ms) — clearly
+// lazy trailing motion, like the ring is considering whether to come
+// with you. Reads as "alive and a little reluctant" instead of glued.
+const EDGE_RING_EASE = 0.06;
 // Stop the rAF loop when both size and Y are within this many pixels of
 // target — avoids burning CPU on infinitesimal residuals.
 const EDGE_RING_SETTLE_THRESHOLD = 0.4;
@@ -6871,10 +6840,6 @@ let _ringRafId = null;
 function _ringForDir(dir) {
   return $(dir === 'prev' ? 'r-edge-ring-prev' : 'r-edge-ring-next');
 }
-function _fillForDir(dir) {
-  return _ringForDir(dir)?.querySelector('.r-edge-ring-fill');
-}
-
 // Compute the ring's *target* radius for a given cursor X position. The
 // rAF loop eases the rendered radius toward this. The ring stays at
 // baseline outside the activation distance and grows along a power
@@ -6965,16 +6930,11 @@ function _initEdgeRings() {
     const ring = _ringForDir(dir);
     if (ring) {
       ring.classList.remove('active', 'armed', 'exiting');
+      ring.style.transition = '';
       const size = EDGE_RING_BASELINE_R * 2;
       ring.style.width = size + 'px';
       ring.style.height = size + 'px';
       ring.style.top = midY + 'px';
-    }
-    const fill = _fillForDir(dir);
-    if (fill) {
-      fill.style.transition = 'none';
-      fill.style.clipPath = 'circle(0% at 50% 50%)';
-      fill.style.webkitClipPath = 'circle(0% at 50% 50%)';
     }
   }
 }
@@ -7029,22 +6989,14 @@ function startHold(dir, x, y) {
   cancelHold();
   _holdDir = dir;
   const ring = _ringForDir(dir);
-  const fill = _fillForDir(dir);
-  if (!ring || !fill) return;
-  // Iris fill — snap clip-path to circle(0%) (fully clipped, invisible)
-  // with no transition, then transition to circle(50%) (fully revealed)
-  // over HOLD_MS. The disc itself is always full-size and full-opacity,
-  // so what the user sees is a sharp brand-color circle expanding
-  // outward from the center.
-  fill.style.transition = 'none';
-  fill.style.clipPath = 'circle(0% at 50% 50%)';
-  fill.style.webkitClipPath = 'circle(0% at 50% 50%)';
-  void fill.getBoundingClientRect();  // reflow
+  if (!ring) return;
+  // The hold animation is the bloom's background gradient interpolating
+  // from the .armed state to the .active state — a color shift from
+  // mid-brand to full-brand over HOLD_MS. Override the default 180ms
+  // CSS transition duration to match the hold duration so the color
+  // build feels paced with the commit window.
   const easing = `${HOLD_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`;
-  fill.style.transition = `clip-path ${easing}, -webkit-clip-path ${easing}`;
-  fill.style.clipPath = 'circle(50% at 50% 50%)';
-  fill.style.webkitClipPath = 'circle(50% at 50% 50%)';
-  ring.classList.remove('hover', 'exiting');
+  ring.style.transition = `background ${easing}`;
   ring.classList.add('active');
   _holdTimer = setTimeout(() => {
     _holdTimer = null;
@@ -7061,29 +7013,14 @@ function cancelHold(completed) {
   _holdDir = null;
   if (!dir) return;
   const ring = _ringForDir(dir);
-  const fill = _fillForDir(dir);
   if (!ring) return;
+  // Restore the default transition timing so the fade-back to armed
+  // or idle uses the normal 180ms easing, not the long HOLD_MS we
+  // set when the hold started.
+  ring.style.transition = '';
   ring.classList.remove('active');
-  // Interior fill handling:
-  // - If completed (page turn fired): snap clip back to 0% instantly so
-  //   the next hold starts from empty.
-  // - If canceled (user released before completion): ease the clip back
-  //   to 0% smoothly so the iris closes rather than popping shut.
-  if (fill) {
-    if (completed) {
-      fill.style.transition = 'none';
-      fill.style.clipPath = 'circle(0% at 50% 50%)';
-      fill.style.webkitClipPath = 'circle(0% at 50% 50%)';
-    } else {
-      const easing = `200ms cubic-bezier(0.4, 0, 0.2, 1)`;
-      fill.style.transition = `clip-path ${easing}, -webkit-clip-path ${easing}`;
-      fill.style.clipPath = 'circle(0% at 50% 50%)';
-      fill.style.webkitClipPath = 'circle(0% at 50% 50%)';
-    }
-  }
-  // Ring's size + position keep tracking the cursor via the continuous
+  // Ring size + position keep tracking the cursor via the continuous
   // mousemove handler, so we don't need to manually retarget here.
-  // Just re-sync the armed class against the now-released state.
   _syncArmedClasses(_lastCursorX, _lastCursorY);
 }
 
