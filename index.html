@@ -9727,15 +9727,13 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') showLibrary();
 });
 
-// ===== SPINE SCROLL — translate vertical wheel to horizontal =====
-document.addEventListener('wheel', e => {
-  const wrap = document.querySelector('.view-spine-wrap');
-  if (!wrap || !wrap.contains(e.target)) return;
-  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-    e.preventDefault();
-    wrap.scrollLeft += e.deltaY;
-  }
-}, { passive: false });
+// Note: spine-view vertical→horizontal wheel translation is attached
+// inline in renderSpineView (on the .view-spine-wrap element). An
+// earlier document-level fallback duplicated that behavior with
+// passive:false, which forced the browser to wait for JS on EVERY
+// wheel event across the entire page — killing compositor scrolling
+// in Grid view and elsewhere. Removed; the wrap-scoped listener is
+// the only one we need.
 
 // ===== GREETING =====
 function getGreeting() {
