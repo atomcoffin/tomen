@@ -1924,7 +1924,7 @@ body.r-mode-editing .r-inner {
   opacity: 0.5;
 }
 .settings-section {
-  max-width: 640px;
+  max-width: 720px;
   margin: 0 auto 18px;
 }
 .settings-label {
@@ -2020,19 +2020,24 @@ body.r-mode-editing .r-inner {
 }
 
 /* Scope banner at the top of the Appearance panel — names what these
-   controls modify ("this book") and offers a clear escape hatch to
-   the global-settings panel. Two columns: label on the left, link
-   chip on the right. Hairline rule under the row separates the
-   banner from the controls that follow. */
+   controls modify and offers two scope-related actions on the right:
+   Reset (revert this book's overrides to global defaults) and Global
+   → (close Appearance, open the Profile/global settings panel).
+   Hairline rule under the row separates the banner from the controls
+   that follow. */
 .set-scope {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  max-width: 640px;
+  max-width: 720px;
   margin: 0 auto 18px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--ink);
+}
+.set-scope-actions {
+  display: flex;
+  gap: 8px;
 }
 .set-scope-label {
   font-family: var(--font-ui);
@@ -2075,7 +2080,7 @@ body.r-mode-editing .r-inner {
    for the paragraph trio. The caption sits inline above each control
    group as a micro-label, freeing the ~110px the old label column ate. */
 .settings-compact .set-section {
-  max-width: 640px;
+  max-width: 720px;
   margin: 0 auto 14px;
 }
 .settings-compact .set-section:last-child {
@@ -2102,7 +2107,7 @@ body.r-mode-editing .r-inner {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
-  max-width: 640px;
+  max-width: 720px;
   margin: 0 auto 14px;
 }
 .set-cell {
@@ -2274,21 +2279,61 @@ body.r-mode-editing .r-inner {
 }
 .face-cell.is-locked .face-lock-note { display: block; }
 
-/* Paragraph cluster — three control groups (Paragraphs / Spacing / Align)
-   share one row, each with icon + text labels. Each cell sizes to its
-   content so the row reads as three related but distinct controls. */
+/* Paragraph group — width, style, spacing, align all share one row
+   as four equal cells. Each gets its own sub-caption + segmented
+   control. On narrow viewports this wraps via the media block below.
+   Top border separates it from the typeface group above. */
 .set-paragraph-cluster {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
   gap: 14px;
   align-items: end;
-  max-width: 640px;
+  max-width: 720px;
   margin: 0 auto;
   padding-top: 14px;
   border-top: 1px solid var(--ink);
 }
 .set-pcell {
   min-width: 0;
+}
+
+/* Typeface group — face buttons + size slider + line height slider on
+   one row. The grid uses auto for the face buttons (sized to content)
+   and 1fr for each slider so they share the remaining width equally.
+   align-items: stretch keeps every control the same height; the
+   slider-rows below get a min-height so they don't collapse around
+   the thin track. */
+.typeface-row {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: 12px;
+  align-items: stretch;
+}
+.typeface-row > .slider-row {
+  min-height: 34px;
+}
+.typeface-row .slider-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--stone);
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+/* Theme + Brightness pair at the top — Theme is a dropdown chip
+   (auto-sized) and Brightness is a slider that fills the rest. The
+   grid lets the slider claim the leftover width while the chip stays
+   compact. align-items: end so the chip and the slider's bottom edge
+   line up with each other regardless of the caption text. */
+.set-pair.is-theme-row {
+  grid-template-columns: auto 1fr;
+  align-items: end;
+}
+.set-pair.is-theme-row .set-cell:last-child .slider-row {
+  min-height: 34px;
 }
 
 /* Font size slider endpoints — small/large A glyphs rather than a numeric
@@ -2427,8 +2472,10 @@ body.r-mode-editing .r-inner {
   letter-spacing: 0.02em;
 }
 
-/* Mobile: pair-rows collapse to single column, theme swatches reflow to
-   three-per-row, paragraph cluster stays a row but shrinks gaps. */
+/* Tablet and narrower — pair-rows stack, typeface group stacks its
+   three columns, paragraph row becomes 2×2. Theme + Brightness pair
+   keeps a two-column layout because both fit comfortably even on
+   phones (theme chip is small, brightness slider takes the rest). */
 @media (max-width: 768px) {
   .settings-compact {
     padding: 12px 18px 22px;
@@ -2437,24 +2484,31 @@ body.r-mode-editing .r-inner {
     grid-template-columns: 1fr;
     gap: 12px;
   }
+  .set-pair.is-theme-row {
+    grid-template-columns: auto 1fr;
+  }
+  .typeface-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .set-paragraph-cluster {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 16px;
+  }
   .seg-btn {
     padding: 7px 8px;
     font-size: 12px;
   }
 }
 
-/* Very narrow screens — theme swatches go to two rows of three so each
-   chip + label has enough room; paragraph cluster also wraps. */
+/* Very narrow phones — theme + brightness stack so brightness gets
+   a usable slider track, paragraph cells stack tighter. */
 @media (max-width: 420px) {
-  .set-paragraph-cluster {
-    grid-template-columns: 1fr 1fr;
-    gap: 12px 16px;
+  .set-pair.is-theme-row {
+    grid-template-columns: 1fr;
   }
-  /* Spacing's three labels need full width on narrow screens, so let it
-     break to the second row spanning both columns. */
-  .set-paragraph-cluster .set-pcell:nth-child(2) {
-    grid-column: 1 / -1;
-    order: 3;
+  .set-paragraph-cluster {
+    gap: 10px 12px;
   }
 }
 
@@ -3460,111 +3514,119 @@ body.lib-select-mode .spine {
   <div class="settings settings-compact" onclick="event.stopPropagation()">
     <div class="settings-handle"></div>
 
-    <!-- Scope banner: names what these controls modify (per-book) and
-         offers an escape hatch to the global Profile panel. Keeps the
-         user oriented when they're tuning typography for a single
-         book and don't want it to leak everywhere. -->
+    <!-- Scope banner: names what these controls modify (current book)
+         and offers two scope-related actions: Reset (revert this book's
+         overrides + bucket prefs to defaults) and Global → (close
+         Appearance, open the Profile/global settings panel). -->
     <div class="set-scope">
-      <span class="set-scope-label">Appearance <span class="set-scope-context">· for this book</span></span>
-      <button class="set-scope-global" type="button" onclick="openGlobalSettingsFromAppearance()">
-        <span>Global</span>
-        <i class="ph ph-arrow-right" aria-hidden="true"></i>
-      </button>
+      <span class="set-scope-label">Appearance <span class="set-scope-context">· for current book</span></span>
+      <div class="set-scope-actions">
+        <button class="set-scope-global" type="button" onclick="resetAppearanceToDefaults()" title="Reset to global defaults">
+          <i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>
+          <span>Reset</span>
+        </button>
+        <button class="set-scope-global" type="button" onclick="openGlobalSettingsFromAppearance()">
+          <span>Global</span>
+          <i class="ph ph-arrow-right" aria-hidden="true"></i>
+        </button>
+      </div>
     </div>
 
-    <div class="set-section">
-      <div class="set-caption">Theme</div>
-      <button class="theme-current" type="button" aria-haspopup="menu" aria-label="Change theme" onclick="openThemeMenu(event)">
-        <span class="swatch-chip" data-swatch="light"></span>
-        <span class="theme-current-name">Light</span>
-        <i class="ph ph-caret-down" aria-hidden="true"></i>
-      </button>
+    <!-- Row 1: Theme + Brightness paired so the two "atmosphere" controls
+         share a row at the top. Brightness sits inline rather than
+         hiding in its own section. -->
+    <div class="set-pair is-theme-row">
+      <div class="set-cell">
+        <div class="set-caption">Theme</div>
+        <button class="theme-current" type="button" aria-haspopup="menu" aria-label="Change theme" onclick="openThemeMenu(event)">
+          <span class="swatch-chip" data-swatch="light"></span>
+          <span class="theme-current-name">Light</span>
+          <i class="ph ph-caret-down" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div class="set-cell">
+        <div class="set-caption">Brightness</div>
+        <div class="slider-row">
+          <i class="ph ph-sun slider-icon" aria-hidden="true"></i>
+          <input type="range" min="0" max="100" value="100" id="sl-brightness" oninput="setBrightness(this.value)">
+          <span class="slider-value" id="brightness-display">100</span>
+        </div>
+      </div>
     </div>
 
-    <div class="set-pair">
-      <div class="set-cell face-cell">
-        <div class="set-caption">Typeface</div>
+    <!-- Row 2: Typeface group — face buttons + size + line height all
+         on one row, same height across the three controls. -->
+    <div class="set-section face-cell">
+      <div class="set-caption">Typeface</div>
+      <div class="typeface-row">
         <div class="seg-row">
           <button class="seg-btn active" data-face="serif" onclick="setReadingFace('serif')">Serif</button>
           <button class="seg-btn" data-face="sans" onclick="setReadingFace('sans')">Sans</button>
           <button class="seg-btn" data-face="mono" onclick="setReadingFace('mono')">Mono</button>
         </div>
-        <div class="face-lock-note" id="face-lock-note"></div>
-      </div>
-      <div class="set-cell">
-        <div class="set-caption">Size</div>
         <div class="slider-row">
+          <span class="slider-label">Size</span>
           <span class="slider-icon-text" aria-hidden="true" style="font-size:11px">A</span>
           <input type="range" min="14" max="28" value="18" id="sl-fontsize" oninput="setFontSize(this.value)">
           <span class="slider-icon-text" aria-hidden="true" style="font-size:16px">A</span>
           <span class="slider-value" id="fs-display">18</span>
         </div>
-      </div>
-    </div>
-
-    <div class="set-pair">
-      <div class="set-cell">
-        <div class="set-caption">Width</div>
-        <div class="seg-row">
-          <button class="seg-btn" data-width="900" onclick="setReadingWidth(900)">Narrow</button>
-          <button class="seg-btn active" data-width="1200" onclick="setReadingWidth(1200)">Medium</button>
-          <button class="seg-btn" data-width="1500" onclick="setReadingWidth(1500)">Wide</button>
-        </div>
-      </div>
-      <div class="set-cell">
-        <div class="set-caption">Line height</div>
         <div class="slider-row">
+          <span class="slider-label">Line</span>
           <input type="range" min="14" max="24" value="18" id="sl-lineheight" oninput="setLineHeight(this.value)">
           <span class="slider-value" id="lh-display">1.8</span>
         </div>
       </div>
+      <div class="face-lock-note" id="face-lock-note"></div>
     </div>
 
+    <!-- Row 3: Paragraph group — width, paragraph style, spacing, align
+         all in one row of four cells. Each has its own sub-caption +
+         segmented control. -->
     <div class="set-section">
-      <div class="set-caption">Brightness</div>
-      <div class="slider-row">
-        <i class="ph ph-sun slider-icon" aria-hidden="true"></i>
-        <input type="range" min="0" max="100" value="100" id="sl-brightness" oninput="setBrightness(this.value)">
-        <span class="slider-value" id="brightness-display">100</span>
-      </div>
-    </div>
-
-    <!-- Paragraph cluster: three control groups (Paragraphs / Spacing /
-         Align) on one row, each with icon + text labels so users can
-         scan by either signal. -->
-    <div class="set-paragraph-cluster">
-      <div class="set-pcell">
-        <div class="set-caption">Paragraphs</div>
-        <div class="seg-row">
-          <button class="seg-btn active" data-pstyle="block" onclick="setParagraphStyle('block')">
-            <i class="ph ph-rows" aria-hidden="true"></i>
-            <span>Block</span>
-          </button>
-          <button class="seg-btn" data-pstyle="indent" onclick="setParagraphStyle('indent')">
-            <i class="ph ph-text-indent" aria-hidden="true"></i>
-            <span>Indent</span>
-          </button>
+      <div class="set-caption">Paragraph</div>
+      <div class="set-paragraph-cluster">
+        <div class="set-pcell">
+          <div class="set-caption">Width</div>
+          <div class="seg-row">
+            <button class="seg-btn" data-width="900" onclick="setReadingWidth(900)">Narrow</button>
+            <button class="seg-btn active" data-width="1200" onclick="setReadingWidth(1200)">Medium</button>
+            <button class="seg-btn" data-width="1500" onclick="setReadingWidth(1500)">Wide</button>
+          </div>
         </div>
-      </div>
-      <div class="set-pcell">
-        <div class="set-caption">Spacing</div>
-        <div class="seg-row">
-          <button class="seg-btn" data-pspacing="7" onclick="setParagraphSpacing(7)">Tight</button>
-          <button class="seg-btn active" data-pspacing="10" onclick="setParagraphSpacing(10)">Normal</button>
-          <button class="seg-btn" data-pspacing="14" onclick="setParagraphSpacing(14)">Loose</button>
+        <div class="set-pcell">
+          <div class="set-caption">Style</div>
+          <div class="seg-row">
+            <button class="seg-btn active" data-pstyle="block" onclick="setParagraphStyle('block')">
+              <i class="ph ph-rows" aria-hidden="true"></i>
+              <span>Block</span>
+            </button>
+            <button class="seg-btn" data-pstyle="indent" onclick="setParagraphStyle('indent')">
+              <i class="ph ph-text-indent" aria-hidden="true"></i>
+              <span>Indent</span>
+            </button>
+          </div>
         </div>
-      </div>
-      <div class="set-pcell">
-        <div class="set-caption">Align</div>
-        <div class="seg-row">
-          <button class="seg-btn active" data-align="justify" onclick="setTextAlign('justify')">
-            <i class="ph ph-text-align-justify" aria-hidden="true"></i>
-            <span>Justify</span>
-          </button>
-          <button class="seg-btn" data-align="left" onclick="setTextAlign('left')">
-            <i class="ph ph-text-align-left" aria-hidden="true"></i>
-            <span>Left</span>
-          </button>
+        <div class="set-pcell">
+          <div class="set-caption">Spacing</div>
+          <div class="seg-row">
+            <button class="seg-btn" data-pspacing="7" onclick="setParagraphSpacing(7)">Tight</button>
+            <button class="seg-btn active" data-pspacing="10" onclick="setParagraphSpacing(10)">Normal</button>
+            <button class="seg-btn" data-pspacing="14" onclick="setParagraphSpacing(14)">Loose</button>
+          </div>
+        </div>
+        <div class="set-pcell">
+          <div class="set-caption">Align</div>
+          <div class="seg-row">
+            <button class="seg-btn active" data-align="justify" onclick="setTextAlign('justify')">
+              <i class="ph ph-text-align-justify" aria-hidden="true"></i>
+              <span>Justify</span>
+            </button>
+            <button class="seg-btn" data-align="left" onclick="setTextAlign('left')">
+              <i class="ph ph-text-align-left" aria-hidden="true"></i>
+              <span>Left</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -8591,6 +8653,43 @@ function openGlobalSettingsFromAppearance() {
   const ov = $('ov-settings');
   if (ov) ov.classList.remove('open');
   toggleProfile();
+}
+
+// Reset every control in the Appearance panel to its global default:
+//   - Per-book typeface override is cleared so the book falls back to
+//     globalReadingFace.
+//   - Device-bucketed prefs (size, line height, width, paragraph
+//     style/spacing, align) revert to their bucket defaults defined
+//     in _READER_CONFIG.
+//   - Brightness goes back to 100 (no dim).
+// Each setter handles its own DOM + persistence, so the visible
+// panel reflects the reset immediately. The reader re-paints
+// through remeasureReader / updateQuickThumbs as each setter fires.
+function resetAppearanceToDefaults() {
+  const bucket = getDeviceBucket();
+  const def = _READER_CONFIG[bucket].defaults;
+  // Clear the per-book typeface override; setReadingFace called via
+  // setGlobalReadingFace falls through to the global default face,
+  // which is exactly what we want after a reset. We do this directly
+  // rather than via setReadingFace() because the latter writes the
+  // current global face onto currentBook (still an override) — we
+  // want NO override.
+  if (typeof currentBook === 'object' && currentBook) {
+    currentBook.fontFace = null;
+    const row = library.find(b => b.id === currentBook.id);
+    if (row) row.fontFace = null;
+    saveBookMeta(currentBook).catch(() => {});
+  }
+  applyReadingFace(globalReadingFace);
+  // Bucket-scoped prefs back to their defaults.
+  setFontSize(def.fontSize);
+  setLineHeight(def.lineHeight);
+  setReadingWidth(def.readingWidth);
+  setParagraphStyle(def.paragraphStyle);
+  setParagraphSpacing(def.paragraphSpacing);
+  setTextAlign(def.textAlign);
+  // Brightness is a global non-bucketed setting; default is 100.
+  setBrightness(100);
 }
 
 // ===== PROFILE =====
