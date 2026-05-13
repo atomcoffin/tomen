@@ -3798,7 +3798,7 @@ let globalReadingFace = localStorage.getItem('tomen_readingFace') || 'serif';
 
 // ===== INDEXEDDB STORAGE =====
 const DB_NAME = 'tomen';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let db = null;
 
 function openDB() {
@@ -3849,6 +3849,16 @@ function openDB() {
           }
           cursor.continue();
         };
+      }
+      // v3 — cover images move out of the books store into their own
+      // covers store. The books store's cover field carried the entire
+      // data URL per book, which loaded into memory on every loadLibrary
+      // call (5-15MB for a 40-book library). Splitting lets library
+      // load become lightweight metadata-only, with covers fetched
+      // lazily as grid cards scroll into view. _migrateCoverStorage()
+      // does the post-upgrade data move in the background.
+      if (!d.objectStoreNames.contains('covers')) {
+        d.createObjectStore('covers', { keyPath: 'id' });
       }
     };
     req.onsuccess = (e) => { db = e.target.result; resolve(db); };
@@ -3948,12 +3958,12 @@ async function saveBookContent(book) {
 // saveBookMeta and saveBookAtomic can share the projection logic. Marks are
 // stored in their own object store now and intentionally excluded here.
 function bookMetaFromBook(book) {
-  return {
-    id: book.id, title: book.title, author: book.author, cover: book.cover,
-    // Cover-storage version. 1 (or missing) = raw blob, full resolution.
-    // 2 = shrunken JPEG via shrinkCoverDataURL. Drives the background
-    // migration on init so existing libraries get re-encoded once.
-    coverV: book.coverV || 1,
+  const meta = {
+    id: book.id, title: book.title, author: book.author,
+    // Cover-storage version. 1 = raw cover in books store (legacy),
+    // 2 = shrunken cover in books store (mid-migration legacy),
+    // 3 = cover lives in covers store (current).
+    coverV: book.coverV || 3,
     progress: book.progress || 0, chapterIndex: book.chapterIndex || 0,
     spreadIndex: book.spreadIndex || 0,
     scrollPos: book.scrollPos || 0, chapterCount: (book.chapters || []).length,
@@ -3971,6 +3981,16 @@ function bookMetaFromBook(book) {
     // store — the global tag list is derived from this union at render.
     tags: Array.isArray(book.tags) ? book.tags : []
   };
+  // Preserve a legacy cover field ONLY when the book hasn't been
+  // migrated yet — coverV < 3 means the cover is supposed to live in
+  // the books store still, and stripping it on a mid-migration
+  // saveProgress write would lose the cover before migration could
+  // move it to the covers store. Once a book is at coverV 3 (post-
+  // migration, or a fresh import), the cover lives exclusively in
+  // the covers store and the books-store record carries no cover
+  // bytes — that's the whole point of the split.
+  if (book.cover && (book.coverV || 1) < 3) meta.cover = book.cover;
+  return meta;
 }
 
 // Atomic save: write meta + content in one transaction across both stores.
@@ -4082,6 +4102,8 @@ async function deleteBook(id) {
   // and orphan marks for a deleted book are harmless dead data.
   try { await dbDelete('books', id); } catch (err) { console.error('delete books meta failed:', err); }
   try { await dbDelete('content', id); } catch (err) { console.error('delete content failed:', err); }
+  try { await dbDelete('covers', id); } catch (err) { console.error('delete cover failed:', err); }
+  _coverCache.delete(id);
   try { await deleteAllMarksForBook(id); } catch (err) { console.error('delete marks failed:', err); }
   // Clear lastRead pointer if it referenced this book — otherwise the next
   // session will try to auto-resume into a book that no longer exists.
@@ -4485,44 +4507,78 @@ async function loadLibrary() {
   _bumpLibraryVersion();
 }
 
-// Background-migrate cover images from raw EPUB blobs (v1) to shrunken
-// JPEG data URLs (v2). Runs once per session — picks up any books still
-// at v1, shrinks each cover, writes the new data URL + coverV=2 back to
-// IDB, and updates the in-memory book object. Yields to the event loop
-// between books so a large migration doesn't lock the UI; the user can
-// scroll/click while it works. The DOM isn't refreshed mid-migration
-// (the in-flight grid view keeps showing the old cover strings until
-// the user navigates), so the perf benefit lands on the next page load
-// rather than mid-session — but that's by design: a full re-render
-// while migrating would itself be expensive.
+// In-memory cache for cover data URLs fetched from the covers store.
+// bookId → dataURL string (cover available), null (book has no cover),
+// or 'loading' (fetch in flight, dedupes concurrent requests).
+const _coverCache = new Map();
+
+// Async getter for a book's cover. Used by the grid-view lazy loader
+// and by spine-color extraction. Memoized in _coverCache so repeat
+// requests don't hit IDB. Returns null if the book has no cover or
+// the fetch fails.
+async function getCoverForBook(bookId) {
+  if (!bookId) return null;
+  if (_coverCache.has(bookId)) {
+    const val = _coverCache.get(bookId);
+    return val === 'loading' ? null : val;
+  }
+  _coverCache.set(bookId, 'loading');
+  try {
+    const rec = await dbGet('covers', bookId);
+    const url = (rec && rec.dataURL) || null;
+    _coverCache.set(bookId, url);
+    return url;
+  } catch (err) {
+    console.warn('[tomen] cover fetch failed', bookId, err);
+    _coverCache.set(bookId, null);
+    return null;
+  }
+}
+
+// Combined cover storage migration. After v3 schema upgrade adds the
+// covers store, this pass moves every book's inline cover field out
+// of the books store and into the new covers store, shrinking on the
+// way if the cover was still at v1 (raw resolution). Once moved, the
+// book's meta in the books store no longer carries cover bytes, so
+// future loadLibrary calls read only lightweight metadata.
+//
+// Runs in the background after the first render — the current session
+// keeps showing in-memory covers from library[i].cover while the
+// migration progresses; the perf win lands on the next page load when
+// loadLibrary returns slim records.
 let _coverMigrationRunning = false;
-async function _migrateCoverImages() {
+async function _migrateCoverStorage() {
   if (_coverMigrationRunning) return;
   if (!library || library.length === 0) return;
-  const candidates = library.filter(b => b.cover && (b.coverV || 1) < 2);
+  const candidates = library.filter(b => b.cover);
   if (candidates.length === 0) return;
   _coverMigrationRunning = true;
   try {
     for (const book of candidates) {
       try {
-        const shrunken = await shrinkCoverDataURL(book.cover);
-        if (shrunken) {
-          book.cover = shrunken;
-          book.coverV = 2;
-          await saveBookMeta(book);
-        } else {
-          // Couldn't shrink (corrupt image, etc.) — mark as v2 anyway so
-          // we don't retry every session. The original raw cover stays.
-          book.coverV = 2;
-          await saveBookMeta(book);
+        let dataURL = book.cover;
+        // Shrink if not already shrunken in a previous migration pass.
+        if ((book.coverV || 1) < 2) {
+          const shrunken = await shrinkCoverDataURL(dataURL);
+          if (shrunken) dataURL = shrunken;
         }
+        // Write to covers store + warm the cache.
+        await dbPut('covers', { id: book.id, dataURL });
+        _coverCache.set(book.id, dataURL);
+        // Clear from book meta — books store now carries no cover bytes.
+        // The current session keeps library[i].cover until this point
+        // so any in-flight renders still see the in-memory copy; once
+        // cleared, future renders fall through to the lazy loader which
+        // pulls from the covers store (now populated above).
+        book.cover = null;
+        book.coverV = 3;
+        await saveBookMeta(book);
       } catch (err) {
-        console.warn('[tomen] cover migration skipped for', book.id, err);
+        console.warn('[tomen] cover storage migration skipped for', book.id, err);
       }
-      // Yield between books so a 40-book migration doesn't freeze the
-      // tab. Each shrink itself involves image decode + canvas paint +
-      // toDataURL — non-trivial work that we don't want stacked back-
-      // to-back without giving the rest of the page a turn.
+      // Yield between books so a large migration doesn't freeze the
+      // tab. Each shrink involves image decode + canvas paint +
+      // toDataURL — non-trivial work we don't want stacked.
       await new Promise(r => setTimeout(r, 0));
     }
   } finally {
@@ -5120,19 +5176,81 @@ function renderGridView(el, books) {
     const p = b.progress || 0;
     const c = strColor(b.title);
     const sel = _libSelectedIds.has(b.id) ? ' selected' : '';
-    const cover = b.cover
-      ? `<img src="${b.cover}" alt="" loading="lazy" decoding="async">`
-      : `<div class="gc-placeholder" style="background:linear-gradient(145deg,${c[0]},${c[1]})">
+    // Three cases for the cover slot:
+    //   1. b.cover is set in memory (fresh import this session, or
+    //      legacy pre-v3 record): render <img> inline immediately.
+    //   2. b.cover is absent but the book likely has one (coverV >= 3
+    //      OR cover cache says it's there): render a placeholder with
+    //      data-needs-cover so the IntersectionObserver below knows to
+    //      lazy-load it as the card scrolls into view.
+    //   3. No cover at all: placeholder stays as the final visual.
+    let coverHtml;
+    const cached = _coverCache.has(b.id) ? _coverCache.get(b.id) : undefined;
+    if (b.cover) {
+      coverHtml = `<img src="${b.cover}" alt="" loading="lazy" decoding="async">`;
+    } else if (cached && cached !== 'loading') {
+      // Cover already in our session cache — emit inline so no
+      // observer round-trip is needed.
+      coverHtml = `<img src="${cached}" alt="" loading="lazy" decoding="async">`;
+    } else {
+      coverHtml = `<div class="gc-placeholder" style="background:linear-gradient(145deg,${c[0]},${c[1]})">
            <div class="gcp-title">${esc(b.title)}</div>
            <div class="gcp-author">${esc(b.author || '')}</div>
          </div>`;
+    }
     return `<div class="gc">
       <button class="gc-menu-btn icon-btn" onclick="openBookMenu(event, '${b.id}')" aria-label="Book options" title="Options"><i class="ph ph-dots-three-outline"></i></button>
-      <div class="gc-cover${sel}" onclick="openBookById('${b.id}')">${cover}${p > 0 ? '<div class="gc-prog"><div class="gc-prog-fill" style="width:' + p + '%"></div></div>' : ''}</div>
+      <div class="gc-cover${sel}" data-book-id="${b.id}" onclick="openBookById('${b.id}')">${coverHtml}${p > 0 ? '<div class="gc-prog"><div class="gc-prog-fill" style="width:' + p + '%"></div></div>' : ''}</div>
       <div class="gc-title" onclick="openBookById('${b.id}')">${esc(b.title)}</div>
       <div class="gc-author" onclick="openBookById('${b.id}')">${esc(b.author || 'Unknown')}</div>
     </div>`;
   }).join('') + '</div>';
+  _observeGridCovers(el);
+}
+
+// IntersectionObserver-driven lazy cover loader for grid view. Watches
+// every .gc-cover that doesn't have an <img> yet; when one enters (or
+// nears) the viewport, fetches the cover from the covers store and
+// swaps the placeholder for an actual <img>. Observers are recreated
+// per renderGridView call — the old one is disconnected so it doesn't
+// chase orphan nodes. rootMargin: 200px pre-loads covers slightly
+// before they're scrolled into view, so the user rarely sees a
+// placeholder flash to image.
+let _gridCoverObserver = null;
+function _observeGridCovers(rootEl) {
+  if (_gridCoverObserver) {
+    _gridCoverObserver.disconnect();
+    _gridCoverObserver = null;
+  }
+  if (typeof IntersectionObserver !== 'function') return;
+  const targets = rootEl.querySelectorAll('.gc-cover[data-book-id]');
+  if (targets.length === 0) return;
+  _gridCoverObserver = new IntersectionObserver((entries, obs) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const el = entry.target;
+      obs.unobserve(el);
+      // Already has an <img>? Cover was inline or was loaded earlier
+      // in this observer cycle. Nothing to do.
+      if (el.querySelector('img')) continue;
+      const id = el.dataset.bookId;
+      if (!id) continue;
+      getCoverForBook(id).then(url => {
+        if (!url) return;
+        const placeholder = el.querySelector('.gc-placeholder');
+        if (!placeholder) return;
+        const img = document.createElement('img');
+        img.alt = '';
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.src = url;
+        placeholder.replaceWith(img);
+      }).catch(() => {});
+    }
+  }, { root: null, rootMargin: '200px', threshold: 0.01 });
+  for (const target of targets) {
+    _gridCoverObserver.observe(target);
+  }
 }
 
 // Map the three valid fontFace keys to the actual CSS font-family strings
@@ -5306,7 +5424,11 @@ function renderSpineView(el, books) {
 let backfillRunning = false;
 async function backfillSpineColors() {
   if (backfillRunning) return;
-  const missing = library.filter(b => !b.spineColor && b.cover);
+  // Pre-v3 records may still carry book.cover; post-v3 records have
+  // the cover in the separate covers store. Either path supplies a
+  // data URL — backfill fetches lazily from the covers store when the
+  // book object doesn't have one inline.
+  const missing = library.filter(b => !b.spineColor);
   if (missing.length === 0) return;
   backfillRunning = true;
 
@@ -5315,7 +5437,9 @@ async function backfillSpineColors() {
   for (let i = 0; i < missing.length; i += batchSize) {
     const batch = missing.slice(i, i + batchSize);
     await Promise.all(batch.map(async (book) => {
-      const color = await extractColor(book.cover);
+      const coverData = book.cover || await getCoverForBook(book.id);
+      if (!coverData) return;
+      const color = await extractColor(coverData);
       if (color) {
         book.spineColor = color;
         await saveBookMeta(book);
@@ -5479,9 +5603,12 @@ async function loadTextFile(file, batch = false) {
     throw dupErr;
   }
   await saveBookAtomic(book);
+  // Text imports have no cover. Prime the cover cache with null so the
+  // lazy loader doesn't bother hitting IDB looking for one.
+  _coverCache.set(book.id, null);
   library.push({
     id: book.id, title: book.title, author: book.author, cover: book.cover,
-    coverV: book.coverV || 2,
+    coverV: book.coverV || 3,
     progress: 0, chapterIndex: 0, scrollPos: 0,
     chapterCount: 1, contentSize: html.length,
     fontFace: null
@@ -6121,11 +6248,14 @@ async function loadEpub(file, batch = false) {
       id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
       title, author, cover, chapters: bookChapters, toc: finalToc,
       progress: 0, chapterIndex: 0, scrollPos: 0, spineColor,
-      // coverV=2 means "stored as shrunken-JPEG via shrinkCoverDataURL."
-      // Used by _migrateCoverImages to skip re-encoding books that were
-      // imported after the shrink path landed. New imports without a
-      // cover get coverV:2 too — they have nothing to migrate.
-      coverV: cover ? (coverShrunken ? 2 : 1) : 2
+      // coverV=3 means the cover lives in the covers store (split out
+      // from the books store as of DB v3). The book object still
+      // carries `cover` in memory for the current session so the grid
+      // view can show it immediately after import — saveBookAtomic
+      // projects via bookMetaFromBook which strips the field before
+      // writing to the books store, and the parallel write below puts
+      // the cover into the covers store.
+      coverV: 3
     };
     // Post-parse dedup against (title, author). Lowercased + trimmed so a
     // re-import of the same EPUB from a different folder doesn't slip
@@ -6140,10 +6270,25 @@ async function loadEpub(file, batch = false) {
       dupErr.code = 'DUPLICATE';
       throw dupErr;
     }
+    // Persist the cover into the covers store BEFORE saving book meta —
+    // this way every committed book in the books store either has a
+    // matching covers-store entry or had no cover from the start. Prime
+    // the cover cache so the immediate render picks up the new cover
+    // via the lazy loader without an extra round-trip to IDB.
+    if (cover) {
+      try {
+        await dbPut('covers', { id: book.id, dataURL: cover });
+        _coverCache.set(book.id, cover);
+      } catch (err) {
+        console.warn('[tomen] cover persist failed for', book.id, err);
+      }
+    } else {
+      _coverCache.set(book.id, null);
+    }
     await saveBookAtomic(book);
     library.push({
       id: book.id, title: book.title, author: book.author, cover: book.cover,
-      coverV: book.coverV || 1,
+      coverV: book.coverV || 3,
       progress: 0, chapterIndex: 0, scrollPos: 0,
       chapterCount: bookChapters.length, contentSize, spineColor,
       fontFace: null
@@ -9851,12 +9996,13 @@ function renderGreeting() {
 
   setView(currentView);
 
-  // Once the library is visible, run the cover-image shrink migration
-  // in the background. The first render shows existing (full-resolution)
-  // covers; subsequent loads will see the shrunken JPEGs. Fire-and-
-  // forget — we never await this, so a slow migration doesn't delay
+  // Once the library is visible, run the cover-storage migration in
+  // the background — shrinks any raw v1 covers and moves them from
+  // the books store into the dedicated covers store. The first render
+  // shows in-memory covers; subsequent loads benefit from a slim
+  // books store. Fire-and-forget so a slow migration doesn't delay
   // anything else in init.
-  _migrateCoverImages().catch(err => console.warn('[tomen] cover migration failed:', err));
+  _migrateCoverStorage().catch(err => console.warn('[tomen] cover migration failed:', err));
 
   // Wire dictionary gestures on the (now-present) slot inners. Safe to
   // call once at init — the inner elements are the persistent containers
