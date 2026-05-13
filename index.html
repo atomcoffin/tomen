@@ -1136,37 +1136,6 @@ body.r-mode-editing .r-inner {
   user-select: text;
 }
 
-/* Eye-comfort effects, both off by default and toggled by body classes
-   from setTextHalo() / setPaperGrain().
-
-   Halo: a sub-pixel text-shadow in the current ink color. Softens the
-   hard antialiased edge of each glyph by leaking a faint halo into the
-   surrounding paper, mimicking ink wicking into fiber. Uses currentColor
-   so it tracks every theme (light/sepia/dark/inkwell) automatically.
-
-   Grain: an SVG-noise overlay scoped to .r-content so it only paints
-   over the book area, not the toolbars or open settings panels.
-   pointer-events:none keeps it transparent to clicks and taps. overlay
-   blend mode makes one noise texture work in both light and dark themes —
-   it lightens the dark pixels and darkens the light pixels, producing
-   film grain rather than a uniform tint. The 200×200 tile repeats so the
-   grain density stays consistent regardless of viewport size. */
-body.r-halo .r-inner {
-  text-shadow: 0 0 0.4px currentColor;
-}
-body.r-grain .r-content::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 4;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-  background-size: 200px 200px;
-  background-repeat: repeat;
-  opacity: 0.06;
-  mix-blend-mode: overlay;
-}
-
 /* Headings inside book content render in Siche Display — the condensed
    display cut of Siche, designed to pair with Siche Text at heading sizes.
    Thow is the fallback while the display font loads. Siche Display ships
@@ -2568,20 +2537,6 @@ body.r-grain .r-content::after {
         <div class="seg-row">
           <button class="seg-btn active" data-align="justify" onclick="setTextAlign('justify')">Justify</button>
           <button class="seg-btn" data-align="left" onclick="setTextAlign('left')">Left</button>
-        </div>
-      </div>
-      <div class="settings-row">
-        <div class="settings-row-label">Halo</div>
-        <div class="seg-row">
-          <button class="seg-btn active" data-halo="off" onclick="setTextHalo('off')">Off</button>
-          <button class="seg-btn" data-halo="on" onclick="setTextHalo('on')">On</button>
-        </div>
-      </div>
-      <div class="settings-row">
-        <div class="settings-row-label">Grain</div>
-        <div class="seg-row">
-          <button class="seg-btn active" data-grain="off" onclick="setPaperGrain('off')">Off</button>
-          <button class="seg-btn" data-grain="on" onclick="setPaperGrain('on')">On</button>
         </div>
       </div>
     </div>
@@ -6916,11 +6871,11 @@ function updateSystemBarColor(theme) {
 // different defaults (e.g., mobile starts smaller than desktop).
 const _READER_CONFIG = {
   phone: {
-    defaults: { fontSize: 16, lineHeight: 15, readingWidth: 360, paragraphStyle: 'block', textAlign: 'left', paragraphSpacing: 10, textHalo: 'off', paperGrain: 'off' },
+    defaults: { fontSize: 16, lineHeight: 15, readingWidth: 360, paragraphStyle: 'block', textAlign: 'left', paragraphSpacing: 10 },
     widthSlider: { min: 280, max: 440, step: 10 }
   },
   desktop: {
-    defaults: { fontSize: 20, lineHeight: 16, readingWidth: 1200, paragraphStyle: 'block', textAlign: 'justify', paragraphSpacing: 10, textHalo: 'off', paperGrain: 'off' },
+    defaults: { fontSize: 20, lineHeight: 16, readingWidth: 1200, paragraphStyle: 'block', textAlign: 'justify', paragraphSpacing: 10 },
     widthSlider: { min: 800, max: 1600, step: 50 }
   }
 };
@@ -7099,27 +7054,6 @@ function setTextAlign(v) {
   remeasureReader();
 }
 
-// Eye-comfort effects. Each is a simple on/off body class — the CSS does
-// the work (sub-pixel text-shadow halo, SVG-noise paper grain overlay).
-// No remeasure needed; neither affects layout. Persisted per-device-bucket
-// so phone and desktop can disagree (perceived softening differs by DPI).
-function setTextHalo(v) {
-  const on = (v === 'on' || v === true) ? 'on' : 'off';
-  document.body.classList.toggle('r-halo', on === 'on');
-  document.querySelectorAll('.seg-btn[data-halo]').forEach(b =>
-    b.classList.toggle('active', b.dataset.halo === on)
-  );
-  savePref('textHalo', on);
-}
-function setPaperGrain(v) {
-  const on = (v === 'on' || v === true) ? 'on' : 'off';
-  document.body.classList.toggle('r-grain', on === 'on');
-  document.querySelectorAll('.seg-btn[data-grain]').forEach(b =>
-    b.classList.toggle('active', b.dataset.grain === on)
-  );
-  savePref('paperGrain', on);
-}
-
 // Reposition each quick-bar's thumb to match its slider's current value.
 // The thumb sits at (current - min) / (max - min) along the track.
 function updateQuickThumbs() {
@@ -7154,8 +7088,6 @@ function applyReaderPrefsForBucket() {
   const ps = loadPref('paragraphStyle');
   const ta = loadPref('textAlign');
   const psp = loadPref('paragraphSpacing');
-  const halo = loadPref('textHalo');
-  const grain = loadPref('paperGrain');
   if (fs !== null) setFontSize(fs);
   if (lh !== null) setLineHeight(lh);
   if (rw !== null) setReadingWidth(rw);
@@ -7164,8 +7096,6 @@ function applyReaderPrefsForBucket() {
   if (psp !== null) setParagraphSpacing(psp);
   if (ps !== null) setParagraphStyle(ps);
   if (ta !== null) setTextAlign(ta);
-  if (halo !== null) setTextHalo(halo);
-  if (grain !== null) setPaperGrain(grain);
 }
 // Re-measure and reapply spread when the reader's content reflows.
 function remeasureReader() {
