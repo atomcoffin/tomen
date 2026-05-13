@@ -3312,7 +3312,10 @@ body.lib-select-mode .spine {
     margin-top: 4px;
   }
   .lib-body { padding: 0 12px 12px; }
-  .view-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 14px; }
+  /* Smaller default minimum on phone, but still honoring the user's
+     slider override if they've set one. clamp() floors at 110px so a
+     desktop-bucket value pushed to 100 doesn't crush phone cards. */
+  .view-grid { grid-template-columns: repeat(auto-fill, minmax(clamp(110px, var(--grid-card-min-width, 110px), 200px), 1fr)); gap: 14px; }
   .tv-title { font-size: 22px; }
   .view-spine { padding: 12px 20px 16px 12px; gap: 1px; }
   .spine { --spine-scale: 0.45; }
@@ -3331,7 +3334,9 @@ body.lib-select-mode .spine {
   .view-spine { padding: 0 32px 20px 20px; }
 }
 @media (min-width: 769px) {
-  .view-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  /* Desktop minimum defers to the user's slider value (set on the
+     html element) or falls back to 150px when no preference saved. */
+  .view-grid { grid-template-columns: repeat(auto-fill, minmax(var(--grid-card-min-width, 150px), 1fr)); }
   .spine { --spine-scale: 1; }
 }
 
@@ -4371,11 +4376,38 @@ function openBookMenu(ev, bookId, anchorEl) {
     </button>`;
   // Show first so we can measure, then position.
   menu.classList.add('open');
-  // Long-press path passes an anchor element directly (the card). The
-  // older inline-onclick path passed an event whose currentTarget was
-  // the button — fall back to that when no explicit anchor is given.
-  const anchor = anchorEl || (ev && ev.currentTarget);
-  if (anchor) positionFloatingMenu(menu, anchor);
+  // Position priority: explicit pointer coordinates (right-click via
+  // contextmenu) > anchor element override (long-press, hint-button
+  // click) > event's currentTarget (legacy inline-onclick paths).
+  // The cursor-coordinate path drops the menu where the click
+  // happened, which is what the user expects from right-click.
+  if (ev && typeof ev.clientX === 'number' && typeof ev.clientY === 'number'
+      && (ev.clientX || ev.clientY)) {
+    _positionFloatingMenuAtPoint(menu, ev.clientX, ev.clientY);
+  } else if (anchorEl) {
+    positionFloatingMenu(menu, anchorEl);
+  } else if (ev && ev.currentTarget) {
+    positionFloatingMenu(menu, ev.currentTarget);
+  }
+}
+
+// Position a floating menu at a specific viewport point, clamped to
+// stay on screen. Used by right-click on book cards so the menu lands
+// where the cursor is, not where the card's anchor would put it.
+function _positionFloatingMenuAtPoint(menuEl, x, y) {
+  const menuRect = menuEl.getBoundingClientRect();
+  let left = x;
+  let top = y;
+  if (left + menuRect.width > window.innerWidth - 8) {
+    left = window.innerWidth - menuRect.width - 8;
+  }
+  if (left < 8) left = 8;
+  if (top + menuRect.height > window.innerHeight - 8) {
+    top = window.innerHeight - menuRect.height - 8;
+  }
+  if (top < 8) top = 8;
+  menuEl.style.left = left + 'px';
+  menuEl.style.top = top + 'px';
 }
 
 // Long-press machinery for opening the per-book menu without a visible
@@ -4435,15 +4467,16 @@ function _cancelLongPressTimer() {
 
 function _onLibContextMenu(e) {
   // Right-click on a book card opens the per-book menu (and suppresses
-  // the OS context menu while we're at it). This is the primary
-  // desktop entry point — the small ⋯ hover hint and the long-press
-  // gesture are the other two.
+  // the OS context menu while we're at it). The event itself is
+  // forwarded to openBookMenu so the menu drops at the cursor
+  // position — what the user expects from a right-click — instead of
+  // anchoring to the card's corner.
   const card = _findLibraryBookCard(e.target);
   if (!card) return;
   e.preventDefault();
   const bookId = card.dataset.bookId;
   if (!bookId) return;
-  openBookMenu(null, bookId, card);
+  openBookMenu(e, bookId);
 }
 
 function _attachLibraryLongPress() {
