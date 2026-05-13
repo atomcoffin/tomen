@@ -385,69 +385,6 @@ body.blueprint .r-content {
   background-size: 32px 32px;
 }
 
-/* Risograph — warm cream paper, near-black ink, with a fluorescent pink
-   ghost shadow offset slightly to one side. Simulates a two-color riso
-   print where the second pass is slightly out of register. The pink
-   stays subtle on body text (1px offset) and grows on headings so
-   chapter titles really pop. Indie-zine vibe. */
-.riso {
-  --paper: #F2EAD5;
-  --linen: #EBE2C8;
-  --card: #F7F0DC;
-  --paper-edge: #D8CDA8;
-  --ink: #1A1610;
-  --stone: #5A5040;
-  --fog: #908675;
-  --brand: #FF4080;
-  --brand-ink: #C8306A;
-  --brand-deep: #E03070;
-  --brand-text: #F2EAD5;
-  --border: rgba(26, 22, 16, 0.1);
-  --shadow-cover: 0 4px 16px rgba(255, 64, 128, 0.12);
-  --shadow-float: 0 8px 32px rgba(255, 64, 128, 0.18);
-}
-/* Offset pink ghost on body text — like a two-color riso print where
-   the second pass is a hair out of register. Body gets a 1px offset
-   (subtle); headings get 2px so chapter titles read as Print Object. */
-body.riso .r-inner p,
-body.riso .r-inner li,
-body.riso .r-inner blockquote {
-  text-shadow: 1px 1px 0 rgba(255, 64, 128, 0.55);
-}
-body.riso .r-inner h1,
-body.riso .r-inner h2,
-body.riso .r-inner h3 {
-  text-shadow: 2px 2px 0 rgba(255, 64, 128, 0.7);
-}
-
-/* Mimeograph — cream paper, violet-blue spirit-duplicator ink. A very
-   soft ink-bleed simulated via text-shadow so the letters feel slightly
-   soaked into the paper. The signature look of 1960s school handouts
-   and zines printed on a mimeo machine. */
-.mimeo {
-  --paper: #F5EEDC;
-  --linen: #EDE5D0;
-  --card: #FAF4E5;
-  --paper-edge: #DCD0B0;
-  --ink: #382B7C;
-  --stone: #5B4FA0;
-  --fog: #8985B0;
-  --brand: #382B7C;
-  --brand-ink: #221A55;
-  --brand-deep: #2D2070;
-  --brand-text: #F5EEDC;
-  --border: rgba(56, 43, 124, 0.1);
-  --shadow-cover: 0 4px 16px rgba(56, 43, 124, 0.12);
-  --shadow-float: 0 8px 32px rgba(56, 43, 124, 0.18);
-}
-/* Subtle ink bleed — soft halo around every letter so the text feels
-   like it was pressed through wet paper. Kept very low so reading
-   isn't tiring. */
-body.mimeo .r-inner {
-  text-shadow:
-    0 0 0.6px rgba(56, 43, 124, 0.45),
-    0.3px 0 0.4px rgba(56, 43, 124, 0.25);
-}
 
 /* Brutalist — pure white, pure black, signal-red accent. The Anti-Theme:
    override --radius to 0 so nothing has rounded corners, override
@@ -2164,10 +2101,6 @@ body.r-mode-editing .r-inner {
 .swatch-chip[data-swatch="terminal"]::after   { background: #4CFF94; }
 .swatch-chip[data-swatch="blueprint"]  { background: #1E4276; }
 .swatch-chip[data-swatch="blueprint"]::after  { background: #FFC93C; }
-.swatch-chip[data-swatch="riso"]    { background: #F2EAD5; }
-.swatch-chip[data-swatch="riso"]::after    { background: #FF4080; }
-.swatch-chip[data-swatch="mimeo"]   { background: #F5EEDC; }
-.swatch-chip[data-swatch="mimeo"]::after   { background: #382B7C; }
 .swatch-chip[data-swatch="brutalist"] { background: #FFFFFF; border: 1.5px solid #000000; }
 .swatch-chip[data-swatch="brutalist"]::after { background: #FF0000; }
 
@@ -3760,16 +3693,6 @@ body.lib-select-mode .spine {
   <button class="theme-menu-item" role="menuitem" data-theme="blueprint" onclick="pickTheme('blueprint')">
     <span class="swatch-chip" data-swatch="blueprint"></span>
     <span class="theme-menu-name">Blueprint</span>
-    <i class="ph ph-flask theme-menu-tag" aria-hidden="true" title="Experimental"></i>
-  </button>
-  <button class="theme-menu-item" role="menuitem" data-theme="riso" onclick="pickTheme('riso')">
-    <span class="swatch-chip" data-swatch="riso"></span>
-    <span class="theme-menu-name">Risograph</span>
-    <i class="ph ph-flask theme-menu-tag" aria-hidden="true" title="Experimental"></i>
-  </button>
-  <button class="theme-menu-item" role="menuitem" data-theme="mimeo" onclick="pickTheme('mimeo')">
-    <span class="swatch-chip" data-swatch="mimeo"></span>
-    <span class="theme-menu-name">Mimeo</span>
     <i class="ph ph-flask theme-menu-tag" aria-hidden="true" title="Experimental"></i>
   </button>
   <button class="theme-menu-item" role="menuitem" data-theme="brutalist" onclick="pickTheme('brutalist')">
@@ -8407,14 +8330,12 @@ const _THEME_PAPER_COLORS = {
   'crt':       '#0A0805',
   'terminal':  '#050805',
   'blueprint': '#1E4276',
-  'riso':      '#F2EAD5',
-  'mimeo':     '#F5EEDC',
   'brutalist': '#FFFFFF'
 };
 // List of all non-default theme class names. Used by setTheme to remove
 // the previous theme before applying a new one — keeping this as a single
 // source of truth so adding a future theme only requires one edit here.
-const _THEME_CLASSES = ['dark', 'inkwell', 'paper', 'crt', 'terminal', 'blueprint', 'riso', 'mimeo', 'brutalist'];
+const _THEME_CLASSES = ['dark', 'inkwell', 'paper', 'crt', 'terminal', 'blueprint', 'brutalist'];
 // Theme metadata for the picker: display name, category (drives the
 // "Reading"/"Experimental" grouping in the menu), and forcesFace (if
 // present, the theme hardcodes that reading face, so the Appearance
@@ -8428,8 +8349,6 @@ const _THEME_INFO = {
   'crt':       { name: 'CRT',       category: 'experimental' },
   'terminal':  { name: 'Terminal',  category: 'experimental', forcesFace: 'mono' },
   'blueprint': { name: 'Blueprint', category: 'experimental' },
-  'riso':      { name: 'Risograph', category: 'experimental' },
-  'mimeo':     { name: 'Mimeo',     category: 'experimental' },
   'brutalist': { name: 'Brutalist', category: 'experimental', forcesFace: 'mono' }
 };
 function setTheme(theme) {
@@ -9616,10 +9535,12 @@ function renderGreeting() {
 // ===== INIT =====
 (async function init() {
   let t = localStorage.getItem('tomen_theme') || '';
-  // Sepia was retired in favor of Paper, which carries the same warm-cream
-  // feel with slightly higher contrast. Remap silently so existing sepia
-  // users land on the closest surviving theme rather than the Light default.
+  // Theme retirements — remap silently so users who had these saved land
+  // somewhere reasonable instead of the Light default.
+  //   sepia → paper (same warm-cream family, slightly higher contrast)
+  //   riso, mimeo → '' (light) — they were experimental, no close cousin
   if (t === 'sepia') t = 'paper';
+  if (t === 'riso' || t === 'mimeo') t = '';
   setTheme(t);
   // Apply the global default face at startup. globalReadingFace was read
   // from localStorage at declaration; applyReadingFace swaps the CSS vars
