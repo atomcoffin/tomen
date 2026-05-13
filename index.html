@@ -1253,6 +1253,12 @@ body.r-debug .r-book {
      and gated by editing mode. Editing mode re-enables selection below. */
   -webkit-user-select: none;
   user-select: none;
+  /* Suppress iOS Safari's native long-press behavior (callout / link
+     preview / definition popup). Without this, iOS intercepts the
+     long-press at the OS level and the custom dictionary lookup never
+     receives pointer events. Has no effect on text selection itself —
+     only on the native long-press UI. */
+  -webkit-touch-callout: none;
 }
 body.r-mode-editing .r-inner {
   -webkit-user-select: text;
