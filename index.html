@@ -1557,17 +1557,26 @@ body.r-ui-visible .r-footer-ref {
   width: 0;  /* set inline by JS via rAF easing loop */
   height: 0;
   pointer-events: none;
-  /* Baseline opacity — the ring is always visible as a quiet hint at
-     each edge. Compounds with the stroke's own stroke-opacity below,
-     so the effective idle visibility is opacity * stroke-opacity. We
-     set both deliberately on the higher side so the rings register in
-     peripheral vision on every theme without competing with the text.
-     Bumps up on .armed and .active for clear interaction feedback. */
-  opacity: 0.6;
-  transition: opacity 180ms ease;
+  /* Soft brand bloom — a radial gradient with the theme's brand color
+     fading from the center to transparent. The visible half (only one
+     side is on-screen due to the edge-anchored translate below) reads
+     as a chartreuse haze hugging the page margin, not a drawn button.
+     Replaces the older outlined SVG ring so the rings feel like
+     family with the toolbar's brand-tinted wash and the seg-btn fills
+     — Tomen's design language is brand-tinted areas, not stroked
+     geometry. The bloom intensifies on .armed and again on .active
+     (hold in progress) via background overrides below. */
+  background: radial-gradient(
+    circle at center,
+    color-mix(in srgb, var(--brand) 32%, transparent) 0%,
+    color-mix(in srgb, var(--brand) 14%, transparent) 45%,
+    transparent 75%
+  );
+  border-radius: 50%;
+  transition: background 180ms ease;
   z-index: 5;
   transform: translateY(-50%);
-  will-change: width, height, top, opacity;
+  will-change: width, height, top, background;
 }
 .r-edge-ring-prev {
   left: 0;
@@ -1581,49 +1590,48 @@ body.r-ui-visible .r-footer-ref {
   transform: translate(50%, -50%);
 }
 /* Cursor is inside the visible half-disc (a click would register).
-   Growth state itself is communicated by SIZE — the ring's diameter
-   eases from baseline up toward max as the cursor approaches the edge,
-   so a separate "hover" opacity tier isn't needed. */
-.r-edge-ring.armed { opacity: 0.9; }
-/* Hold is active (mousedown / touchend at armed). */
-.r-edge-ring.active { opacity: 1; }
+   Bloom intensifies: stronger brand at center, reaches further out
+   before fading. Growth state itself is communicated by SIZE (the
+   ring's diameter eases from baseline up toward max as the cursor
+   approaches the edge), so the armed/active states tune intensity
+   rather than dimensions. */
+.r-edge-ring.armed {
+  background: radial-gradient(
+    circle at center,
+    color-mix(in srgb, var(--brand) 60%, transparent) 0%,
+    color-mix(in srgb, var(--brand) 28%, transparent) 50%,
+    transparent 85%
+  );
+}
+/* Hold is active (mousedown / touch release at armed). The iris fill
+   inside takes over as the visual focus, so the bloom can simplify to
+   a near-solid backing. */
+.r-edge-ring.active {
+  background: radial-gradient(
+    circle at center,
+    color-mix(in srgb, var(--brand) 80%, transparent) 0%,
+    color-mix(in srgb, var(--brand) 35%, transparent) 60%,
+    transparent 90%
+  );
+}
 .r-edge-ring svg {
   width: 100%; height: 100%;
   overflow: visible;
   display: block;
 }
-/* Idle outline ring — thin perimeter, no fill. With non-scaling-stroke,
-   the stroke width stays constant in CSS pixels regardless of how the
-   SVG container scales — so the border looks consistent whether the
-   ring is small or large. Stroke color comes from --ink so the rings
-   adapt to every theme automatically; stroke-opacity gives a little
-   transparency so the ring feels carved out of the paper rather than
-   painted on, and combines with the parent .r-edge-ring opacity for
-   the final idle visibility. Transitions to full-strength brand on
-   .armed (cursor inside the disc, click would register). */
-.r-edge-ring-track {
-  fill: none;
-  stroke: var(--ink);
-  stroke-opacity: 0.6;
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-  transition: stroke 180ms ease, stroke-opacity 180ms ease;
-}
-/* Armed — cursor is inside the half-disc, a click will register. Outline
-   shifts from dim ink to brand as a subtle affordance. */
-.r-edge-ring.armed .r-edge-ring-track {
-  stroke: var(--brand);
-  stroke-opacity: 1;
-}
+/* Outline ring removed — the soft brand bloom on the parent IS the
+   visual. The SVG element + circle is kept (it carries the iris fill
+   for the hold animation), but the track path is hidden. */
+.r-edge-ring-track { display: none; }
 
-/* Interior fill disc. Sits inside the ring and scales from 0 to 1 during
-   a hold, giving the sense that the ring is "filling up" from the center
-   outward like ink bleeding into paper. Transform origin is the SVG's
-   center so the disc grows symmetrically from the middle.
-   Note: the SVG viewBox is 0 0 80 80 centered on cx=40, cy=40. The disc
-   visually shows only in the half-circle that's on-screen (the other
-   half is behind the viewport edge), so the growing disc reads as a
-   half-disc filling up a half-ring. */
+/* Interior fill disc. Sits inside the bloom and scales from 0 to 1
+   during a hold — solid brand disc emerging from the soft bloom's
+   center, "pressure expanding outward from the fingertip." Transform
+   origin is the SVG's center so the disc grows symmetrically.
+   Note: the SVG viewBox is 0 0 80 80 centered on cx=40, cy=40. The
+   disc visually shows only in the half on-screen (the other half is
+   behind the viewport edge), so the growing disc reads as a half-disc
+   filling out of the bloom toward the page interior. */
 .r-edge-ring-fill {
   fill: var(--brand);
   stroke: none;
