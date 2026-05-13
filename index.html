@@ -878,6 +878,51 @@ html, body {
 .view-switch .icon-btn { width: 32px; height: 32px; border-radius: 4px; }
 .view-switch .icon-btn.active { background: var(--card); }
 
+/* Library card-size slider — shown only when the user is in grid
+   view. Small icons frame the track for visual scale; the slider
+   drives a CSS custom property that the grid uses for its
+   minmax(...) so cards resize live. */
+.lib-size {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+}
+body[data-lib-view="grid"] .lib-size { display: inline-flex; }
+.lib-size .ph {
+  font-size: 12px;
+  color: var(--stone);
+  flex-shrink: 0;
+}
+.lib-size .ph.is-large { font-size: 18px; }
+.lib-size input[type="range"] {
+  width: 90px;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+  outline: none;
+  cursor: pointer;
+}
+.lib-size input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 0;
+  background: var(--brand);
+  border: 1px solid var(--ink);
+  cursor: pointer;
+}
+.lib-size input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 0;
+  background: var(--brand);
+  border: 1px solid var(--ink);
+  cursor: pointer;
+}
+
 /* Library body */
 .lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 12px 28px 28px; min-height: 0; }
 .lib-body.spine-active {
@@ -947,25 +992,13 @@ html, body {
   width: 100px; margin-top: 6px; overflow: hidden;
 }
 .tv-progress-fill { height: 100%; background: var(--brand); border-radius: 1px; }
-/* Per-row options button. Stays at fog-color until row hover, then comes
-   forward. Opacity transition reads as "available but quiet" — no need
-   to compete with the book title for visual attention. */
-.tv-menu-btn {
-  width: 32px; height: 32px;
-  flex-shrink: 0;
-  color: var(--fog);
-  opacity: 0.6;
-  transition: opacity 140ms ease, color 140ms ease, background 140ms ease;
-  margin-top: 4px;
-}
-.tv-item:hover .tv-menu-btn { opacity: 1; }
-.tv-menu-btn:hover { color: var(--ink); background: var(--linen); }
-.tv-menu-btn .ph { font-size: 18px; }
-
 /* === GRID VIEW === */
 .view-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  /* Card minimum width is variable so a slider in the library top bar
+     can shrink or grow the cards live. Auto-fill keeps the grid dense
+     regardless of the user's setting. */
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-card-min-width, 150px), 1fr));
   gap: 20px;
 }
 /* content-visibility:auto defers rendering of offscreen cards entirely
@@ -1014,25 +1047,6 @@ html, body {
    semi-translucent dark backing so it's legible against any cover image.
    Always visible on touch devices; on hover-capable devices we could
    make it appear on hover only, but always-visible is more discoverable. */
-.gc-menu-btn {
-  position: absolute;
-  top: 6px; right: 6px;
-  width: 28px; height: 28px;
-  /* Slightly darker than before so the button stays legible without the
-     backdrop-filter blur. That blur was the single most expensive style
-     in the library view: with ~40 grid cards visible, every scroll
-     frame had to re-sample and re-blur the underlying cover pixels for
-     each button. Solid 70% black reads fine against any cover. */
-  background: rgba(0, 0, 0, 0.7);
-  color: rgba(255, 255, 255, 0.92);
-  border-radius: 50%;
-  z-index: 2;
-  opacity: 0.85;
-  transition: opacity 140ms ease, background 140ms ease;
-}
-.gc:hover .gc-menu-btn { opacity: 1; }
-.gc-menu-btn:hover { background: rgba(0, 0, 0, 0.75); color: white; }
-.gc-menu-btn .ph { font-size: 16px; }
 
 /* === SPINE VIEW ========================================================
 
@@ -3384,6 +3398,11 @@ body.lib-select-mode .spine {
           <i class="ph ph-books"></i>
         </button>
       </div>
+      <div class="lib-size" aria-label="Grid card size">
+        <i class="ph ph-square" aria-hidden="true"></i>
+        <input type="range" min="100" max="260" step="10" value="150" id="sl-libsize" oninput="setLibrarySize(this.value)" title="Card size">
+        <i class="ph ph-square is-large" aria-hidden="true"></i>
+      </div>
       <select class="sort-select" id="sort-select" onchange="setSort(this.value)">
         <option value="title">A — Z</option>
         <option value="title-desc">Z — A</option>
@@ -4281,9 +4300,11 @@ async function deleteBook(id) {
 
 let _bookMenuId = null; // id of the book the menu is currently open for
 
-function openBookMenu(ev, bookId) {
-  ev.stopPropagation(); // prevent the row click from firing openBookById
-  ev.preventDefault();
+function openBookMenu(ev, bookId, anchorEl) {
+  if (ev) {
+    if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+    if (typeof ev.preventDefault === 'function') ev.preventDefault();
+  }
   _bookMenuId = bookId;
   const book = library.find(b => b.id === bookId);
   if (!book) return;
@@ -4300,7 +4321,80 @@ function openBookMenu(ev, bookId) {
     </button>`;
   // Show first so we can measure, then position.
   menu.classList.add('open');
-  positionFloatingMenu(menu, ev.currentTarget);
+  // Long-press path passes an anchor element directly (the card). The
+  // older inline-onclick path passed an event whose currentTarget was
+  // the button — fall back to that when no explicit anchor is given.
+  const anchor = anchorEl || (ev && ev.currentTarget);
+  if (anchor) positionFloatingMenu(menu, anchor);
+}
+
+// Long-press machinery for opening the per-book menu without a visible
+// trigger button. The user presses and holds anywhere on a book card
+// for _LONG_PRESS_MS milliseconds; the timer fires the menu anchored to
+// the card. A small movement threshold cancels the press so scrolling
+// doesn't accidentally trigger the menu, and the click that fires on
+// pointerup gets swallowed by _longPressFired so the book doesn't open
+// at the same time.
+const _LONG_PRESS_MS = 450;
+const _LONG_PRESS_MOVE_THRESHOLD = 8;
+let _longPressTimer = null;
+let _longPressFired = false;
+let _longPressStartX = 0;
+let _longPressStartY = 0;
+
+function _findLibraryBookCard(target) {
+  if (!target || typeof target.closest !== 'function') return null;
+  return target.closest('.gc[data-book-id], .tv-item[data-book-id], .spine[data-book-id]');
+}
+
+function _onLibPointerDown(e) {
+  // Only primary button on mouse; touch always has button:0.
+  if (e.button !== undefined && e.button !== 0) return;
+  const card = _findLibraryBookCard(e.target);
+  if (!card) return;
+  const bookId = card.dataset.bookId;
+  if (!bookId) return;
+  _longPressFired = false;
+  _longPressStartX = e.clientX;
+  _longPressStartY = e.clientY;
+  _longPressTimer = setTimeout(() => {
+    _longPressTimer = null;
+    _longPressFired = true;
+    openBookMenu(null, bookId, card);
+  }, _LONG_PRESS_MS);
+}
+
+function _onLibPointerMove(e) {
+  if (!_longPressTimer) return;
+  const dx = Math.abs(e.clientX - _longPressStartX);
+  const dy = Math.abs(e.clientY - _longPressStartY);
+  if (dx > _LONG_PRESS_MOVE_THRESHOLD || dy > _LONG_PRESS_MOVE_THRESHOLD) {
+    _cancelLongPressTimer();
+  }
+}
+
+function _cancelLongPressTimer() {
+  if (_longPressTimer) {
+    clearTimeout(_longPressTimer);
+    _longPressTimer = null;
+  }
+}
+
+function _onLibContextMenu(e) {
+  // Suppress the OS context menu on book cards — we have our own.
+  if (_findLibraryBookCard(e.target)) e.preventDefault();
+}
+
+function _attachLibraryLongPress() {
+  const body = $('lib-body');
+  if (!body || body.dataset.longPressAttached === '1') return;
+  body.dataset.longPressAttached = '1';
+  body.addEventListener('pointerdown', _onLibPointerDown);
+  body.addEventListener('pointerup', _cancelLongPressTimer);
+  body.addEventListener('pointercancel', _cancelLongPressTimer);
+  body.addEventListener('pointerleave', _cancelLongPressTimer);
+  body.addEventListener('pointermove', _onLibPointerMove);
+  body.addEventListener('contextmenu', _onLibContextMenu);
 }
 
 // ===== BULK SELECT =====
@@ -4565,7 +4659,6 @@ function closeBookMenu() {
 document.addEventListener('mousedown', (ev) => {
   if (!$('book-menu')?.classList.contains('open')) return;
   if (ev.target.closest('.book-menu')) return;
-  if (ev.target.closest('.tv-menu-btn, .gc-menu-btn')) return; // let the new btn open
   closeBookMenu();
 });
 // Also close on Escape
@@ -5131,7 +5224,23 @@ function setView(v) {
     b.setAttribute('aria-checked', on ? 'true' : 'false');
   });
   $('lib-body').classList.toggle('spine-active', v === 'spine');
+  // data-lib-view on body drives view-specific UI like the card-size
+  // slider, which is only useful when the grid is on screen.
+  document.body.setAttribute('data-lib-view', v);
   renderLibrary();
+}
+
+// Live card-size adjustment in grid view. Writes to a CSS custom
+// property the grid's minmax(...) reads, so cards reflow as soon as
+// the user moves the slider. Persisted across sessions and shared
+// across device buckets — a setting like this is preference, not
+// device-bucketed reading config.
+function setLibrarySize(value) {
+  const v = Math.max(100, Math.min(280, parseInt(value, 10) || 150));
+  document.documentElement.style.setProperty('--grid-card-min-width', v + 'px');
+  const slider = $('sl-libsize');
+  if (slider && slider.value != String(v)) slider.value = v;
+  localStorage.setItem('tomen_libGridSize', String(v));
 }
 
 function setSort(s) {
@@ -5314,13 +5423,12 @@ function renderTextView(el, books) {
     const readMeta = readDuration
       ? ' · <span style="font-family:var(--font-mono);font-size:11px">' + readDuration + ' read</span>'
       : '';
-    return `<div class="tv-item">
+    return `<div class="tv-item" data-book-id="${b.id}">
       <div class="tv-item-main${sel}" onclick="openBookById('${b.id}')">
         <div class="tv-title${isReading ? ' reading' : ''}">${esc(b.title)}</div>
         <div class="tv-author">${esc(b.author || 'Unknown')}${progressMeta}${readMeta}${timeMeta}</div>
         ${isReading ? '<div class="tv-progress"><div class="tv-progress-fill" style="width:' + p + '%"></div></div>' : ''}
       </div>
-      <button class="tv-menu-btn icon-btn" onclick="openBookMenu(event, '${b.id}')" aria-label="Book options" title="Options"><i class="ph ph-dots-three-outline"></i></button>
     </div>`;
   }).join('') + '</div>';
 }
@@ -5352,8 +5460,7 @@ function renderGridView(el, books) {
            <div class="gcp-author">${esc(b.author || '')}</div>
          </div>`;
     }
-    return `<div class="gc">
-      <button class="gc-menu-btn icon-btn" onclick="openBookMenu(event, '${b.id}')" aria-label="Book options" title="Options"><i class="ph ph-dots-three-outline"></i></button>
+    return `<div class="gc" data-book-id="${b.id}">
       <div class="gc-cover${sel}" data-book-id="${b.id}" onclick="openBookById('${b.id}')">${coverHtml}${p > 0 ? '<div class="gc-prog"><div class="gc-prog-fill" style="width:' + p + '%"></div></div>' : ''}</div>
       <div class="gc-title" onclick="openBookById('${b.id}')">${esc(b.title)}</div>
       <div class="gc-author" onclick="openBookById('${b.id}')">${esc(b.author || 'Unknown')}</div>
@@ -5489,6 +5596,7 @@ function renderSpineView(el, books) {
       const sel = _libSelectedIds.has(s.book.id) ? ' selected' : '';
       return `<div class="spine${sel}" id="spine-${s.index}"
         data-progress="${Math.round(s.progress)}"
+        data-book-id="${s.book.id}"
         style="${style}"
         onclick="openBookById('${s.book.id}')"
         title="${esc(s.book.title)}">
@@ -6501,6 +6609,13 @@ let currentSpread = 0;       // 0-indexed spread within current chapter
 let totalSpreads = 1;        // computed after layout
 
 async function openBookById(id) {
+  // Long-press just fired the book menu — swallow the click that the
+  // browser dispatches on pointerup so the book doesn't open at the
+  // same moment. Single-shot flag: next click goes through normally.
+  if (_longPressFired) {
+    _longPressFired = false;
+    return;
+  }
   // In bulk-select mode, a tap toggles selection instead of opening the
   // book. All the library renderers wire their clicks through here, so
   // this single short-circuit handles every view.
@@ -10198,7 +10313,17 @@ function renderGreeting() {
   // Restore sort
   $('sort-select').value = currentSort;
 
+  // Restore card size for the grid view — saved across sessions so
+  // the user's library always opens at their preferred density.
+  const savedLibSize = parseInt(localStorage.getItem('tomen_libGridSize'), 10);
+  if (!isNaN(savedLibSize)) setLibrarySize(savedLibSize);
+
   setView(currentView);
+
+  // Long-press anywhere on a book card opens the per-book menu (Tags /
+  // Select / Delete). Replaces the floating ⋯ buttons that used to
+  // sit on every card.
+  _attachLibraryLongPress();
 
   // Once the library is visible, run the cover-storage migration in
   // the background — shrinks any raw v1 covers and moves them from
