@@ -258,9 +258,7 @@ body.crt .r-inner h3 {
 /* Mild glow on chrome — library titles, spines, toolbar title. Less
    intense than book content so UI text stays legible. */
 body.crt .lib-brand,
-body.crt .tv-title,
-body.crt .r-title,
-body.crt .spine-title {
+body.crt .r-title {
   text-shadow:
     0 0 1px rgba(255, 179, 71, 0.45),
     0 0 5px rgba(255, 179, 71, 0.2);
@@ -325,9 +323,7 @@ body.terminal .r-inner h1,
 body.terminal .r-inner h2,
 body.terminal .r-inner h3,
 body.terminal .lib-brand,
-body.terminal .tv-title,
-body.terminal .r-title,
-body.terminal .spine-title {
+body.terminal .r-title {
   font-family: var(--font-read-mono);
 }
 /* Scanlines — tight 2px repeat, lower opacity than CRT so the look is
@@ -416,9 +412,7 @@ body.brutalist .r-inner h1,
 body.brutalist .r-inner h2,
 body.brutalist .r-inner h3,
 body.brutalist .lib-brand,
-body.brutalist .tv-title,
-body.brutalist .r-title,
-body.brutalist .spine-title {
+body.brutalist .r-title {
   font-family: var(--font-read-mono);
 }
 /* Hard black borders on the toolbar instead of brand-tinted ones —
@@ -925,21 +919,6 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
 
 /* Library body */
 .lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 12px 28px 28px; min-height: 0; }
-.lib-body.spine-active {
-  overflow: hidden;
-  padding: 0;
-  display: flex;
-  min-height: 0;
-}
-.lib-body.spine-active > .view-spine-wrap {
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  display: flex;
-  align-items: flex-end;  /* bottom-anchor the inner view-spine when it's shorter than the wrap */
-}
 .lib-body::-webkit-scrollbar { width: 4px; }
 .lib-body::-webkit-scrollbar-thumb { background: var(--fog); border-radius: 2px; opacity: 0.3; }
 
@@ -969,35 +948,144 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
   color: var(--brand-ink);
 }
 
-/* === TEXT VIEW === */
-.view-text { display: flex; flex-direction: column; gap: 0; }
-/* Each row is now flex with the main clickable area + a small options
-   button on the right. The wrapping div is no longer click-handled —
-   .tv-item-main captures the row click for opening the book. */
-.tv-item {
-  display: flex; align-items: flex-start; gap: 8px;
-  padding: 16px 0; border-bottom: 0.5px solid var(--border);
+/* === COLUMNS VIEW ===
+   Compact title-scan layout. Multiple columns of [title + small
+   author + thin progress underline]. No covers — the point is to
+   skim names fast. Progress underline fills under each title to
+   show reading state without taking visual weight. */
+.view-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 4px 28px;
+  padding: 4px 0;
 }
-.tv-item:last-child { border-bottom: none; }
-.tv-item-main { flex: 1; min-width: 0; cursor: pointer; }
-.tv-item:hover .tv-title { color: var(--brand-ink); }
-.tv-title {
-  font-family: var(--font-read); font-size: 28px; font-weight: 400;
-  letter-spacing: -0.5px; line-height: 1.2; color: var(--ink);
+.col-item {
+  padding: 10px 0;
+  border-bottom: 0.5px solid var(--border);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
 }
-.tv-title.reading { color: var(--brand-ink); }
-.tv-author { font-size: 12px; color: var(--fog); margin-top: 3px; }
-.tv-progress {
-  height: 2px; background: var(--linen); border-radius: 1px;
-  width: 100px; margin-top: 6px; overflow: hidden;
+.col-item:hover .col-title { color: var(--brand-ink); }
+.col-title {
+  font-family: var(--font-read); font-size: 17px; font-weight: 400;
+  line-height: 1.25; color: var(--ink);
+  letter-spacing: -0.2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.tv-progress-fill { height: 100%; background: var(--brand); border-radius: 1px; }
-/* Hover-only menu hint — a small ⋯ chip that fades in on row hover so
-   desktop users can see there's a menu without cluttering the row by
-   default. Both the right-click path and the long-press path still
-   work alongside this; the hint is a third visual entry point. */
-.tv-menu-hint {
+.col-author {
+  font-size: 11px; color: var(--fog); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.col-progress {
+  height: 1px; background: transparent;
+  margin-top: 6px;
+}
+.col-progress-fill {
+  height: 100%; background: var(--brand);
+}
+.col-item.selected .col-title { color: var(--brand-ink); }
+
+/* === TABLE VIEW ===
+   Rich-data layout, one row per book. Small cover thumb, title +
+   author block, then a metadata strip with progress bar, time to
+   finish, total reading time, and tag chips. The densest information
+   surface in the library — useful for power users who want to scan
+   their collection's state at a glance. */
+.view-table {
+  display: flex;
+  flex-direction: column;
+}
+.tr-item {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 0.5px solid var(--border);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 90px;
+}
+.tr-item:last-child { border-bottom: none; }
+.tr-item:hover .tr-title { color: var(--brand-ink); }
+.tr-cover {
+  width: 56px;
+  aspect-ratio: 2 / 3;
+  background: var(--card);
+  position: relative;
+  overflow: hidden;
+  border-radius: 2px;
+  box-shadow: var(--shadow-cover);
+}
+.tr-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tr-placeholder { width: 100%; height: 100%; }
+.tr-main { min-width: 0; }
+.tr-title {
+  font-family: var(--font-read); font-size: 18px; font-weight: 500;
+  line-height: 1.2; color: var(--ink);
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tr-author {
+  font-size: 12px; color: var(--fog); margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tr-meta {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--stone);
+}
+.tr-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tr-meta-item .ph { font-size: 12px; color: var(--fog); }
+.tr-meta-item.is-done { color: var(--brand-ink); }
+.tr-meta-item.is-done .ph { color: var(--brand-ink); }
+.tr-meta-item.is-unread { color: var(--fog); }
+.tr-progress-bar {
+  display: inline-block;
+  width: 80px;
+  height: 3px;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  position: relative;
   flex-shrink: 0;
+}
+.tr-progress-bar-fill {
+  position: absolute;
+  left: 0; top: 0; height: 100%;
+  background: var(--brand);
+}
+.tr-tags {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tr-tag {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--stone);
+  padding: 2px 6px;
+  border: 0.5px solid var(--border);
+}
+.tr-menu-hint {
   width: 28px; height: 28px;
   border: 0;
   background: transparent;
@@ -1005,12 +1093,11 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
   cursor: pointer;
   opacity: 0;
   transition: opacity 140ms ease, color 140ms ease;
-  margin-top: 4px;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.tv-item:hover .tv-menu-hint { opacity: 0.7; }
-.tv-menu-hint:hover { color: var(--ink); opacity: 1; }
-.tv-menu-hint .ph { font-size: 18px; }
+.tr-item:hover .tr-menu-hint { opacity: 0.7; }
+.tr-menu-hint:hover { color: var(--ink); opacity: 1; }
+.tr-menu-hint .ph { font-size: 18px; }
 
 /* === GRID VIEW === */
 .view-grid {
@@ -1098,139 +1185,6 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
    Always visible on touch devices; on hover-capable devices we could
    make it appear on hover only, but always-visible is more discoverable. */
 
-/* === SPINE VIEW ========================================================
-
-Flat, minimal spines. Each spine is:
-  - A solid color (the book's spineColor — hash-derived or extracted from cover)
-  - A fill mechanic where the read portion tints toward the page background,
-    filling UP from the bottom as progress increases (0% = fully saturated,
-    100% = fully faded)
-  - A single centered vertical title in that book's typeface
-  - An optional chartreuse dot at the base marking last-read
-
-No texture, no bands, no bookmark triangle, no author, no gradient, no inset
-shadow. The whole row is meant to read as a clean chart of colors + types.
-============================================================================ */
-
-.view-spine-wrap {
-  overflow-x: auto; overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  height: 100%;
-  width: 100%;
-}
-.view-spine-wrap::-webkit-scrollbar { height: 6px; }
-.view-spine-wrap::-webkit-scrollbar-track { background: transparent; }
-.view-spine-wrap::-webkit-scrollbar-thumb { background: var(--fog); border-radius: 3px; opacity: 0.3; }
-
-.view-spine {
-  display: flex; align-items: flex-end; gap: 2px;
-  height: 100%;
-  max-height: 85vh;
-  width: max-content;
-  min-width: 100%;
-  padding: 14px 40px 28px 28px;
-}
-
-/* The spine is positioned so absolutely-placed children (fill layer, title,
-   last-read dot) can stack cleanly. Color is set inline per-book via
-   --spine-color (a single hex string). --spine-fill-pct drives the height
-   of the faded-bottom fill — 0% = no fill visible, 100% = fully faded.
-   The subtle dark outline prevents adjacent same-hue spines from blurring
-   into a single block; it's 30% black at ~4% opacity so it never looks
-   like a real border, just a seam. */
-.spine {
-  flex-shrink: 0;
-  position: relative;
-  overflow: hidden;
-  cursor: pointer;
-  border-radius: 2px;
-  background: var(--spine-color, #888);
-  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.18);
-  transition: filter 140ms ease;
-}
-.spine:hover { filter: brightness(1.08); }
-
-/* The read-portion fill. Sits at the bottom, grows upward with progress.
-   Uses color-mix to blend the spine color with the current theme's paper
-   color, so the faded region reads as "lighter version of the same book"
-   in light and dark themes without per-theme tuning. */
-.spine-fill {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: var(--spine-fill-pct, 0%);
-  background: color-mix(in srgb, var(--spine-color, #888) 15%, var(--paper));
-  pointer-events: none;
-  transition: height 200ms ease;
-}
-
-/* Thin line where the fill meets the unread portion. Only visible when
-   there's actual progress. Fixed near-black at moderate opacity so it's
-   legible on every spine color — the earlier color-mix approach was too
-   subtle on warm mid-toned spines (oranges, muted browns). */
-.spine-fill-line {
-  position: absolute;
-  left: 0; right: 0;
-  height: 1px;
-  bottom: calc(var(--spine-fill-pct, 0%) - 0.5px);
-  background: rgba(0, 0, 0, 0.35);
-  pointer-events: none;
-}
-.spine[data-progress="0"] .spine-fill-line { display: none; }
-
-/* Title zone. Two elements:
-   - .spine-title-wrap is the positioning layer (absolute, full-spine,
-     flex alignment). Default top-aligns; .center modifier adds vertical
-     centering for short titles that would look stranded at the top.
-   - .spine-title is the rotated text. Writing-mode goes on the text
-     element, not the flex container, because combining flex with
-     vertical writing mode makes alignment properties axis-rotate in
-     surprising ways. */
-.spine-title-wrap {
-  position: absolute;
-  top: 4%; left: 0; right: 0; bottom: 4%;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 0 3px;
-  z-index: 2;
-  pointer-events: none;
-}
-.spine-title-wrap.center { align-items: center; }
-.spine-title {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  line-height: 1.1;
-  word-break: break-word;
-  color: var(--spine-title-color, rgba(255,255,255,0.92));
-  max-height: 100%;
-  /* Hang the rotated text from the top-left corner of the flex item box
-     so top-anchored titles start at the visual top of the zone. */
-  display: block;
-}
-
-/* Subtitle treatment. Renders inline inside the rotated .spine-title span,
-   smaller and italicized, so "Recursion: A Novel" reads as title + appendix
-   rather than as two disconnected words. */
-.spine-subtitle {
-  font-style: italic;
-  opacity: 0.72;
-}
-
-/* Last-read indicator. Small chartreuse dot at the base of the spine,
-   centered horizontally, just above the fill line so it's always visible
-   regardless of progress. Replaces the old pinned-margin + spacer. */
-.spine-last-read {
-  position: absolute;
-  left: 50%;
-  bottom: 4px;
-  width: 6px; height: 6px;
-  margin-left: -3px;
-  border-radius: 50%;
-  background: var(--brand);
-  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--brand) 40%, var(--paper));
-  z-index: 3;
-  pointer-events: none;
-}
 
 /* ===== READER ===== */
 .r-progress {
@@ -2983,39 +2937,31 @@ body.lib-select-mode .lib-action-bar { transform: translate(-50%, 0); }
   text-align: center;
 }
 
-/* Selected-state visual across all three library views. A subtle brand-
-   tinted background and a small check overlay in the corner. */
-body.lib-select-mode .tv-item-main,
+/* Selected-state visual across the three library views. A subtle
+   brand-tinted outline plus a check chip in the corner. */
+body.lib-select-mode .tr-item,
 body.lib-select-mode .gc-cover,
-body.lib-select-mode .spine {
+body.lib-select-mode .col-item {
   position: relative;
 }
-.tv-item-main.selected,
+.tr-item.selected,
 .gc-cover.selected,
-.spine.selected {
+.col-item.selected {
   outline: 2px solid var(--brand-ink);
   outline-offset: -2px;
-  border-radius: var(--radius-sm);
 }
-.tv-item-main.selected::after,
+.tr-item.selected::after,
 .gc-cover.selected::after,
-.spine.selected::after {
+.col-item.selected::after {
   content: '✓';
   position: absolute;
   top: 6px; right: 6px;
   width: 22px; height: 22px;
-  border-radius: 11px;
   background: var(--brand);
   color: var(--brand-text);
   font-size: 13px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
   z-index: 3;
-}
-/* Spine view: the check sits at the TOP of the vertical spine since the
-   spine itself is narrow. */
-.spine.selected::after {
-  top: 4px; right: 50%; transform: translateX(50%);
 }
 
 /* Library tag filter strip. Hidden by default (no tags exist); shows
@@ -3316,10 +3262,8 @@ body.lib-select-mode .spine {
      slider override if they've set one. clamp() floors at 110px so a
      desktop-bucket value pushed to 100 doesn't crush phone cards. */
   .view-grid { grid-template-columns: repeat(auto-fill, minmax(clamp(110px, var(--grid-card-min-width, 110px), 200px), 1fr)); gap: 14px; }
-  .tv-title { font-size: 22px; }
-  .view-spine { padding: 12px 20px 16px 12px; gap: 1px; }
-  .spine { --spine-scale: 0.45; }
-  .view-spine-wrap::-webkit-scrollbar { height: 0; }
+  .tr-title { font-size: 16px; }
+  .col-title { font-size: 15px; }
   .icon-btn { width: 32px; height: 32px; }
   .icon-btn svg { width: 18px; height: 18px; }
   .icon-btn .ph { font-size: 18px; }
@@ -3330,14 +3274,11 @@ body.lib-select-mode .spine {
 @media (min-width: 481px) and (max-width: 768px) {
   .lib-header { padding: 14px 20px; }
   .lib-search { flex-basis: 180px; margin-left: 12px; }
-  .spine { --spine-scale: 0.65; }
-  .view-spine { padding: 0 32px 20px 20px; }
 }
 @media (min-width: 769px) {
   /* Desktop minimum defers to the user's slider value (set on the
      html element) or falls back to 150px when no preference saved. */
   .view-grid { grid-template-columns: repeat(auto-fill, minmax(var(--grid-card-min-width, 150px), 1fr)); }
-  .spine { --spine-scale: 1; }
 }
 
 /* Mobile reader — single-page mode hides the right slot so the left slot
@@ -3443,14 +3384,14 @@ body.lib-select-mode .spine {
         </div>
       </div>
       <div class="view-switch" id="view-switch" role="radiogroup" aria-label="Library view">
-        <button class="icon-btn active" data-view="text" onclick="setView('text')" title="Text view" aria-label="Text view" role="radio" aria-checked="true">
-          <i class="ph ph-list-dashes"></i>
+        <button class="icon-btn" data-view="columns" onclick="setView('columns')" title="Columns — scan titles fast" aria-label="Columns view" role="radio" aria-checked="false">
+          <i class="ph ph-text-columns"></i>
         </button>
-        <button class="icon-btn" data-view="grid" onclick="setView('grid')" title="Grid view" aria-label="Grid view" role="radio" aria-checked="false">
+        <button class="icon-btn active" data-view="grid" onclick="setView('grid')" title="Grid — browse covers" aria-label="Grid view" role="radio" aria-checked="true">
           <i class="ph ph-squares-four"></i>
         </button>
-        <button class="icon-btn" data-view="spine" onclick="setView('spine')" title="Spine view" aria-label="Spine view" role="radio" aria-checked="false">
-          <i class="ph ph-books"></i>
+        <button class="icon-btn" data-view="table" onclick="setView('table')" title="Table — full details" aria-label="Table view" role="radio" aria-checked="false">
+          <i class="ph ph-rows"></i>
         </button>
       </div>
       <div class="lib-size" aria-label="Grid card size">
@@ -4012,7 +3953,18 @@ let currentChapterIndex = 0;
 let chapters = [];
 let toc = [];
 let uiVisible = true;
-let currentView = localStorage.getItem('tomen_view') || 'spine';
+// View identifiers: 'columns' (compact title scan), 'grid' (cover
+// browse), 'table' (rich data per row). Older saved values from the
+// previous view-set are remapped here at read time: 'spine' → 'columns'
+// (similar dense-scanning role) and 'text' → 'table' (richer info per
+// book is what the old text view evolved into).
+let currentView = (() => {
+  const saved = localStorage.getItem('tomen_view');
+  if (saved === 'spine') return 'columns';
+  if (saved === 'text') return 'table';
+  if (saved === 'columns' || saved === 'grid' || saved === 'table') return saved;
+  return 'grid';
+})();
 let currentSort = localStorage.getItem('tomen_sort') || 'title';
 // Active library search query. Not persisted — a fresh session opens to the
 // full library rather than a confusingly-filtered view. Empty string means
@@ -4340,9 +4292,6 @@ async function deleteBook(id) {
   }
   library = library.filter(b => b.id !== id);
   _bumpLibraryVersion();
-  // Drop the spine layout cache entry for this book so it doesn't
-  // linger as orphan memory for the rest of the session.
-  _spineLayoutCache.delete(id);
 }
 
 // ===== BOOK MENU =====
@@ -4426,7 +4375,7 @@ let _longPressStartY = 0;
 
 function _findLibraryBookCard(target) {
   if (!target || typeof target.closest !== 'function') return null;
-  return target.closest('.gc[data-book-id], .tv-item[data-book-id], .spine[data-book-id]');
+  return target.closest('.gc[data-book-id], .tr-item[data-book-id], .col-item[data-book-id]');
 }
 
 function _onLibPointerDown(e) {
@@ -4434,7 +4383,7 @@ function _onLibPointerDown(e) {
   if (e.button !== undefined && e.button !== 0) return;
   // Pressing the hover-only ⋯ hint takes its own onclick path —
   // don't double-fire by also running the long-press timer.
-  if (e.target && e.target.closest && e.target.closest('.gc-menu-hint, .tv-menu-hint')) return;
+  if (e.target && e.target.closest && e.target.closest('.gc-menu-hint, .tr-menu-hint')) return;
   const card = _findLibraryBookCard(e.target);
   if (!card) return;
   const bookId = card.dataset.bookId;
@@ -5026,285 +4975,6 @@ async function getSpineColor(book) {
   return fallback;
 }
 
-// ===== SPINE DIMENSIONS =====
-// Each book has a "volume" (from content size) and a "format" (seeded from title/author).
-// Format determines how the volume is distributed between height and width.
-// Tall/slim books are like paperbacks. Short/thick books are like hardcovers.
-
-function hashBook(book) {
-  let h = 0;
-  const s = (book.title || '') + '|' + (book.author || '');
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-function spineDimensions(book) {
-  const total = book.contentSize || (book.chapters || []).reduce((s, c) => s + (c.html?.length || 0), 0);
-  const hash = hashBook(book);
-
-  // Volume: log-scaled content size → 0.0 (tiny) to 1.0 (massive)
-  const log = Math.log10(Math.max(1000, total));
-  const volume = Math.max(0, Math.min(1, (log - 4.0) / 2.5)); // 4.0–6.5 → 0–1
-
-  // Format: hash-seeded ratio of height vs width
-  // 0.0 = very tall/slim, 1.0 = very short/thick
-  const formatSeed = (hash % 100) / 100; // 0.0 to 0.99
-
-  // Height: 65–98%, influenced by volume (bigger = taller) and format (tall format = taller)
-  const tallness = 1.0 - formatSeed; // invert: low seed = tall
-  const heightBase = 65 + volume * 20 + tallness * 13;
-  const heightPct = Math.max(60, Math.min(98, Math.round(heightBase)));
-
-  // Width: 40–120px, influenced by volume (bigger = wider) and format (thick format = wider)
-  const thickness = formatSeed; // high seed = thick
-  const widthBase = 40 + volume * 50 + thickness * 30;
-  const widthPx = Math.max(40, Math.min(120, Math.round(widthBase)));
-
-  // Apply responsive scale to width
-  return { heightPct, widthPx: Math.round(widthPx * spineScale) };
-}
-
-// Keep these as wrappers for backward compatibility
-
-// Get the current spine scale from CSS (responsive). The previous
-// version was called from renderSpineView and created/destroyed a
-// probe element on every render — fast individually, but renderLibrary
-// runs after most user interactions in the library view, so the cost
-// stacked. Now the scale is computed once on first need and refreshed
-// (debounced) on window resize, so renderSpineView reads it for free.
-let spineScale = 1;
-let _spineScaleInitialized = false;
-let _spineScaleResizeTm = null;
-function _refreshSpineScale() {
-  const test = document.createElement('div');
-  test.className = 'spine';
-  test.style.cssText = 'position:absolute;visibility:hidden;';
-  document.body.appendChild(test);
-  const val = getComputedStyle(test).getPropertyValue('--spine-scale');
-  document.body.removeChild(test);
-  const next = parseFloat(val) || 1;
-  if (next !== spineScale) {
-    spineScale = next;
-    // Cached layouts are keyed by widthPx which is derived from
-    // spineScale — a scale change invalidates every entry.
-    _spineLayoutCache.clear();
-  }
-  _spineScaleInitialized = true;
-}
-// Stand-in for the old function name so any straggler callsite keeps
-// working. Triggers a one-time compute on first invocation; subsequent
-// calls are no-ops because the resize listener keeps the value fresh.
-function updateSpineScale() {
-  if (!_spineScaleInitialized) _refreshSpineScale();
-}
-window.addEventListener('resize', () => {
-  clearTimeout(_spineScaleResizeTm);
-  _spineScaleResizeTm = setTimeout(_refreshSpineScale, 120);
-}, { passive: true });
-
-// ===== SPINE COMPOSITION =====
-// Parse title and author into layout-ready pieces.
-function parseSpineContent(book) {
-  const rawTitle = book.title || '';
-  const author = book.author || null;
-
-  const volMatch = rawTitle.match(/^(.+?)\s+(#\d+|Vol\.?\s*\d+|Book\s+[IVXLCDM\d]+|Part\s+[IVXLCDM\d]+)\s*$/i);
-  const subSep = [': ', ' \u2014 ', ' - '];
-  let subIdx = -1, subSepUsed = null;
-  for (const sep of subSep) {
-    const idx = rawTitle.indexOf(sep);
-    if (idx > 0 && idx < rawTitle.length - 3) { subIdx = idx; subSepUsed = sep; break; }
-  }
-
-  let primary, secondary = null;
-  if (volMatch) {
-    primary = volMatch[1].trim();
-    secondary = volMatch[2].trim();
-  } else if (subIdx > 0) {
-    primary = rawTitle.substring(0, subIdx).trim();
-    secondary = rawTitle.substring(subIdx + subSepUsed.length).trim();
-  } else {
-    primary = rawTitle;
-  }
-
-  let authorInitials = null;
-  if (author) {
-    const words = author.trim().split(/\s+/).filter(Boolean);
-    if (words.length === 1) authorInitials = words[0][0].toUpperCase() + '.';
-    else authorInitials = words.map(w => w[0].toUpperCase()).join('.') + '.';
-  }
-
-  return { primary, secondary, author, authorInitials };
-}
-
-// ===== SPINE TEXT MEASUREMENT =====
-// All measurements use a hidden probe element attached to the DOM so the
-// browser performs real layout with the real font. Call after fonts load.
-
-const _probe = (() => {
-  let el = null;
-  return () => {
-    if (!el) {
-      el = document.createElement('span');
-      el.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden;font-family:Thow,Georgia,serif;';
-      document.body.appendChild(el);
-    }
-    return el;
-  };
-})();
-
-function measureVertical(text, fontSize, fontWeight, maxHeightPx, fontFamily) {
-  const el = _probe();
-  el.style.writingMode = 'vertical-rl';
-  el.style.textOrientation = 'mixed';
-  el.style.lineHeight = '1.1';
-  el.style.wordBreak = 'break-word';
-  el.style.whiteSpace = 'normal';
-  el.style.fontSize = fontSize + 'px';
-  el.style.fontWeight = fontWeight;
-  el.style.maxHeight = maxHeightPx + 'px';
-  el.style.maxWidth = '';
-  el.style.display = '';
-  // fontFamily is optional. Default (omitted) uses the probe's Thow fallback.
-  // Spine measurement needs the actual per-book face since serif / sans /
-  // mono metrics differ enough to throw off the binary-search fit.
-  el.style.fontFamily = fontFamily || '';
-  el.textContent = text;
-  return { w: el.offsetWidth, h: el.offsetHeight };
-}
-
-function measureHorizontal(text, fontSize, fontWeight, maxWidthPx) {
-  const el = _probe();
-  el.style.writingMode = 'horizontal-tb';
-  el.style.textOrientation = '';
-  el.style.lineHeight = '1.15';
-  el.style.wordBreak = 'normal';
-  el.style.whiteSpace = 'normal';
-  el.style.fontSize = fontSize + 'px';
-  el.style.fontWeight = fontWeight;
-  el.style.maxWidth = maxWidthPx + 'px';
-  el.style.maxHeight = '';
-  el.style.display = 'inline-block';
-  el.textContent = text;
-  const w = el.offsetWidth;
-  const h = el.offsetHeight;
-  const intrinsic = el.scrollWidth;
-  return { w, h, overflowed: intrinsic > maxWidthPx + 0.5 };
-}
-
-function fitVertical(text, maxW, maxH, sizeLo, sizeHi, fontFamily) {
-  let lo = sizeLo, hi = sizeHi, best = sizeLo, bestW = 0, bestH = 0;
-  for (let i = 0; i < 14 && lo <= hi; i++) {
-    const mid = Math.round((lo + hi) / 2);
-    const weight = mid >= 22 ? 500 : 400;
-    const m = measureVertical(text, mid, weight, maxH, fontFamily);
-    if (m.w <= maxW && m.h <= maxH) {
-      best = mid; bestW = m.w; bestH = m.h;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  return { size: best, weight: best >= 22 ? 500 : 400, width: bestW, height: bestH };
-}
-
-function fitHorizontal(text, maxW, maxH, maxLines, sizeHi, sizeLo) {
-  for (let size = sizeHi; size >= sizeLo; size--) {
-    const m = measureHorizontal(text, size, 400, maxW);
-    if (m.overflowed) continue;
-    if (m.h > maxH) continue;
-    const lineH = size * 1.15;
-    const lines = Math.max(1, Math.round(m.h / lineH));
-    if (lines > maxLines) continue;
-    return { text, size, weight: 400, width: m.w, height: m.h, lines };
-  }
-  return null;
-}
-
-// Layout cache keyed by every input spineLayout depends on. The binary-
-// search title fit forces synchronous layout for every measurement
-// iteration (~14 per book), so re-running it on every renderLibrary call
-// — which fires for sort, filter, view-switch, theme change, tag click,
-// and more — was the dominant cost in the library view. Title + author
-// in the key means renames invalidate automatically; faceKey covers
-// global/per-book face changes; widthPx/heightPx cover viewport resize
-// and the per-book dimension formula.
-const _spineLayoutCache = new Map();
-function _getSpineLayout(book, widthPx, heightPx, fontFamily, faceKey) {
-  const key = `${faceKey}|${widthPx}|${heightPx}|${book.title || ''}|${book.author || ''}`;
-  const cached = _spineLayoutCache.get(book.id);
-  if (cached && cached.key === key) return cached.layout;
-  const layout = spineLayout(book, widthPx, heightPx, fontFamily);
-  _spineLayoutCache.set(book.id, { key, layout });
-  return layout;
-}
-
-// ===== SPINE LAYOUT =====
-// Given a spine's ACTUAL rendered width/height in pixels, compute the title's
-// fitted size. Flat-spine redesign: no author on the spine, but the subtitle
-// (if parseSpineContent splits one off) renders inline as a smaller italic
-// appendix so titles like "Recursion: A Novel" don't read as a run-on.
-//
-// fontFamily is the CSS font-family string that will actually render the
-// title — passed through to measureVertical so size fitting uses the real
-// metrics rather than the probe's default face.
-function spineLayout(book, widthPx, heightPx, fontFamily) {
-  const parsed = parseSpineContent(book);
-  const primaryText = parsed.primary;
-  const subtitleText = parsed.secondary || null;
-
-  // Title area: full inner width (minus the 3px CSS horizontal padding on
-  // each side) and most of the vertical (4% inset top/bot from CSS).
-  const titleMaxW = Math.max(10, widthPx - 6);
-  const titleMaxH = Math.max(20, Math.round(heightPx * 0.92));
-
-  // Size caps scale with spine height so the same text feels right on a
-  // 500px mobile spine and a 1200px desktop spine. Short titles cap bigger
-  // since they can fill more of the zone with a single large glyph column.
-  const hScale = Math.max(0.5, Math.min(1.0, heightPx / 1100));
-  const len = primaryText.length;
-  const baseCap = len <= 4  ? 88 :
-                  len <= 8  ? 64 :
-                  len <= 16 ? 46 :
-                  len <= 30 ? 34 : 28;
-  const titleCap = Math.max(14, Math.round(baseCap * hScale));
-
-  let title = fitVertical(primaryText, titleMaxW, titleMaxH, 10, titleCap, fontFamily);
-
-  // Long titles sometimes under-size because single-column is height-bound
-  // by char count, not width. Try a wider budget so they can wrap.
-  if (primaryText.length > 18 && title.size < titleCap * 0.75) {
-    const wideW = Math.round(widthPx * 0.85);
-    const wrapped = fitVertical(primaryText, wideW, titleMaxH, title.size + 1, titleCap, fontFamily);
-    if (wrapped.size > title.size) title = wrapped;
-  }
-
-  // Subtitle size — roughly 60-70% of the title's chosen size, with a floor
-  // of 9px for legibility. Only emit a subtitle if it actually fits within
-  // the remaining zone height after the title.
-  let subtitle = null;
-  if (subtitleText) {
-    const subSize = Math.max(9, Math.round(title.size * 0.62));
-    const remainingH = Math.max(0, titleMaxH - title.height - 6);
-    // Measure the subtitle in the same column width as the title.
-    const sm = measureVertical(subtitleText, subSize, 400, remainingH, fontFamily);
-    if (sm.h <= remainingH && sm.w <= titleMaxW) {
-      subtitle = { text: subtitleText, size: subSize, weight: 400, width: sm.w, height: sm.h };
-    }
-  }
-
-  // Center the title+subtitle vertically when the combined height is well
-  // under the zone — a short title top-anchored in a tall spine looks
-  // stranded. Threshold of 55% is the same as the pre-redesign layout.
-  const combinedH = title.height + (subtitle ? subtitle.height + 6 : 0);
-  const titleCenter = combinedH < titleMaxH * 0.55;
-
-  return {
-    primary: { text: primaryText, ...title },
-    subtitle,
-    titleCenter
-  };
-}
 
 // ===== LIBRARY RENDERING =====
 function setView(v) {
@@ -5317,7 +4987,6 @@ function setView(v) {
     // accurate for assistive tech.
     b.setAttribute('aria-checked', on ? 'true' : 'false');
   });
-  $('lib-body').classList.toggle('spine-active', v === 'spine');
   // data-lib-view on body drives view-specific UI like the card-size
   // slider, which is only useful when the grid is on screen.
   document.body.setAttribute('data-lib-view', v);
@@ -5485,47 +5154,91 @@ function renderLibrary() {
     </div>`;
     return;
   }
-  if (currentView === 'text') renderTextView(body, sorted);
-  else if (currentView === 'grid') renderGridView(body, sorted);
-  else renderSpineView(body, sorted);
+  if (currentView === 'columns') renderColumnsView(body, sorted);
+  else if (currentView === 'table') renderTableView(body, sorted);
+  else renderGridView(body, sorted);
 }
 
-function renderTextView(el, books) {
-  el.innerHTML = '<div class="view-text">' + books.map(b => {
+// Columns view — compact title-scan, multi-column layout. No covers,
+// no authors prominent — just titles big enough to skim. A hairline
+// progress underline under each title shows reading state at a
+// glance without taking visual weight.
+function renderColumnsView(el, books) {
+  el.innerHTML = '<div class="view-columns">' + books.map(b => {
+    const p = b.progress || 0;
+    const sel = _libSelectedIds.has(b.id) ? ' selected' : '';
+    const progressFill = p > 0
+      ? `<div class="col-progress"><div class="col-progress-fill" style="width:${p}%"></div></div>`
+      : '<div class="col-progress"></div>';
+    return `<div class="col-item${sel}" data-book-id="${b.id}" onclick="openBookById('${b.id}')" title="Right-click or long-press for options">
+      <div class="col-title">${esc(b.title)}</div>
+      <div class="col-author">${esc(b.author || 'Unknown')}</div>
+      ${progressFill}
+    </div>`;
+  }).join('') + '</div>';
+}
+
+// Table view — rich data per row. Small cover thumb on the left,
+// title + author, then a horizontal metadata strip with progress
+// bar, time to finish, and accumulated reading time. Tags chips
+// trail the row when present. One row per book; the densest
+// information surface in the library.
+function renderTableView(el, books) {
+  el.innerHTML = '<div class="view-table">' + books.map(b => {
     const p = b.progress || 0;
     const isReading = p > 0 && p < 100;
+    const isFinished = p >= 100;
     const sel = _libSelectedIds.has(b.id) ? ' selected' : '';
-    // Estimate remaining time based on HTML content size scaled ~0.75 to
-    // approximate text-only length (tags, whitespace inflate raw length).
-    // Fall back silently if contentSize is missing (legacy books).
+    // Cover thumbnail — same lazy-load path as grid view. Inline if
+    // the cover is in memory or cache; otherwise emit a placeholder
+    // that the IntersectionObserver fetches from the covers store.
+    const c = strColor(b.title);
+    const cached = _coverCache.has(b.id) ? _coverCache.get(b.id) : undefined;
+    let coverInner;
+    if (b.cover) {
+      coverInner = `<img src="${b.cover}" alt="" loading="lazy" decoding="async">`;
+    } else if (cached && cached !== 'loading') {
+      coverInner = `<img src="${cached}" alt="" loading="lazy" decoding="async">`;
+    } else {
+      coverInner = `<div class="tr-placeholder" style="background:linear-gradient(145deg,${c[0]},${c[1]})"></div>`;
+    }
+    // Estimate time to finish from content size and progress.
     let timeMeta = '';
     if (b.contentSize && p < 100) {
       const textChars = b.contentSize * 0.75;
       const remainingChars = textChars * (1 - p / 100);
       const mins = estimateReadingMinutes(remainingChars);
       const formatted = formatReadingTime(mins);
-      if (formatted) {
-        const phrase = isReading ? formatted + ' until finished' : formatted + ' to read';
-        timeMeta = ' · <span style="font-family:var(--font-mono);font-size:11px">' + phrase + '</span>';
-      }
+      if (formatted) timeMeta = `<span class="tr-meta-item"><i class="ph ph-clock" aria-hidden="true"></i>${formatted} left</span>`;
     }
-    const progressMeta = isReading ? ' · <span style="font-family:var(--font-mono);font-size:11px">' + Math.round(p) + '%</span>' : '';
-    // Ambient reading stat — only shown once there's at least a minute
-    // of reading time so a never-opened book doesn't get a "0 min"
-    // label that looks like clutter.
     const readDuration = _formatReadingDuration(b.readingSeconds);
     const readMeta = readDuration
-      ? ' · <span style="font-family:var(--font-mono);font-size:11px">' + readDuration + ' read</span>'
+      ? `<span class="tr-meta-item"><i class="ph ph-eye" aria-hidden="true"></i>${readDuration} read</span>`
       : '';
-    return `<div class="tv-item" data-book-id="${b.id}" title="Right-click or long-press for options">
-      <div class="tv-item-main${sel}" onclick="openBookById('${b.id}')">
-        <div class="tv-title${isReading ? ' reading' : ''}">${esc(b.title)}</div>
-        <div class="tv-author">${esc(b.author || 'Unknown')}${progressMeta}${readMeta}${timeMeta}</div>
-        ${isReading ? '<div class="tv-progress"><div class="tv-progress-fill" style="width:' + p + '%"></div></div>' : ''}
+    const tags = Array.isArray(b.tags) && b.tags.length > 0
+      ? '<span class="tr-tags">' + b.tags.map(t => `<span class="tr-tag">${esc(t)}</span>`).join('') + '</span>'
+      : '';
+    const progressLabel = isFinished
+      ? '<span class="tr-meta-item is-done"><i class="ph ph-check" aria-hidden="true"></i>Finished</span>'
+      : isReading
+        ? `<span class="tr-meta-item"><span class="tr-progress-bar"><span class="tr-progress-bar-fill" style="width:${p}%"></span></span><span>${Math.round(p)}%</span></span>`
+        : '<span class="tr-meta-item is-unread">Unread</span>';
+    return `<div class="tr-item${sel}" data-book-id="${b.id}" onclick="openBookById('${b.id}')" title="Right-click or long-press for options">
+      <div class="tr-cover" data-book-id="${b.id}">${coverInner}</div>
+      <div class="tr-main">
+        <div class="tr-title">${esc(b.title)}</div>
+        <div class="tr-author">${esc(b.author || 'Unknown')}</div>
+        <div class="tr-meta">
+          ${progressLabel}
+          ${timeMeta}
+          ${readMeta}
+          ${tags}
+        </div>
       </div>
-      <button class="tv-menu-hint" tabindex="-1" aria-hidden="true" onclick="openBookMenu(event, '${b.id}')"><i class="ph ph-dots-three"></i></button>
+      <button class="tr-menu-hint" tabindex="-1" aria-hidden="true" onclick="openBookMenu(event, '${b.id}')"><i class="ph ph-dots-three"></i></button>
     </div>`;
   }).join('') + '</div>';
+  _observeBookCovers(el, '.tr-cover[data-book-id]');
 }
 
 function renderGridView(el, books) {
@@ -5562,39 +5275,37 @@ function renderGridView(el, books) {
       <div class="gc-author" onclick="openBookById('${b.id}')">${esc(b.author || 'Unknown')}</div>
     </div>`;
   }).join('') + '</div>';
-  _observeGridCovers(el);
+  _observeBookCovers(el, '.gc-cover[data-book-id]');
 }
 
-// IntersectionObserver-driven lazy cover loader for grid view. Watches
-// every .gc-cover that doesn't have an <img> yet; when one enters (or
-// nears) the viewport, fetches the cover from the covers store and
-// swaps the placeholder for an actual <img>. Observers are recreated
-// per renderGridView call — the old one is disconnected so it doesn't
-// chase orphan nodes. rootMargin: 200px pre-loads covers slightly
-// before they're scrolled into view, so the user rarely sees a
-// placeholder flash to image.
-let _gridCoverObserver = null;
-function _observeGridCovers(rootEl) {
-  if (_gridCoverObserver) {
-    _gridCoverObserver.disconnect();
-    _gridCoverObserver = null;
+// IntersectionObserver-driven lazy cover loader. Watches elements
+// matching `selector` (each carrying data-book-id); when one enters
+// (or nears) the viewport, fetches its cover from the covers store
+// and swaps any .gc-placeholder / .tr-placeholder inside for an
+// <img>. Single observer instance reused across views — the previous
+// observer is disconnected before re-attaching so it doesn't chase
+// orphan nodes from the prior render. rootMargin: 200px pre-loads
+// covers slightly before they're scrolled into view.
+let _bookCoverObserver = null;
+function _observeBookCovers(rootEl, selector) {
+  if (_bookCoverObserver) {
+    _bookCoverObserver.disconnect();
+    _bookCoverObserver = null;
   }
   if (typeof IntersectionObserver !== 'function') return;
-  const targets = rootEl.querySelectorAll('.gc-cover[data-book-id]');
+  const targets = rootEl.querySelectorAll(selector);
   if (targets.length === 0) return;
-  _gridCoverObserver = new IntersectionObserver((entries, obs) => {
+  _bookCoverObserver = new IntersectionObserver((entries, obs) => {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
       const el = entry.target;
       obs.unobserve(el);
-      // Already has an <img>? Cover was inline or was loaded earlier
-      // in this observer cycle. Nothing to do.
       if (el.querySelector('img')) continue;
       const id = el.dataset.bookId;
       if (!id) continue;
       getCoverForBook(id).then(url => {
         if (!url) return;
-        const placeholder = el.querySelector('.gc-placeholder');
+        const placeholder = el.querySelector('.gc-placeholder, .tr-placeholder');
         if (!placeholder) return;
         const img = document.createElement('img');
         img.alt = '';
@@ -5606,219 +5317,8 @@ function _observeGridCovers(rootEl) {
     }
   }, { root: null, rootMargin: '200px', threshold: 0.01 });
   for (const target of targets) {
-    _gridCoverObserver.observe(target);
+    _bookCoverObserver.observe(target);
   }
-}
-
-// Map the three valid fontFace keys to the actual CSS font-family strings
-// used for rendering AND measurement. Kept in sync with _READING_FACES.
-const _SPINE_FONT_FAMILIES = {
-  serif: "'Siche Text', 'Thow', 'Georgia', serif",
-  sans:  "'Uncut Sans', 'Inter', 'Helvetica Neue', sans-serif",
-  mono:  "'Dolph YY', 'Thow Mono', 'Courier New', monospace"
-};
-
-// Pick a title color (light or dark) based on the spine color's perceived
-// luminance. Uses the relative-luminance formula (Rec. 709 coefficients)
-// on a gamma-approximated linear-ish value — close enough for UI decisions.
-// Returns a CSS color string suitable for the title on BOTH the saturated
-// and faded portions of the spine (the faded portion is only 15% color +
-// 85% paper, so its luminance is close to paper's — a light-text choice
-// that works on the saturated band becomes unreadable there, which is why
-// we err on the side of dark text on medium-luminance colors).
-function titleColorForSpine(hex) {
-  if (typeof hex !== 'string' || !hex.startsWith('#')) return 'rgba(255,255,255,0.92)';
-  const h = hex.slice(1);
-  if (h.length !== 6) return 'rgba(255,255,255,0.92)';
-  const r = parseInt(h.slice(0, 2), 16) / 255;
-  const g = parseInt(h.slice(2, 4), 16) / 255;
-  const b = parseInt(h.slice(4, 6), 16) / 255;
-  // Fast approximation — perceived brightness via Rec. 709 coefficients.
-  // Proper sRGB linearization would be more accurate but adds cost for
-  // little payoff at this decision threshold.
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  // Threshold picked empirically: the existing palette in strColor() has
-  // everything well below 0.55 (its lightest is around 0.47 for the
-  // ochre/amber pair), so most autogenerated colors get light text.
-  // Cover-extracted colors can be anywhere, so the check is real.
-  return lum > 0.55
-    ? 'rgba(20, 16, 12, 0.85)'
-    : 'rgba(255, 250, 240, 0.95)';
-}
-
-function renderSpineView(el, books) {
-  updateSpineScale();
-  const lastId = getLastReadId();
-
-  // Build the data model. spineColor is stored as a [primary, deeper] pair
-  // for legacy reasons (old gradient design); new flat design uses only
-  // the primary color. Keep the pair in storage — don't mutate existing
-  // records.
-  const spineData = books.map((b, i) => {
-    const dims = spineDimensions(b);
-    const w = dims.widthPx;
-    const hPct = dims.heightPct;
-    const colorPair = b.spineColor || strColor(b.title);
-    const color = colorPair[0];
-    const progress = Math.max(0, Math.min(100, b.progress || 0));
-    const isLastRead = b.id === lastId;
-    // Per-book face resolves to the book's override if set, else the global
-    // default. Both the title's CSS font-family AND the measurement pass
-    // need this value so fit calculations use the actual render font.
-    const faceKey = _READING_FACES[b.fontFace] ? b.fontFace : globalReadingFace;
-    const fontFamily = _SPINE_FONT_FAMILIES[faceKey] || _SPINE_FONT_FAMILIES.serif;
-    const titleColor = titleColorForSpine(color);
-    return { book: b, index: i, width: w, heightPct: hPct,
-      color, progress, isLastRead, faceKey, fontFamily, titleColor };
-  });
-
-  // PASS 1: render skeletons with dimensions and color variables set. The
-  // browser performs real layout here so we can measure each spine's
-  // actual pixel height before deciding title size. Title text is added in
-  // PASS 2 after fonts are loaded.
-  el.innerHTML = '<div class="view-spine-wrap"><div class="view-spine" id="spine-row">' +
-    spineData.map((s) => {
-      // Inline style carries: dimensions, the color variable, the fill
-      // percentage variable, the title color variable, and the font-family
-      // on the spine element itself (so descendant .spine-title inherits).
-      const style = [
-        `width:${s.width}px`,
-        `height:${s.heightPct}%`,
-        `--spine-color:${s.color}`,
-        `--spine-fill-pct:${s.progress}%`,
-        `--spine-title-color:${s.titleColor}`,
-        `font-family:${s.fontFamily}`
-      ].join(';');
-      const sel = _libSelectedIds.has(s.book.id) ? ' selected' : '';
-      return `<div class="spine${sel}" id="spine-${s.index}"
-        data-progress="${Math.round(s.progress)}"
-        data-book-id="${s.book.id}"
-        style="${style}"
-        onclick="openBookById('${s.book.id}')"
-        title="${esc(s.book.title)}">
-        <div class="spine-fill"></div>
-        <div class="spine-fill-line"></div>
-        ${s.isLastRead ? '<div class="spine-last-read" aria-label="Last read"></div>' : ''}
-      </div>`;
-    }).join('') + '</div></div>';
-
-  // PASS 2: measure with the actual per-book font, fit the title, inject.
-  const paintText = () => {
-    spineData.forEach((s) => {
-      const spineEl = $(`spine-${s.index}`);
-      if (!spineEl) return;
-      const hPx = spineEl.clientHeight;
-      if (hPx <= 0) return;
-      const layout = _getSpineLayout(s.book, s.width, hPx, s.fontFamily, s.faceKey);
-      const p = layout.primary;
-      // Tighter tracking at larger sizes; looser at smaller so tall skinny
-      // spines don't feel cramped.
-      const spacing = p.size >= 18 ? '-0.2px' : p.size >= 12 ? '0.2px' : '0.4px';
-      // Subtitle, if present, renders inline with the title (same column,
-      // smaller italic). A space is inserted between them so the line
-      // break happens naturally at word boundary.
-      const subtitleHtml = layout.subtitle
-        ? `<span class="spine-subtitle" style="font-size:${layout.subtitle.size}px">${esc(' ' + layout.subtitle.text)}</span>`
-        : '';
-      const centerClass = layout.titleCenter ? ' center' : '';
-      const titleHtml = `<div class="spine-title-wrap${centerClass}"><span class="spine-title"
-        style="font-size:${p.size}px;font-weight:${p.weight};letter-spacing:${spacing}">${esc(p.text)}${subtitleHtml}</span></div>`;
-      // Preserve the fill + fill-line + last-read dot; re-inject title.
-      spineEl.innerHTML = `
-        <div class="spine-fill"></div>
-        <div class="spine-fill-line"></div>
-        ${s.isLastRead ? '<div class="spine-last-read" aria-label="Last read"></div>' : ''}
-        ${titleHtml}
-      `;
-    });
-  };
-
-  // Only block on the faces actually used by the spines about to render.
-  // A typical library has no per-book overrides, so this loads 2 font
-  // variants (regular + bold of the global face) instead of 6. Per-book
-  // overrides are added to the set so a book pinned to a different face
-  // still gets accurate metrics.
-  const SPINE_FACE_FAMILY = { serif: 'Siche Text', sans: 'Uncut Sans', mono: 'Dolph YY' };
-  const facesNeeded = new Set();
-  facesNeeded.add(globalReadingFace || 'serif');
-  for (const b of library) {
-    if (b.fontFace && SPINE_FACE_FAMILY[b.fontFace]) facesNeeded.add(b.fontFace);
-  }
-  const loadAndPaint = async () => {
-    try {
-      const loads = [];
-      for (const face of facesNeeded) {
-        const fam = SPINE_FACE_FAMILY[face];
-        if (!fam) continue;
-        loads.push(document.fonts.load(`14px "${fam}"`));
-        loads.push(document.fonts.load(`bold 14px "${fam}"`));
-      }
-      await Promise.all(loads);
-    } catch {}
-    paintText();
-  };
-
-  if (document.fonts && document.fonts.load) {
-    loadAndPaint();
-  } else {
-    requestAnimationFrame(paintText);
-  }
-
-  // Vertical mouse wheel → horizontal scroll. Natural on a shelf view.
-  const wrap = el.querySelector('.view-spine-wrap');
-  if (wrap) {
-    wrap.addEventListener('wheel', (e) => {
-      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-        wrap.scrollLeft += e.deltaY;
-        e.preventDefault();
-      }
-    }, { passive: false });
-  }
-
-  backfillSpineColors();
-}
-
-// Backfill spineColor for any books that don't have it yet (one-time migration)
-let backfillRunning = false;
-async function backfillSpineColors() {
-  if (backfillRunning) return;
-  // Pre-v3 records may still carry book.cover; post-v3 records have
-  // the cover in the separate covers store. Either path supplies a
-  // data URL — backfill fetches lazily from the covers store when the
-  // book object doesn't have one inline.
-  const missing = library.filter(b => !b.spineColor);
-  if (missing.length === 0) return;
-  backfillRunning = true;
-
-  // Process in parallel batches of 4 to avoid blocking
-  const batchSize = 4;
-  for (let i = 0; i < missing.length; i += batchSize) {
-    const batch = missing.slice(i, i + batchSize);
-    await Promise.all(batch.map(async (book) => {
-      const coverData = book.cover || await getCoverForBook(book.id);
-      if (!coverData) return;
-      const color = await extractColor(coverData);
-      if (color) {
-        book.spineColor = color;
-        await saveBookMeta(book);
-        // Update the spine in the DOM if we're still on spine view. The
-        // new flat design reads the color from the --spine-color custom
-        // property, so we update that (and the title color too, since a
-        // newly-extracted color may need different contrast).
-        if (currentView === 'spine') {
-          const idx = library.findIndex(b => b.id === book.id);
-          const el = $('spine-' + idx);
-          if (el) {
-            el.style.setProperty('--spine-color', color[0]);
-            el.style.setProperty('--spine-title-color', titleColorForSpine(color[0]));
-          }
-        }
-      }
-    }));
-    // Yield between batches so the UI stays responsive
-    await new Promise(r => setTimeout(r, 0));
-  }
-  backfillRunning = false;
 }
 
 // ===== FILE HANDLING =====
