@@ -6,7 +6,7 @@
 // handler below deletes any cache whose key doesn't match this version.
 // Add new assets (fonts, icons) to ASSETS so they're cached on install.
 // =====================================================================
-const CACHE_VERSION = 'tomen-v1.21.2';
+const CACHE_VERSION = 'tomen-v1.22.0';
 
 const ASSETS = [
   './',
@@ -25,7 +25,13 @@ const ASSETS = [
   './fonts/DolphYY-Regular.woff2',
   './fonts/DolphYY-RegularItalic.woff2',
   './fonts/DolphYY-Bold.woff2',
-  './vendor/jszip.min.js'
+  './vendor/jszip.min.js',
+  // Phosphor icon CSS — referenced by <link> in index.html. Caching just
+  // the CSS gives a partial offline win: the rules apply offline, but the
+  // glyph font (which the CSS references with relative URLs into the
+  // jsdelivr package) may still need network if uncached. Full Phosphor
+  // self-hosting is a future improvement; this one-liner is risk-free.
+  'https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/regular/style.css'
 ];
 
 self.addEventListener('install', (event) => {

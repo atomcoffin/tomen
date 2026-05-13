@@ -3794,20 +3794,27 @@ function renderSpineView(el, books) {
     });
   };
 
-  // Wait for all three reading faces to load before measuring — the probe
-  // uses whichever face the spine is set to, and if that face hasn't loaded
-  // yet the fallback metrics poison the fit. Loading all three upfront
-  // avoids per-book load waits.
+  // Only block on the faces actually used by the spines about to render.
+  // A typical library has no per-book overrides, so this loads 2 font
+  // variants (regular + bold of the global face) instead of 6. Per-book
+  // overrides are added to the set so a book pinned to a different face
+  // still gets accurate metrics.
+  const SPINE_FACE_FAMILY = { serif: 'Siche Text', sans: 'Uncut Sans', mono: 'Dolph YY' };
+  const facesNeeded = new Set();
+  facesNeeded.add(globalReadingFace || 'serif');
+  for (const b of library) {
+    if (b.fontFace && SPINE_FACE_FAMILY[b.fontFace]) facesNeeded.add(b.fontFace);
+  }
   const loadAndPaint = async () => {
     try {
-      await Promise.all([
-        document.fonts.load('14px "Siche Text"'),
-        document.fonts.load('bold 14px "Siche Text"'),
-        document.fonts.load('14px "Uncut Sans"'),
-        document.fonts.load('bold 14px "Uncut Sans"'),
-        document.fonts.load('14px "Dolph YY"'),
-        document.fonts.load('bold 14px "Dolph YY"'),
-      ]);
+      const loads = [];
+      for (const face of facesNeeded) {
+        const fam = SPINE_FACE_FAMILY[face];
+        if (!fam) continue;
+        loads.push(document.fonts.load(`14px "${fam}"`));
+        loads.push(document.fonts.load(`bold 14px "${fam}"`));
+      }
+      await Promise.all(loads);
     } catch {}
     paintText();
   };
@@ -3916,13 +3923,14 @@ async function collectFilesFromDir(dirHandle, files) {
 }
 
 async function importFiles(files) {
-  const existingTitles = new Set(library.map(b => b.title.toLowerCase()));
-  const newFiles = files.filter(f => !existingTitles.has(f.name.replace(/\.[^.]+$/, '').toLowerCase()));
-  if (newFiles.length === 0) { alert('All books in this folder are already in your library.'); return; }
-  showLoading(true, `Importing 0 / ${newFiles.length}…`);
-  let n = 0, skipped = 0;
+  if (!files || files.length === 0) return;
+  showLoading(true, `Importing 0 / ${files.length}…`);
+  // Dedup happens post-parse inside loadEpub/loadTextFile (against title +
+  // author). The old pre-parse filter compared filename to title which was
+  // structurally broken — two books titled "Volume 1" silently collided.
+  let n = 0, skipped = 0, dupes = 0;
 
-  for (const file of newFiles) {
+  for (const file of files) {
     // Per-file timeout so one bad file can't hang the whole import
     const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('timeout after 30s')), 30000)
@@ -3936,18 +3944,28 @@ async function importFiles(files) {
       await Promise.race([importPromise, timeoutPromise]);
       n++;
     } catch (err) {
-      console.warn(`Skipped ${file.name}:`, err);
-      skipped++;
+      if (err && err.code === 'DUPLICATE') {
+        dupes++;
+      } else {
+        console.warn(`Skipped ${file.name}:`, err);
+        skipped++;
+      }
     }
-    showLoading(true, `Importing ${n} / ${newFiles.length}…`);
+    showLoading(true, `Importing ${n} / ${files.length}…`);
     // Yield to the event loop briefly so UI can update
     await new Promise(r => setTimeout(r, 0));
   }
 
   renderLibrary();
   showLoading(false);
-  if (skipped > 0) {
-    setTimeout(() => alert(`Imported ${n} books. ${skipped} could not be read (likely DRM-protected or corrupt).`), 100);
+  // Single summary alert combining the three outcomes — keeps the user from
+  // playing whack-a-modal on a 50-book folder import.
+  const parts = [];
+  if (n > 0) parts.push(`Imported ${n} book${n === 1 ? '' : 's'}.`);
+  if (dupes > 0) parts.push(`${dupes} already in your library.`);
+  if (skipped > 0) parts.push(`${skipped} could not be read (likely DRM-protected or corrupt).`);
+  if (parts.length > 0 && (dupes > 0 || skipped > 0)) {
+    setTimeout(() => alert(parts.join(' ')), 100);
   }
 }
 
@@ -3984,6 +4002,19 @@ async function loadTextFile(file, batch = false) {
     chapters: [{ title, html }], toc: [{ title, index: 0 }],
     progress: 0, chapterIndex: 0, scrollPos: 0
   };
+  // Post-parse dedup against (title, author). Plain-text files have empty
+  // author so the match is title-only here, but the comparison structure
+  // matches loadEpub's so the importFiles handler treats both the same.
+  const tLc = (book.title || '').toLowerCase().trim();
+  const aLc = (book.author || '').toLowerCase().trim();
+  if (tLc && library.some(b =>
+      (b.title || '').toLowerCase().trim() === tLc &&
+      (b.author || '').toLowerCase().trim() === aLc)) {
+    if (!batch) alert('This book is already in your library.');
+    const dupErr = new Error('duplicate');
+    dupErr.code = 'DUPLICATE';
+    throw dupErr;
+  }
   await saveBookAtomic(book);
   library.push({
     id: book.id, title: book.title, author: book.author, cover: book.cover,
@@ -4607,6 +4638,19 @@ async function loadEpub(file, batch = false) {
       title, author, cover, chapters: bookChapters, toc: finalToc,
       progress: 0, chapterIndex: 0, scrollPos: 0, spineColor
     };
+    // Post-parse dedup against (title, author). Lowercased + trimmed so a
+    // re-import of the same EPUB from a different folder doesn't slip
+    // through on stray whitespace. importFiles catches DUPLICATE and
+    // surfaces it as a "already in your library" outcome, not an error.
+    const titleLc = (book.title || '').toLowerCase().trim();
+    const authorLc = (book.author || '').toLowerCase().trim();
+    if (titleLc && library.some(b =>
+        (b.title || '').toLowerCase().trim() === titleLc &&
+        (b.author || '').toLowerCase().trim() === authorLc)) {
+      const dupErr = new Error('duplicate');
+      dupErr.code = 'DUPLICATE';
+      throw dupErr;
+    }
     await saveBookAtomic(book);
     library.push({
       id: book.id, title: book.title, author: book.author, cover: book.cover,
@@ -4616,6 +4660,13 @@ async function loadEpub(file, batch = false) {
     });
     if (!batch) renderLibrary();
   } catch (err) {
+    if (err && err.code === 'DUPLICATE') {
+      // Not an error — same book already in library. Surface a calm
+      // message for single-file imports; batch imports get a combined
+      // summary alert in importFiles.
+      if (!batch) alert('This book is already in your library.');
+      throw err;
+    }
     console.error('EPUB parse error:', err);
     if (!batch) {
       const quotaMsg = quotaMessageForError(err);
@@ -4721,6 +4772,14 @@ async function openBookById(id) {
 function showLibrary() {
   exitEditingMode();
   saveProgress();
+  // Force the pending IDB write through before we free anything. flushSave
+  // -Progress runs its synchronous prelude (which copies fields from
+  // currentBook onto library[idx] via saveLibrary) before suspending on the
+  // saveBookMeta await, so by the time it returns the library row already
+  // holds the durable values and the IDB transaction has captured them.
+  // Calling without await is intentional — we don't want to block UI on
+  // the disk write.
+  flushSaveProgress();
   // Clear stale per-mark menu / note-editor refs so a re-opened book
   // doesn't see lingering ids from the previous session's UI.
   _markMenuId = null;
@@ -4732,6 +4791,17 @@ function showLibrary() {
   // regardless of which book was last open. The per-book override will be
   // re-applied the next time that book is opened.
   applyReadingFace(globalReadingFace);
+  // Free chapter memory. A 10MB EPUB held the full chapter HTML in two
+  // slot inners plus the chapters[] array; without this, every book read
+  // in a session stayed resident until tab close. Safe to null currentBook
+  // here because the IDB write above has already captured the meta fields.
+  currentBook = null;
+  chapters = [];
+  toc = [];
+  const li = $('r-inner');
+  const ri = $('r-inner-right');
+  if (li) li.innerHTML = '';
+  if (ri) ri.innerHTML = '';
   renderLibrary();
 }
 
@@ -6820,7 +6890,11 @@ async function exportLibrary() {
       marks,
       preferences
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    // Compact (no indent) — pretty-printing materializes the full library
+    // a second time as a humongous string, which OOMs on mobile when the
+    // library is large. The file is machine-read on re-import, not edited
+    // by hand, so the indentation isn't load-bearing.
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     const dateStr = new Date().toISOString().slice(0, 10);
