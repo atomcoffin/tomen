@@ -453,26 +453,47 @@ body.brutalist .r-toolbar {
   --shadow-cover: 0 4px 16px rgba(0, 0, 0, 0.75);
   --shadow-float: 0 8px 32px rgba(0, 0, 0, 0.85);
 }
-/* Flashlight overlay — a fixed pseudo-element that paints the whole
-   viewport with a radial gradient. Clear center (the "light"), gradual
-   falloff to dense darkness at the edges. The center position is
-   driven by --flashlight-x / --flashlight-y custom properties that
-   the mousemove/touchmove handlers update; CSS falls back to 50% 50%
-   so the very first paint and any moment without pointer activity
-   shows a centered light rather than a dark void. */
+/* Flashlight overlay — a single solid dark overlay revealed through
+   the INTERSECTION of two radial masks. Darkness only appears where
+   BOTH masks say "dark," so either light source keeps an area
+   readable on its own.
+     - Ambient: a wide stationary ellipse centered on the viewport,
+       sized to comfortably cover the reading column. This is the
+       "candle on the desk" — reading is always possible without
+       pointer interaction.
+     - Cursor: a smaller circle tracking the pointer position via
+       --flashlight-x / --flashlight-y. When the pointer wanders into
+       the dim zone (corners, toolbar edges), it punches a clearing.
+   mask-composite: intersect requires the overlay to be visible only
+   where BOTH mask layers are opaque (black). Where either is
+   transparent, the overlay is hidden and the content shows through. */
 body.horror::after {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 9998;
-  background: radial-gradient(
-    circle 280px at var(--flashlight-x, 50%) var(--flashlight-y, 50%),
-    rgba(0, 0, 0, 0) 0,
-    rgba(0, 0, 0, 0) 90px,
-    rgba(0, 0, 0, 0.5) 180px,
-    rgba(0, 0, 0, 0.88) 280px
-  );
+  background: rgba(0, 0, 0, 0.88);
+  -webkit-mask-image:
+    radial-gradient(circle 240px at var(--flashlight-x, 50%) var(--flashlight-y, 50%),
+      transparent 0,
+      transparent 90px,
+      black 240px),
+    radial-gradient(ellipse 60vw 75vh at center,
+      transparent 0,
+      transparent 32%,
+      black 95%);
+  mask-image:
+    radial-gradient(circle 240px at var(--flashlight-x, 50%) var(--flashlight-y, 50%),
+      transparent 0,
+      transparent 90px,
+      black 240px),
+    radial-gradient(ellipse 60vw 75vh at center,
+      transparent 0,
+      transparent 32%,
+      black 95%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
 }
 /* Headings inside the book get a blood-red color so chapter titles
    register as ominous focal points when the light passes over them. */
