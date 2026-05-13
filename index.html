@@ -1558,10 +1558,12 @@ body.r-ui-visible .r-footer-ref {
   height: 0;
   pointer-events: none;
   /* Baseline opacity — the ring is always visible as a quiet hint at
-     each edge. Bumps up on hover and active. The whole element fades
-     via opacity; the interior fill has its own separate opacity driven
-     by startHold/cancelHold for the bloom-in effect. */
-  opacity: 0.35;
+     each edge. Compounds with the stroke's own stroke-opacity below,
+     so the effective idle visibility is opacity * stroke-opacity. We
+     set both deliberately on the higher side so the rings register in
+     peripheral vision on every theme without competing with the text.
+     Bumps up on .armed and .active for clear interaction feedback. */
+  opacity: 0.6;
   transition: opacity 180ms ease;
   z-index: 5;
   transform: translateY(-50%);
@@ -1593,13 +1595,17 @@ body.r-ui-visible .r-footer-ref {
 /* Idle outline ring — thin perimeter, no fill. With non-scaling-stroke,
    the stroke width stays constant in CSS pixels regardless of how the
    SVG container scales — so the border looks consistent whether the
-   ring is small or large. Transitions color between dim (.hover, cursor
-   in zone but not yet in ring) and brand (.armed, cursor inside ring). */
+   ring is small or large. Stroke color comes from --ink so the rings
+   adapt to every theme automatically; stroke-opacity gives a little
+   transparency so the ring feels carved out of the paper rather than
+   painted on, and combines with the parent .r-edge-ring opacity for
+   the final idle visibility. Transitions to full-strength brand on
+   .armed (cursor inside the disc, click would register). */
 .r-edge-ring-track {
   fill: none;
   stroke: var(--ink);
-  stroke-opacity: 0.35;
-  stroke-width: 1.5;
+  stroke-opacity: 0.6;
+  stroke-width: 2;
   vector-effect: non-scaling-stroke;
   transition: stroke 180ms ease, stroke-opacity 180ms ease;
 }
@@ -6806,8 +6812,10 @@ const EDGE_RING_MAX_R = 60;
 // each edge. With Y-tracking enabled, both rings ride the cursor's
 // vertical position even when the cursor is nowhere near an edge, so
 // the rings feel like companions you can approach rather than UI
-// elements that appear and disappear.
-const EDGE_RING_BASELINE_R = 9;
+// elements that appear and disappear. Sized to be readable in
+// peripheral vision: small enough to feel like punctuation, big
+// enough that a glance at the edge confirms "there's something here."
+const EDGE_RING_BASELINE_R = 14;
 // Minimum rendered radius for a click to count as "armed." Sits above
 // the baseline so stray clicks on the small idle indicator don't
 // register — the user has to move the cursor close enough to grow the
@@ -6820,8 +6828,11 @@ const EDGE_RING_MIN_R = 24;
 const EDGE_RING_ACTIVATION_DIST = 220;
 // rAF easing factor for size/position pursuit. Each frame, the ring's
 // rendered values move (target - current) * EASE toward the target.
-// Lower = more lag (molasses), higher = snappier.
-const EDGE_RING_EASE = 0.25;
+// At 0.10 the ring settles in roughly 10-12 frames (~170-200ms) —
+// noticeable lag that reads as "the ring is processing your motion"
+// without feeling sluggish. Higher = snappier (felt glued to cursor);
+// lower = molasses (felt unresponsive). 0.10 is the alive zone.
+const EDGE_RING_EASE = 0.10;
 // Stop the rAF loop when both size and Y are within this many pixels of
 // target — avoids burning CPU on infinitesimal residuals.
 const EDGE_RING_SETTLE_THRESHOLD = 0.4;
