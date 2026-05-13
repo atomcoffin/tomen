@@ -965,12 +965,13 @@ body.r-ui-visible .r-progress {
   position: absolute;
   left: 0; right: 0;
   z-index: 10;
-  /* Brand-forward toolbar — paper with a confident wash of the theme's
-     brand color so the UI surface reads as unmistakably "ours" without
-     overpowering the page. Dark themes override this below to keep the bg
-     subtle (heavy brand mix on near-black bases muddies into olive) and
-     instead use a bright brand stripe at the page-facing edge. */
-  background: color-mix(in srgb, var(--paper) 78%, var(--brand) 22%);
+  /* Bold brand wash — a 50/50 mix of paper and the theme's brand color so
+     the bar reads as an unmistakable branded surface, not a subtle tint.
+     Dark themes override this below: a 50% brand mix on near-black paper
+     muddies into olive, so they keep a quiet bg and instead express the
+     same intensity through a thicker, fully saturated brand stripe at
+     the page-facing edge. */
+  background: color-mix(in srgb, var(--paper) 50%, var(--brand) 50%);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   transition: opacity 180ms ease, transform 220ms var(--ease);
@@ -978,40 +979,55 @@ body.r-ui-visible .r-progress {
 }
 .r-toolbar-top {
   top: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--brand) 60%, var(--border));
+  border-bottom: 1.5px solid var(--brand);
   padding: calc(8px + env(safe-area-inset-top, 0px)) 0 8px 0;
 }
 .r-toolbar-bottom {
   bottom: 0;
-  border-top: 1px solid color-mix(in srgb, var(--brand) 60%, var(--border));
+  border-top: 1.5px solid var(--brand);
   padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px)) 0;
 }
-/* Dark-theme toolbar treatment — bg stays close to paper (mixing a bright
-   brand into a near-black base produces muddy olive), and the page-facing
-   edge gets a clean 1.5px brand stripe at ~75% to express the same
-   "branded UI" intensity expressed differently for a dark substrate. */
+/* Dark-theme toolbar treatment — bg stays close to paper (a 50% brand
+   mix on near-black bases produces muddy olive), and the page-facing
+   edge gets a clean 2px brand stripe at full saturation to match the
+   light themes' intensity expressed differently for a dark substrate. */
 body.dark .r-toolbar,
 body.inkwell .r-toolbar,
 body.crt .r-toolbar {
-  background: color-mix(in srgb, var(--paper) 90%, var(--brand) 10%);
+  background: color-mix(in srgb, var(--paper) 88%, var(--brand) 12%);
 }
 body.dark .r-toolbar-top,
 body.inkwell .r-toolbar-top,
 body.crt .r-toolbar-top {
-  border-bottom: 1.5px solid color-mix(in srgb, var(--brand) 75%, transparent);
+  border-bottom: 2px solid var(--brand);
 }
 body.dark .r-toolbar-bottom,
 body.inkwell .r-toolbar-bottom,
 body.crt .r-toolbar-bottom {
-  border-top: 1.5px solid color-mix(in srgb, var(--brand) 75%, transparent);
+  border-top: 2px solid var(--brand);
 }
-/* Icon hover inside the now-branded bar — the default --linen hover bg
-   blends into the brand wash and disappears. Switch to a brand-mixed
-   chip so the affordance still reads. Active state stays --brand-ink
-   which is calibrated to be readable as text on each theme's paper. */
+/* Icon contrast inside the now-loud bar. Default icon color was --stone
+   (warm grey) which gets lost against a brand-heavy bg — bump to --ink
+   for max readability. Hover uses an ink-tinted chip rather than a
+   brand-tinted one (brand-on-brand would disappear), and active stays
+   --ink since --brand-ink would muddy into the bar bg. */
+.r-toolbar .icon-btn {
+  color: var(--ink);
+}
 .r-toolbar .icon-btn:hover {
-  background: color-mix(in srgb, var(--brand) 22%, transparent);
-  color: var(--brand-ink);
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+  color: var(--ink);
+}
+.r-toolbar .icon-btn.active {
+  color: var(--ink);
+}
+/* Dark-theme icon override — the bar bg stays close to dark paper, so
+   --ink (which is light on dark themes) keeps working naturally. Active
+   gets the saturated brand color so it pops against the dark bar bg. */
+body.dark .r-toolbar .icon-btn.active,
+body.inkwell .r-toolbar .icon-btn.active,
+body.crt .r-toolbar .icon-btn.active {
+  color: var(--brand);
 }
 /* Inner container is a three-column grid: left cluster, centered title,
    right cluster. Constrained to 720px on desktop so the items sit close
