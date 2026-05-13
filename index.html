@@ -2797,26 +2797,78 @@ body.lib-select-mode .spine {
 }
 .error-toast.show { opacity: 1; }
 
-/* Update toast */
-.update-toast {
-  position: fixed; bottom: 20px; left: 50%;
-  transform: translateX(-50%) translateY(100px);
-  background: var(--card); border: 0.5px solid var(--border);
-  border-radius: var(--radius); box-shadow: var(--shadow-float);
-  padding: 12px 16px; display: flex; align-items: center; gap: 12px;
-  z-index: 600; font-size: 13px; color: var(--ink);
-  transition: transform 0.25s var(--ease); white-space: nowrap;
+/* Update affordances — small brand-colored dot on the profile button
+   when a new service worker is waiting, and a matching dot inside the
+   Profile overlay's About row. The dot replaces the older bottom-center
+   toast: less intrusive (it only appears where the user already looks
+   for app-level actions) and more honest (it stays put until the user
+   chooses to act). */
+.icon-btn .update-dot,
+.about-row .update-dot {
+  position: absolute;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+  border: 1.5px solid var(--card);
+  pointer-events: none;
 }
-.update-toast.visible { transform: translateX(-50%) translateY(0); }
-.update-toast .u-btn {
-  padding: 5px 12px; border-radius: 6px; border: none;
-  background: var(--brand); color: var(--brand-text);
-  font-family: var(--font-ui); font-size: 12px; font-weight: 600; cursor: pointer;
+.icon-btn { position: relative; }
+.icon-btn .update-dot {
+  top: 5px; right: 5px;
 }
-.update-toast .u-dismiss {
-  padding: 5px 8px; border: none; background: transparent;
-  color: var(--fog); font-size: 12px; cursor: pointer;
+.icon-btn .update-dot[hidden] { display: none; }
+
+/* About-Tomen section inside the Profile overlay. Sits above Colophon as
+   an app-meta row: current version + a single context-sensitive action
+   button (Check for updates → Install update when one is waiting). */
+.about-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--stone);
+  position: relative;
 }
+.about-version { color: var(--ink); font-weight: 500; }
+.about-sep { opacity: 0.5; }
+.about-status { color: var(--stone); }
+.about-status.is-update { color: var(--brand-ink); font-weight: 600; }
+.about-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.about-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.about-btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+.about-btn[disabled] { opacity: 0.55; cursor: default; }
+.about-btn[disabled]:hover { border-color: var(--border); color: var(--ink); }
+.about-btn.is-primary {
+  background: var(--brand);
+  color: var(--brand-text);
+  border-color: var(--brand);
+}
+.about-btn.is-primary:hover {
+  background: var(--brand-deep);
+  border-color: var(--brand-deep);
+  color: var(--brand-text);
+}
+.about-btn .ph { font-size: 14px; }
 
 #file-input { display: none; }
 
@@ -2979,8 +3031,9 @@ body.lib-select-mode .spine {
         <option value="recent">Recent</option>
         <option value="progress">Progress</option>
       </select>
-      <button class="icon-btn" onclick="toggleProfile()" title="Profile & settings" aria-label="Profile and settings">
+      <button class="icon-btn" id="lib-profile-btn" onclick="toggleProfile()" title="Profile & settings" aria-label="Profile and settings">
         <i class="ph ph-user"></i>
+        <span class="update-dot" id="lib-profile-update-dot" hidden></span>
       </button>
     </div>
   </div>
@@ -3364,6 +3417,25 @@ body.lib-select-mode .spine {
       <div class="settings-hint">A clean Markdown file of every highlight and note across your library, grouped by book and chapter. Paste into Obsidian, Readwise, Notion, or any notes app.</div>
     </div>
     <div class="settings-section">
+      <div class="settings-label">About Tomen</div>
+      <div class="about-row">
+        <span class="about-version" id="about-version">Tomen</span>
+        <span class="about-sep">·</span>
+        <span class="about-status" id="about-status">Up to date</span>
+      </div>
+      <div class="about-actions">
+        <button class="about-btn" id="about-check-btn" onclick="checkForUpdate(true)">
+          <i class="ph ph-arrows-clockwise" aria-hidden="true"></i>
+          <span id="about-check-label">Check for updates</span>
+        </button>
+        <button class="about-btn is-primary" id="about-install-btn" onclick="applyUpdate()" hidden>
+          <i class="ph ph-download-simple" aria-hidden="true"></i>
+          <span>Install update</span>
+        </button>
+      </div>
+      <div class="settings-hint">Checked automatically every 15 minutes while Tomen is open. Click Check to look right now.</div>
+    </div>
+    <div class="settings-section">
       <div class="settings-label">Colophon</div>
       <div class="colophon">
         <p>Tomen's reading faces are licensed from independent type designers.</p>
@@ -3383,12 +3455,6 @@ body.lib-select-mode .spine {
 </div>
 
 <!-- Update toast -->
-<div class="update-toast" id="update-toast" role="status" aria-live="polite">
-  New version available
-  <button class="u-btn" onclick="applyUpdate()">Update</button>
-  <button class="u-dismiss" onclick="document.getElementById('update-toast').classList.remove('visible')">Later</button>
-</div>
-
 <!-- Per-book contextual menu. Singleton positioned via inline style at the
      clicked button's location. Currently carries one action (Delete); will
      expand to include Rename, Mark as finished, Export marks, etc. as
@@ -7809,6 +7875,9 @@ function toggleProfile() {
     document.querySelectorAll('.theme-btn[data-pace]').forEach(b =>
       b.classList.toggle('active', b.dataset.pace === pace)
     );
+    // Refresh the About row so the version label and Up-to-date / Update
+    // available state reflect the current SW status when the panel opens.
+    if (typeof refreshAboutRow === 'function') refreshAboutRow();
   }
 }
 function updateProfileName(name) {
@@ -9210,21 +9279,145 @@ function renderGreeting() {
 
 <!-- Service Worker -->
 <script>
+// Tomen's update flow:
+//   1. SW registers and we hold onto the registration so we can poll it.
+//   2. A new SW is detected either passively (browser checks sw.js on
+//      load/navigation) or actively (visibilitychange + 15min interval
+//      call reg.update()). When one is detected and finishes installing,
+//      we surface it via a brand-colored dot on the Profile button and a
+//      one-click "Install update" affordance inside the Profile overlay.
+//   3. Clicking Install posts skipWaiting to the new SW. The browser
+//      activates it, fires controllerchange, and we reload — the user
+//      lands on the new version with their state intact.
+//
+// This replaces the older bottom-center toast, which appeared at
+// unpredictable times (whenever the browser felt like checking) and
+// disappeared on dismissal, leaving the user with no path back to the
+// update other than refreshing and hoping.
+let swRegistration = null;
 let waitingSW = null;
+let tomenVersion = '';
+const UPDATE_POLL_INTERVAL_MS = 15 * 60 * 1000;
+let _updatePollTimer = null;
+// "checking" is a brief visual state shown after a manual Check click so
+// the user gets feedback that something happened. Auto-checks don't set
+// this — they happen silently and only surface a state change if an
+// update is found.
+let _checkInFlight = false;
+
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').then(reg => {
-    if (reg.waiting) showUpdateToast(reg.waiting);
+    swRegistration = reg;
+    if (reg.waiting) markUpdateAvailable(reg.waiting);
     reg.addEventListener('updatefound', () => {
       const nw = reg.installing;
+      if (!nw) return;
       nw.addEventListener('statechange', () => {
-        if (nw.state === 'installed' && navigator.serviceWorker.controller) showUpdateToast(nw);
+        // Only treat the new SW as an "update" once a controller already
+        // owns the page — the first install on a fresh visit isn't an
+        // update, it's the initial caching pass.
+        if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+          markUpdateAvailable(nw);
+        }
       });
     });
-  });
+    startUpdatePolling();
+  }).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
 }
-function showUpdateToast(sw) { waitingSW = sw; $('update-toast').classList.add('visible'); }
-function applyUpdate() { if (waitingSW) waitingSW.postMessage('skipWaiting'); }
+
+// Read CACHE_VERSION out of sw.js once at startup so the About row can
+// show the actual deployed version rather than a hardcoded string we'd
+// have to keep in lockstep. sw.js is already in the cache by this point
+// (registration fetched it), so the request is local.
+fetch('./sw.js', { cache: 'no-cache' }).then(r => r.text()).then(t => {
+  const m = t.match(/CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/);
+  if (m) {
+    // Strip the leading "tomen-" prefix so the display reads "Tomen v1.31.1"
+    // rather than the duplicate "Tomen tomen-v1.31.1".
+    tomenVersion = m[1].replace(/^tomen-/, '');
+    refreshAboutRow();
+  }
+}).catch(() => {});
+
+// Active update polling — call reg.update() on a 15-min interval while
+// the tab is visible, and on every visibilitychange that brings the
+// tab back into view. The browser's own update heuristic checks only on
+// navigation, which means a tab kept open all day would never see an
+// update without this. The cost is one HEAD-equivalent request to
+// sw.js per check — effectively free.
+function startUpdatePolling() {
+  const tick = () => {
+    if (document.visibilityState === 'visible' && swRegistration) {
+      swRegistration.update().catch(() => {});
+    }
+  };
+  if (_updatePollTimer) clearInterval(_updatePollTimer);
+  _updatePollTimer = setInterval(tick, UPDATE_POLL_INTERVAL_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') tick();
+  });
+}
+
+function markUpdateAvailable(sw) {
+  waitingSW = sw;
+  refreshAboutRow();
+  const dot = $('lib-profile-update-dot');
+  if (dot) dot.hidden = false;
+}
+
+// Manual update check — user clicked "Check for updates" in the About
+// row. Always shows a brief "Checking…" state so the click feels
+// acknowledged even when there's no update. Resolves to the same final
+// states the auto-poll produces.
+function checkForUpdate(manual) {
+  if (!swRegistration) return;
+  if (_checkInFlight) return;
+  _checkInFlight = true;
+  if (manual) {
+    const label = $('about-check-label');
+    const btn = $('about-check-btn');
+    if (label) label.textContent = 'Checking…';
+    if (btn) btn.disabled = true;
+  }
+  swRegistration.update().catch(() => {}).finally(() => {
+    // Brief delay so "Checking…" registers visually even on fast checks.
+    setTimeout(() => {
+      _checkInFlight = false;
+      const label = $('about-check-label');
+      const btn = $('about-check-btn');
+      if (label) label.textContent = 'Check for updates';
+      if (btn) btn.disabled = false;
+      refreshAboutRow();
+    }, 350);
+  });
+}
+
+// Apply the waiting update. Triggers skipWaiting in the new SW, which
+// activates, fires controllerchange, which reloads us into the new build.
+function applyUpdate() {
+  if (waitingSW) waitingSW.postMessage('skipWaiting');
+}
+
+// Sync the About row DOM to the current state. Called on toggleProfile,
+// after the version fetch resolves, and after every state transition.
+// Idempotent — safe to call repeatedly with no waiting SW.
+function refreshAboutRow() {
+  const versionEl = $('about-version');
+  const statusEl = $('about-status');
+  const installBtn = $('about-install-btn');
+  if (versionEl) versionEl.textContent = tomenVersion ? `Tomen ${tomenVersion}` : 'Tomen';
+  if (statusEl) {
+    if (waitingSW) {
+      statusEl.textContent = 'Update available';
+      statusEl.classList.add('is-update');
+    } else {
+      statusEl.textContent = 'Up to date';
+      statusEl.classList.remove('is-update');
+    }
+  }
+  if (installBtn) installBtn.hidden = !waitingSW;
+}
 
 // ===== SENTENCE SELECTION =====
 // In editing mode, a single tap on text selects the sentence containing the
