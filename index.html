@@ -1995,6 +1995,86 @@ body.r-mode-editing .r-inner {
 .marks-cta .ph { font-size: 16px; }
 
 .marks-list { flex: 1; overflow-y: auto; padding: 12px 0 18px; }
+
+/* Search panel — slides in from the right like marks-panel and reuses
+   the chapter-header / item / empty-state visual language so the two
+   feel like siblings, not bolted-on additions. The input row sits
+   sticky just under the header so the query stays visible while
+   scrolling through long result lists. */
+.search-panel {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(360px, 85vw); background: var(--card);
+  z-index: 201; transform: translateX(100%);
+  transition: transform 0.25s var(--ease);
+  display: flex; flex-direction: column;
+}
+.overlay.open .search-panel { transform: translateX(0); }
+.search-header {
+  padding: 20px 24px 16px;
+  border-bottom: 0.5px solid var(--border);
+  font-family: var(--font-read); font-size: 18px; font-weight: 500;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.search-input-row {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 18px 0;
+  padding: 9px 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  transition: border-color 140ms ease;
+}
+.search-input-row:focus-within { border-color: var(--brand-ink); }
+.search-input-icon { color: var(--stone); font-size: 14px; flex-shrink: 0; }
+.search-input {
+  flex: 1;
+  border: none; outline: none; background: transparent;
+  font-family: var(--font-ui); font-size: 13px; color: var(--ink);
+  padding: 0;
+}
+.search-input::placeholder { color: var(--fog); }
+.search-clear {
+  border: none; background: transparent;
+  color: var(--fog); cursor: pointer;
+  padding: 2px 4px; line-height: 1; font-size: 13px;
+  display: none;
+}
+.search-clear.visible { display: inline-flex; }
+.search-clear:hover { color: var(--stone); }
+.search-list { flex: 1; overflow-y: auto; padding: 12px 0 18px; }
+.search-empty {
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--fog);
+  font-family: var(--font-ui); font-size: 12px; line-height: 1.5;
+}
+.search-item {
+  display: block; width: 100%; text-align: left;
+  padding: 10px 24px;
+  border: none; background: transparent;
+  font-family: var(--font-read); font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.search-item:hover {
+  background: var(--linen);
+  border-left-color: var(--brand-ink);
+}
+.search-item-snippet {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.search-item-snippet mark {
+  background: color-mix(in srgb, var(--brand) 35%, transparent);
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
 .marks-empty {
   padding: 32px 24px;
   text-align: center;
@@ -2562,6 +2642,7 @@ body.r-mode-editing .r-inner {
       <div class="r-toolbar-left">
         <button class="icon-btn" onclick="toggleTOC()" title="Contents" aria-label="Contents"><i class="ph ph-list-bullets"></i></button>
         <button class="icon-btn" onclick="toggleMarks()" title="Marks" aria-label="Marks"><i class="ph ph-bookmark-simple"></i></button>
+        <button class="icon-btn" onclick="toggleSearch()" title="Search in book" aria-label="Search in book"><i class="ph ph-magnifying-glass"></i></button>
       </div>
       <div class="r-toolbar-center">
         <button class="icon-btn" onclick="toggleSettings()" title="Appearance" aria-label="Appearance"><i class="ph ph-sliders"></i></button>
@@ -2693,6 +2774,30 @@ body.r-mode-editing .r-inner {
       <span>Mark new passage</span>
     </button>
     <div class="marks-list" id="marks-list"></div>
+  </div>
+</div>
+
+<!-- Search overlay. Slides in from the right like TOC/Marks; sticky text
+     input at top with debounced live results below, grouped by chapter.
+     Tapping a result navigates to that chapter and spread. -->
+<div class="overlay" id="ov-search" role="dialog" aria-modal="true" aria-label="Search in book" onclick="toggleSearch()">
+  <div class="search-panel" onclick="event.stopPropagation()">
+    <div class="search-header">
+      <span>Search</span>
+      <span class="marks-header-count" id="search-count"></span>
+    </div>
+    <div class="search-input-row">
+      <i class="ph ph-magnifying-glass search-input-icon" aria-hidden="true"></i>
+      <input type="search" class="search-input" id="search-input"
+        placeholder="Find in this book"
+        aria-label="Search query"
+        oninput="onSearchInput(this.value)"
+        onkeydown="if (event.key === 'Escape') { this.value = ''; onSearchInput(''); }">
+      <button class="search-clear" id="search-clear" onclick="clearBookSearch()" aria-label="Clear search">
+        <i class="ph ph-x" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="search-list" id="search-list"></div>
   </div>
 </div>
 
@@ -4796,6 +4901,9 @@ async function openBookById(id) {
   // until the defensive timeout fires.
   _animatingTurn = false;
   _fadeSwapBusy = false;
+  // Drop the search index cache — chapter indices are book-scoped, and
+  // reusing an entry from a previous book would point at the wrong text.
+  _chapterTextCache.clear();
   localStorage.setItem('tomen_lastRead', id);
   showLoading(true, 'Opening book…');
   try {
@@ -4880,6 +4988,8 @@ function showLibrary() {
   currentBook = null;
   chapters = [];
   toc = [];
+  // Search index pointed at the previous book — drop it.
+  _chapterTextCache.clear();
   const li = $('r-inner');
   const ri = $('r-inner-right');
   if (li) li.innerHTML = '';
@@ -7693,6 +7803,191 @@ function _setupDictionaryHandlers() {
     }
   });
 }
+
+// ===== IN-BOOK SEARCH =====
+// Substring search across all chapters of the current book. Plain text
+// per chapter is extracted lazily (first lookup) and cached for the
+// session. Offsets are walker-order text-node character positions,
+// which match the offset model used by marks / findSpreadForChapter
+// -Offset, so a result can be navigated to the spread containing it
+// without a separate index.
+const _chapterTextCache = new Map();
+let _searchDebounce = null;
+let _lastSearchQuery = '';
+
+function _chapterPlainText(chapterIdx) {
+  if (_chapterTextCache.has(chapterIdx)) return _chapterTextCache.get(chapterIdx);
+  const html = chapters?.[chapterIdx]?.html || '';
+  // Parse the chapter into a detached document and walk text nodes in
+  // document order. This matches what the rendered DOM contains after
+  // renderChapter assigns chapter.html to .r-inner.innerHTML, so the
+  // offsets we produce here line up with findSpreadForChapterOffset.
+  const doc = new DOMParser().parseFromString('<body>' + html + '</body>', 'text/html');
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null);
+  let text = '';
+  let n;
+  while ((n = walker.nextNode())) text += n.data;
+  _chapterTextCache.set(chapterIdx, text);
+  return text;
+}
+
+function toggleSearch() {
+  const ov = $('ov-search');
+  if (!ov) return;
+  const opening = !ov.classList.contains('open');
+  ov.classList.toggle('open');
+  if (opening) {
+    // Focus the input on next frame so the slide-in animation doesn't
+    // fight the focus (and so the on-screen keyboard appears at the
+    // right moment on mobile).
+    const input = $('search-input');
+    if (input) requestAnimationFrame(() => input.focus());
+    // Re-render in case the user opens with a stale query in the input
+    // (input retains its value across overlay toggles).
+    if (input && input.value) onSearchInput(input.value);
+    else _renderSearchResults('', []);
+  }
+}
+
+function clearBookSearch() {
+  const input = $('search-input');
+  if (input) { input.value = ''; input.focus(); }
+  onSearchInput('');
+}
+
+function onSearchInput(value) {
+  const q = (value || '').trim();
+  _lastSearchQuery = q;
+  const clearBtn = $('search-clear');
+  if (clearBtn) clearBtn.classList.toggle('visible', q.length > 0);
+  clearTimeout(_searchDebounce);
+  if (q.length < 2) {
+    _renderSearchResults(q, []);
+    return;
+  }
+  _searchDebounce = setTimeout(() => {
+    _searchDebounce = null;
+    const results = _runBookSearch(q);
+    // Drop stale results if the query changed during the debounce.
+    if (q === _lastSearchQuery) _renderSearchResults(q, results);
+  }, 150);
+}
+
+function _runBookSearch(query) {
+  if (!currentBook || !Array.isArray(chapters) || chapters.length === 0) return [];
+  const q = query.toLowerCase();
+  // Caps so a common query like "the" doesn't produce thousands of rows.
+  const MAX_PER_CHAPTER = 30;
+  const MAX_TOTAL = 200;
+  const results = [];
+  for (let ci = 0; ci < chapters.length; ci++) {
+    const text = _chapterPlainText(ci);
+    const lower = text.toLowerCase();
+    let idx = 0;
+    let perChapter = 0;
+    while (true) {
+      const hit = lower.indexOf(q, idx);
+      if (hit === -1) break;
+      results.push({ chapterIndex: ci, offset: hit, end: hit + q.length });
+      perChapter++;
+      idx = hit + q.length;
+      if (perChapter >= MAX_PER_CHAPTER) break;
+      if (results.length >= MAX_TOTAL) break;
+    }
+    if (results.length >= MAX_TOTAL) break;
+  }
+  return results;
+}
+
+function _renderSearchResults(query, results) {
+  const listEl = $('search-list');
+  const countEl = $('search-count');
+  if (!listEl) return;
+  if (countEl) {
+    countEl.textContent = query.length < 2 ? ''
+      : results.length === 0 ? 'no matches'
+      : results.length >= 200 ? '200+ matches'
+      : `${results.length} match${results.length === 1 ? '' : 'es'}`;
+  }
+  if (query.length < 2) {
+    listEl.innerHTML = '<div class="search-empty">Type at least 2 characters to find a phrase in this book.</div>';
+    return;
+  }
+  if (results.length === 0) {
+    listEl.innerHTML = '<div class="search-empty">No matches.</div>';
+    return;
+  }
+  // Group by chapter for readability — a long result list reads like a
+  // TOC of where the phrase appears rather than a flat dump.
+  const SNIPPET_RADIUS = 60;
+  const grouped = new Map();
+  for (const r of results) {
+    if (!grouped.has(r.chapterIndex)) grouped.set(r.chapterIndex, []);
+    grouped.get(r.chapterIndex).push(r);
+  }
+  const html = [];
+  for (const [ci, hits] of grouped) {
+    const text = _chapterPlainText(ci);
+    const chTitle = chapters[ci]?.title || `Chapter ${ci + 1}`;
+    html.push(`<div class="marks-chapter-header">${esc(chTitle)}</div>`);
+    for (const h of hits) {
+      const left = Math.max(0, h.offset - SNIPPET_RADIUS);
+      const right = Math.min(text.length, h.end + SNIPPET_RADIUS);
+      const before = text.slice(left, h.offset).replace(/\s+/g, ' ');
+      const match = text.slice(h.offset, h.end);
+      const after = text.slice(h.end, right).replace(/\s+/g, ' ');
+      const ellL = left > 0 ? '…' : '';
+      const ellR = right < text.length ? '…' : '';
+      html.push(
+        `<button class="search-item" onclick="goToSearchResult(${ci}, ${h.offset})">
+          <div class="search-item-snippet">${ellL}${esc(before)}<mark>${esc(match)}</mark>${esc(after)}${ellR}</div>
+        </button>`
+      );
+    }
+  }
+  listEl.innerHTML = html.join('');
+}
+
+function goToSearchResult(chapterIdx, offset) {
+  if (!currentBook) return;
+  toggleSearch();
+  // Same chapter — just jump to the spread containing the match.
+  if (chapterIdx === currentChapterIndex) {
+    const spread = findSpreadForChapterOffset(offset);
+    if (spread !== null) {
+      currentSpread = spread;
+      applySpread();
+      updateProgress();
+      saveProgress();
+    }
+    return;
+  }
+  // Different chapter — fade through, render, then on the next frame
+  // (when measureSpreads has populated _slotColumnWidth) jump to the
+  // spread containing the match. Mirrors goToMark's pattern.
+  fadeSwap(() => {
+    currentChapterIndex = chapterIdx;
+    currentSpread = 0;
+    renderChapter();
+    requestAnimationFrame(() => {
+      const spread = findSpreadForChapterOffset(offset);
+      if (spread !== null && spread !== currentSpread) {
+        currentSpread = spread;
+        applySpread();
+        updateProgress();
+      }
+      saveProgress();
+    });
+  });
+}
+
+// Escape closes the search overlay if open. Matches the pattern used by
+// the per-overlay handlers above (book-menu, confirm-backdrop, etc.).
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && $('ov-search')?.classList.contains('open')) {
+    toggleSearch();
+  }
+});
 
 // ===== KEYBOARD =====
 document.addEventListener('keydown', e => {
