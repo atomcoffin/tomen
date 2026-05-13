@@ -4673,8 +4673,12 @@ async function loadEpub(file, batch = false) {
       alert(quotaMsg || 'Could not open this EPUB. It may be DRM-protected or unsupported.');
     }
     throw err;  // re-throw so importFiles can count it as skipped
+  } finally {
+    // Always dismiss the loading overlay, including on duplicate/error
+    // paths. Previously this lived outside the try/catch and a thrown
+    // error (DRM, malformed EPUB, now DUPLICATE) left the overlay stuck.
+    if (!batch) showLoading(false);
   }
-  if (!batch) showLoading(false);
 }
 
 function resolveHref(base, rel) {
