@@ -992,6 +992,26 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
   width: 100px; margin-top: 6px; overflow: hidden;
 }
 .tv-progress-fill { height: 100%; background: var(--brand); border-radius: 1px; }
+/* Hover-only menu hint — a small ⋯ chip that fades in on row hover so
+   desktop users can see there's a menu without cluttering the row by
+   default. Both the right-click path and the long-press path still
+   work alongside this; the hint is a third visual entry point. */
+.tv-menu-hint {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--fog);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 140ms ease, color 140ms ease;
+  margin-top: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.tv-item:hover .tv-menu-hint { opacity: 0.7; }
+.tv-menu-hint:hover { color: var(--ink); opacity: 1; }
+.tv-menu-hint .ph { font-size: 18px; }
+
 /* === GRID VIEW === */
 .view-grid {
   display: grid;
@@ -1017,10 +1037,40 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
 .gc-cover { cursor: pointer; }
 .gc-title, .gc-author { cursor: pointer; }
 .gc-cover {
-  width: 100%; aspect-ratio: 2 / 3; border-radius: var(--radius-sm);
+  width: 100%; aspect-ratio: 2 / 3;
+  /* Less rounded than --radius-sm (8px). 2px keeps a hint of "book
+     corner" feel without softening the cover edge into a chrome
+     pill. */
+  border-radius: 2px;
   overflow: hidden; box-shadow: var(--shadow-cover); position: relative;
   background: var(--card);
 }
+/* Hover-only menu hint on grid cards — small ⋯ chip in the top-right
+   corner that appears when the cursor is over the card. Solid-dark
+   bg for legibility on any cover. Right-click and long-press both
+   still work as alternate paths; this is just the third visual
+   entry point for desktop users who don't think to right-click. */
+.gc-menu-hint {
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 26px; height: 26px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.7);
+  color: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  z-index: 2;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  border-radius: 2px;
+}
+.gc:hover .gc-menu-hint,
+.gc:focus-within .gc-menu-hint {
+  opacity: 0.85;
+}
+.gc-menu-hint:hover { opacity: 1; }
+.gc-menu-hint .ph { font-size: 16px; }
 .gc-cover img { width: 100%; height: 100%; object-fit: cover; }
 .gc-placeholder {
   width: 100%; height: 100%;
@@ -4350,6 +4400,9 @@ function _findLibraryBookCard(target) {
 function _onLibPointerDown(e) {
   // Only primary button on mouse; touch always has button:0.
   if (e.button !== undefined && e.button !== 0) return;
+  // Pressing the hover-only ⋯ hint takes its own onclick path —
+  // don't double-fire by also running the long-press timer.
+  if (e.target && e.target.closest && e.target.closest('.gc-menu-hint, .tv-menu-hint')) return;
   const card = _findLibraryBookCard(e.target);
   if (!card) return;
   const bookId = card.dataset.bookId;
@@ -4381,8 +4434,16 @@ function _cancelLongPressTimer() {
 }
 
 function _onLibContextMenu(e) {
-  // Suppress the OS context menu on book cards — we have our own.
-  if (_findLibraryBookCard(e.target)) e.preventDefault();
+  // Right-click on a book card opens the per-book menu (and suppresses
+  // the OS context menu while we're at it). This is the primary
+  // desktop entry point — the small ⋯ hover hint and the long-press
+  // gesture are the other two.
+  const card = _findLibraryBookCard(e.target);
+  if (!card) return;
+  e.preventDefault();
+  const bookId = card.dataset.bookId;
+  if (!bookId) return;
+  openBookMenu(null, bookId, card);
 }
 
 function _attachLibraryLongPress() {
@@ -5423,12 +5484,13 @@ function renderTextView(el, books) {
     const readMeta = readDuration
       ? ' · <span style="font-family:var(--font-mono);font-size:11px">' + readDuration + ' read</span>'
       : '';
-    return `<div class="tv-item" data-book-id="${b.id}">
+    return `<div class="tv-item" data-book-id="${b.id}" title="Right-click or long-press for options">
       <div class="tv-item-main${sel}" onclick="openBookById('${b.id}')">
         <div class="tv-title${isReading ? ' reading' : ''}">${esc(b.title)}</div>
         <div class="tv-author">${esc(b.author || 'Unknown')}${progressMeta}${readMeta}${timeMeta}</div>
         ${isReading ? '<div class="tv-progress"><div class="tv-progress-fill" style="width:' + p + '%"></div></div>' : ''}
       </div>
+      <button class="tv-menu-hint" tabindex="-1" aria-hidden="true" onclick="openBookMenu(event, '${b.id}')"><i class="ph ph-dots-three"></i></button>
     </div>`;
   }).join('') + '</div>';
 }
@@ -5460,7 +5522,8 @@ function renderGridView(el, books) {
            <div class="gcp-author">${esc(b.author || '')}</div>
          </div>`;
     }
-    return `<div class="gc" data-book-id="${b.id}">
+    return `<div class="gc" data-book-id="${b.id}" title="Right-click or long-press for options">
+      <button class="gc-menu-hint" tabindex="-1" aria-hidden="true" onclick="openBookMenu(event, '${b.id}')"><i class="ph ph-dots-three"></i></button>
       <div class="gc-cover${sel}" data-book-id="${b.id}" onclick="openBookById('${b.id}')">${coverHtml}${p > 0 ? '<div class="gc-prog"><div class="gc-prog-fill" style="width:' + p + '%"></div></div>' : ''}</div>
       <div class="gc-title" onclick="openBookById('${b.id}')">${esc(b.title)}</div>
       <div class="gc-author" onclick="openBookById('${b.id}')">${esc(b.author || 'Unknown')}</div>
