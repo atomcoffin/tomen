@@ -1179,50 +1179,57 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
 }
 .gc-prog-fill { height: 100%; background: var(--brand); }
 
-/* Summoning animation — when a book is clicked in grid view, it
-   plays a four-beat cinematic transition before the reader screen
-   takes over:
-     1. RISE  (0–35%): book scales up to 1.35x and floats forward
-        — "coming toward the screen"
-     2. SLAM  (35–45%): rapid return past the resting state with a
-        small overshoot, like pressing into the table
-     3. SHAKE (45–72%): four quick horizontal recoil motions from
-        the impact, decaying in amplitude
-     4. HOLD  (72–100%): book settles slightly raised, ready
-   The other books fade + blur out starting at the slam moment so
-   the impact reads as the cause of their disappearance.
-   Total duration ~1000ms — the user explicitly asked for slow so
-   opening a book feels like a deliberate act. */
+/* Summoning animation — cartoon physics in eight beats. The book
+   anticipates by squatting, launches forward with squash-and-stretch,
+   wobbles at peak, plummets back, slams flat with an exaggerated
+   squish, bounces, shakes with rotation, then settles. Other books
+   recoil + fade on the slam frame so the impact reads as the cause.
+   2000ms total, transform-origin: center bottom so squashes pivot
+   off the "ground" the book is slamming onto. */
 @keyframes book-summon {
-  0%   { transform: translateY(0) scale(1); }
-  /* Rise: smooth, accelerating upward into the screen */
-  35%  { transform: translateY(-22px) scale(1.35); }
-  /* Slam: fast return, slight overshoot below resting position */
-  45%  { transform: translateY(6px) scale(0.94); }
-  /* Shake: four decreasing recoil motions */
-  50%  { transform: translateX(-7px) translateY(0) scale(1); }
-  56%  { transform: translateX(8px) translateY(0) scale(1); }
-  62%  { transform: translateX(-5px) translateY(0) scale(1); }
-  68%  { transform: translateX(3px) translateY(0) scale(1); }
-  72%  { transform: translateX(0) translateY(0) scale(1); }
-  /* Hold: settle into the lifted "ready" pose */
-  100% { transform: translateY(-4px) scale(1.04); }
+  /* Anticipation — squat down preparing to launch */
+  0%   { transform: translateY(0) scale(1, 1) rotate(0); }
+  8%   { transform: translateY(6px) scale(1.12, 0.82) rotate(0); }
+  /* Rise — stretch tall while launching upward */
+  16%  { transform: translateY(-30px) scale(0.82, 1.28) rotate(0); }
+  30%  { transform: translateY(-78px) scale(1.45, 1.45) rotate(0); }
+  /* Peak hover — wobble side to side, excited */
+  36%  { transform: translateY(-80px) scale(1.45, 1.45) rotate(-3deg); }
+  42%  { transform: translateY(-82px) scale(1.45, 1.45) rotate(4deg); }
+  48%  { transform: translateY(-78px) scale(1.45, 1.45) rotate(-2deg); }
+  /* Plummet — stretch tall again, falling fast */
+  56%  { transform: translateY(-10px) scale(0.88, 1.22) rotate(0); }
+  /* SLAM — extreme squish, exaggerated wide-and-flat */
+  62%  { transform: translateY(12px) scale(1.35, 0.6) rotate(0); }
+  /* Bounce — small rebound */
+  70%  { transform: translateY(-18px) scale(0.92, 1.1) rotate(0); }
+  76%  { transform: translateY(2px) scale(1.06, 0.96) rotate(0); }
+  /* Shake — rotation + translation, decaying */
+  80%  { transform: translateY(0) rotate(-5deg) translateX(-7px) scale(1); }
+  85%  { transform: translateY(0) rotate(6deg) translateX(8px) scale(1); }
+  89%  { transform: translateY(0) rotate(-3deg) translateX(-4px) scale(1); }
+  93%  { transform: translateY(0) rotate(2deg) translateX(2px) scale(1); }
+  96%  { transform: translateY(0) rotate(0) translateX(0) scale(1); }
+  /* Hold — settle into the summoned pose */
+  100% { transform: translateY(-4px) scale(1.04) rotate(0); }
 }
 @keyframes other-books-flee {
-  0%, 35% { opacity: 1; filter: blur(0); }
-  /* Books fade ON the slam — the impact knocks them out of focus */
-  45%     { opacity: 0.6; filter: blur(0.5px); }
-  62%     { opacity: 0.12; filter: blur(2px); }
-  100%    { opacity: 0.12; filter: blur(2px); }
+  0%, 55%  { opacity: 1; filter: blur(0); transform: scale(1); }
+  /* On the slam the surrounding books recoil, shrink slightly, and
+     blur out — they're getting knocked back by the impact. */
+  62%      { opacity: 0.55; filter: blur(0.5px); transform: scale(0.97); }
+  78%      { opacity: 0.12; filter: blur(2px); transform: scale(0.95); }
+  100%     { opacity: 0.12; filter: blur(2px); transform: scale(0.95); }
 }
 .view-grid.is-summoning .gc:not(.is-summoned) {
-  animation: other-books-flee 1000ms ease both;
+  animation: other-books-flee 2000ms ease both;
   pointer-events: none;
 }
 .gc.is-summoned {
   position: relative;
   z-index: 5;
-  animation: book-summon 1000ms cubic-bezier(0.32, 0.72, 0.32, 1) both;
+  transform-origin: center bottom;
+  animation: book-summon 2000ms linear both;
   /* Disable content-visibility containment for the duration of the
      summon so the scaled-up book doesn't get clipped by the layout
      paint box. */
@@ -1231,9 +1238,9 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
 .gc.is-summoned .gc-cover {
   box-shadow:
     var(--shadow-cover),
-    0 24px 48px color-mix(in srgb, var(--brand) 38%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--brand) 30%, transparent);
-  transition: box-shadow 360ms ease 280ms;
+    0 28px 56px color-mix(in srgb, var(--brand) 42%, transparent),
+    0 0 0 1.5px color-mix(in srgb, var(--brand) 32%, transparent);
+  transition: box-shadow 480ms ease 600ms;
 }
 
 /* ===== READER ===== */
@@ -6277,7 +6284,7 @@ let totalSpreads = 1;        // computed after layout
 //   - the library is in bulk-select mode (taps toggle selection)
 //   - we can't find the card or grid for some reason (defensive)
 //   - a summon is already in flight (don't double-fire)
-const _SUMMON_DURATION_MS = 1000;
+const _SUMMON_DURATION_MS = 2000;
 let _summonInFlight = false;
 function summonAndOpen(ev, id) {
   if (ev) {
