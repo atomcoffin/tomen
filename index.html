@@ -2988,6 +2988,13 @@ async function deleteAllMarksForBook(bookId) {
   await ensureDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('marks', 'readwrite');
+    // Resolve on transaction commit, not cursor end — the per-row deletes
+    // are still pending when the cursor finishes. Without this guarantee
+    // the subsequent deleteBook content-delete (a separate transaction)
+    // can race; if the page reloads between them, orphan marks survive.
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
     const idx = tx.objectStore('marks').index('bookId');
     const req = idx.openKeyCursor(bookId);
     req.onsuccess = (e) => {
@@ -2995,11 +3002,8 @@ async function deleteAllMarksForBook(bookId) {
       if (cursor) {
         tx.objectStore('marks').delete(cursor.primaryKey);
         cursor.continue();
-      } else {
-        resolve();
       }
     };
-    req.onerror = () => reject(req.error);
   });
 }
 
@@ -4221,6 +4225,39 @@ function _matchesAnyClassHint(el, hints, opts = {}) {
 function normalizeChapterHtml(body) {
   const doc = body.ownerDocument;
 
+  // Step 0 — sanitize. EPUB content is third-party HTML; we set
+  // body.innerHTML downstream which does NOT execute <script>, but DOES
+  // fire <img onerror=...>, <svg onload=...>, <iframe src="javascript:">,
+  // etc. Strip every known execution vector before any downstream code
+  // touches the tree. Mirrors the allowlist in htmlFileToReaderHtml.
+  const DANGEROUS_TAGS = 'script,style,iframe,object,embed,link,meta,base';
+  body.querySelectorAll(DANGEROUS_TAGS).forEach(n => n.remove());
+  const sanWalker = doc.createTreeWalker(body, NodeFilter.SHOW_ELEMENT);
+  let sanNode;
+  while ((sanNode = sanWalker.nextNode())) {
+    for (const attr of Array.from(sanNode.attributes)) {
+      const name = attr.name.toLowerCase();
+      // Event-handler attributes (onclick, onerror, onload, ...). Even
+      // setting innerHTML triggers these on the resulting elements.
+      if (name.startsWith('on')) {
+        sanNode.removeAttribute(attr.name);
+        continue;
+      }
+      // Inline style can carry url(javascript:...) and other CSS-side
+      // injection vectors. Tomen restyles books from scratch anyway.
+      if (name === 'style') {
+        sanNode.removeAttribute(attr.name);
+        continue;
+      }
+      // javascript: URLs on every attribute that can navigate or fetch.
+      if (/^(href|src|xlink:href|action|formaction|poster)$/.test(name)) {
+        if (/^\s*javascript:/i.test(attr.value)) {
+          sanNode.removeAttribute(attr.name);
+        }
+      }
+    }
+  }
+
   // Step 1 — strip Kobo per-sentence spans (and similar reader-injected
   // spans). They carry no semantic value and clutter the DOM. Replace
   // each span with its text content / children.
@@ -4387,11 +4424,27 @@ async function loadEpub(file, batch = false) {
           const imgFile = zip.file(imgPath);
           if (imgFile) imageCache[imgPath] = await blobToDataURL(await imgFile.async('blob'));
         }
-        if (imageCache[imgPath]) img.setAttribute('src', imageCache[imgPath]);
+        if (imageCache[imgPath]) {
+          img.setAttribute('src', imageCache[imgPath]);
+        } else {
+          // Unresolved src — drop it. Otherwise an EPUB with a remote URL
+          // (intentional tracking pixel or accidental external embed) would
+          // load when the chapter renders, leaking the reader's IP/timing.
+          img.removeAttribute('src');
+          img.removeAttribute('xlink:href');
+        }
       }
       for (const si2 of body.querySelectorAll('svg image')) {
         const h2 = si2.getAttribute('xlink:href') || si2.getAttribute('href');
-        if (h2 && imageCache[resolveHref(rootDir, h2)]) si2.setAttribute('xlink:href', imageCache[resolveHref(rootDir, h2)]);
+        if (!h2) continue;
+        const resolved = imageCache[resolveHref(rootDir, h2)];
+        if (resolved) {
+          si2.setAttribute('xlink:href', resolved);
+        } else {
+          // Same rationale as the <img> case above.
+          si2.removeAttribute('xlink:href');
+          si2.removeAttribute('href');
+        }
       }
 
       // Normalize publisher-specific markup into semantic tags Tomen's CSS
@@ -5009,7 +5062,15 @@ function saveProgress() {
   const chapterPct = totalSpreads > 1 ? currentSpread / (totalSpreads - 1) : 1;
   currentBook.progress = ((currentChapterIndex + chapterPct) / chapters.length) * 100;
   const idx = library.findIndex(b => b.id === currentBook.id);
-  if (idx >= 0) library[idx] = currentBook;
+  // Sync only the progress-relevant fields onto the library row. Replacing
+  // the row with `currentBook` (the old behavior) would smuggle the full
+  // book (chapters + marks + content) into the in-memory meta-only array,
+  // bloating memory the longer the session lives.
+  if (idx >= 0) {
+    library[idx].chapterIndex = currentBook.chapterIndex;
+    library[idx].spreadIndex = currentBook.spreadIndex;
+    library[idx].progress = currentBook.progress;
+  }
   _saveProgressPending = true;
   if (_saveProgressTm) return;
   _saveProgressTm = setTimeout(flushSaveProgress, 1500);
@@ -6461,6 +6522,14 @@ function saveEditingMark(isBookmark) {
   // Compute global offsets into the flattened chapter text. This lets us
   // locate the mark reliably on re-render even if the DOM nodes differ.
   const { start, end } = rangeToChapterOffsets(inner, range);
+  // Defense in depth: even with the normalizer, exotic selections (empty
+  // ranges, ranges spanning the chapter root, etc.) can still produce an
+  // invalid offset pair. Refuse to save rather than write a -1 mark that
+  // can never be reopened.
+  if (start < 0 || end < 0 || end <= start) {
+    showErrorToast("Couldn't capture the selected text. Try selecting again.");
+    return;
+  }
   const text = sel.toString().replace(/\s+/g, ' ').trim();
   if (!text) return;
 
@@ -6498,17 +6567,52 @@ function saveEditingMark(isBookmark) {
   if (right) renderMarksForChapter(right, currentChapterIndex);
 }
 
+// Normalize a Range boundary point to a text-node boundary. Browser
+// selections routinely produce element-node endpoints (e.g., the user
+// drags exactly to a paragraph edge, or double-click word-select snaps
+// to a wrapper element). The downstream offset walker only matches on
+// text-node identity, so an element endpoint would silently produce -1
+// and corrupt the saved mark. This snaps the boundary to the nearest
+// real text-node position.
+function _normalizeBoundaryToText(container, offsetInChildren) {
+  if (container.nodeType === Node.TEXT_NODE) {
+    return { node: container, offset: offsetInChildren };
+  }
+  // Element node: offset is index into children, NOT character offset.
+  // If past the last child, return the end of the last text descendant.
+  if (offsetInChildren >= container.childNodes.length) {
+    const w = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+    let last = null, n;
+    while ((n = w.nextNode())) last = n;
+    return last ? { node: last, offset: last.data.length } : null;
+  }
+  // Otherwise, take the first text-node descendant of the child at offset.
+  const childAtOffset = container.childNodes[offsetInChildren];
+  if (childAtOffset.nodeType === Node.TEXT_NODE) {
+    return { node: childAtOffset, offset: 0 };
+  }
+  const w = document.createTreeWalker(childAtOffset, NodeFilter.SHOW_TEXT, null);
+  const firstText = w.nextNode();
+  return firstText ? { node: firstText, offset: 0 } : null;
+}
+
 // Convert a DOM Range inside `root` to {start, end} character offsets into the
-// flattened text of `root`. Walks text nodes in document order.
+// flattened text of `root`. Walks text nodes in document order. Element-node
+// endpoints are normalized to text-node positions first (see
+// _normalizeBoundaryToText) — without that, end/start silently became -1.
 function rangeToChapterOffsets(root, range) {
+  const sNorm = _normalizeBoundaryToText(range.startContainer, range.startOffset);
+  const eNorm = _normalizeBoundaryToText(range.endContainer, range.endOffset);
+  if (!sNorm || !eNorm) return { start: -1, end: -1 };
+
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
   let offset = 0;
   let start = -1, end = -1;
   let n;
   while ((n = walker.nextNode())) {
     const len = n.data.length;
-    if (n === range.startContainer) start = offset + range.startOffset;
-    if (n === range.endContainer)   end   = offset + range.endOffset;
+    if (n === sNorm.node) start = offset + sNorm.offset;
+    if (n === eNorm.node) end   = offset + eNorm.offset;
     offset += len;
     if (start >= 0 && end >= 0) break;
   }
