@@ -1465,6 +1465,27 @@ body.r-mode-editing .r-toolbar-bottom {
    that already appears on the progress bar and mark highlights. Hidden when
    reader UI is up since the toolbar already shows book title and the quick
    bars would sit on top anyway. */
+
+/* Centered guide ring — a faint outlined circle at viewport center,
+   80vh in diameter. Pure visual scaffold (pointer-events:none); the
+   user has plans for it, this is just the placeholder geometry. The
+   stroke uses --ink at low opacity so it inherits per-theme. Lives
+   above the page text but below toolbars and edge-ring page-turn
+   affordances. */
+.r-ring {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80vh;
+  height: 80vh;
+  max-width: 90vw;
+  max-height: 90vw;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--ink) 22%, transparent);
+  pointer-events: none;
+  z-index: 4;
+}
+
 .r-footer-ref {
   position: absolute;
   left: 0; right: 0;
@@ -3545,6 +3566,10 @@ body.lib-select-mode .col-item {
         </div>
       </div>
     </div>
+    <!-- Centered guide ring. Faint outlined circle sized at 80vh,
+         positioned at viewport center. Non-interactive — purely a
+         visual scaffold for future use. -->
+    <div class="r-ring" id="r-ring" aria-hidden="true"></div>
     <!-- Book + chapter reminder at bottom. -->
     <div class="r-footer-ref" id="r-footer-ref" aria-hidden="true"></div>
     <!-- Edge-anchored half-circle page-turn affordances. Each ring is
