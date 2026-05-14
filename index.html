@@ -1128,17 +1128,14 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
      --tilt-y per card in a rAF loop; see _TILT in script section. */
   perspective: 1400px;
 }
-/* content-visibility:auto defers rendering of offscreen cards entirely
-   — the browser skips paint, layout, and image decode for any .gc that
-   isn't in (or near) the viewport. contain-intrinsic-size reserves a
-   placeholder height for cards that haven't rendered yet (covers are
-   2:3 aspect, so the height is roughly 1.5x the column width — using
-   220px as a reasonable middle value for the current size range). */
+/* Note: content-visibility:auto used to live here for offscreen-card
+   render deferral, but its paint containment clipped the 3D edge
+   slabs (which extend outside the card's 2D bounds before rotation).
+   Lazy cover image loading via IntersectionObserver still keeps the
+   memory cost bounded for big libraries. */
 .gc {
   cursor: pointer;
   position: relative;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 220px;
   /* Live tilt driven by JS — angles default to 0 so cards render
      flat before the first mousemove. The rAF loop overwrites these
      each frame. Composed with the inner :hover translateY so both
@@ -10071,14 +10068,15 @@ function _tiltTick() {
       targetRy = 0;
       targetRx = 0;
     } else {
-      // atan2 of the screen-space offset against the perspective
-      // distance gives the exact angle for the card's front face to
-      // point straight at the cursor. rotateY positive turns the front
-      // face toward +X (so dx > 0 ⇒ +rotateY); rotateX positive turns
-      // the front face toward -Y (up in screen), so dy > 0 ⇒ -rotateX.
+      // atan2 against the perspective distance gives the exact angle
+      // for the card's normal to point at the cursor; we negate both
+      // axes so cards lean AWAY instead — every book turns its back on
+      // the cursor. This also reveals the per-side edge slabs facing
+      // the cursor (spine when cursor is right, fore-edge when left,
+      // head when below, foot when above).
       const RAD2DEG = 180 / Math.PI;
-      targetRy = RAD2DEG * Math.atan2(dx, _TILT.perspective);
-      targetRx = -RAD2DEG * Math.atan2(dy, _TILT.perspective);
+      targetRy = -RAD2DEG * Math.atan2(dx, _TILT.perspective);
+      targetRx =  RAD2DEG * Math.atan2(dy, _TILT.perspective);
     }
     let s = _TILT.states.get(card);
     if (!s) {
