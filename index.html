@@ -1121,10 +1121,16 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
   flex-direction: column;
   flex-wrap: wrap;
   align-content: flex-start;
-  /* 100vh (not 100%) — percentage heights inside flex:1 parents can
-     resolve to auto-sized values in some engines, leaving the grid
-     short of the viewport. vh is bulletproof. */
-  height: 100vh;
+  /* Pin the grid to .screen's full viewport so it isn't sized by
+     lib-body's flex calculation (which was leaving it short of the
+     viewport for reasons the engine wasn't keen to reveal). Left
+     offset gives the requested padding on the left; right:0 lets the
+     rightmost column run off the screen edge. */
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 28px;
+  right: 0;
   gap: 16px;
   overflow-x: auto;
   overflow-y: hidden;
