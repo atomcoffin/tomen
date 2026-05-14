@@ -5427,6 +5427,92 @@ function renderLibrary() {
   else renderGridView(body, sorted);
 }
 
+// ===== SMOOTH WHEEL SCROLL (library) =====
+// Windows mouse wheels scroll in coarse, stepped chunks. This intercepts
+// wheel events over the library and eases the scroll position toward a
+// target with a rAF loop, so a flick of the wheel glides instead of
+// jumping. Two axes depending on view:
+//   - columns / table view: lib-body scrolls vertically
+//   - grid view: the .view-grid scrolls horizontally — a pure vertical
+//     wheel delta is mapped onto scrollLeft (preserving the original
+//     handler's behavior, now smoothed for mouse wheels)
+// Trackpads already scroll smoothly pixel-by-pixel; re-animating their
+// input only adds lag, so they're detected and left to native handling
+// (in grid view their delta is still mapped to scrollLeft, just without
+// the easing). Touch scrolling never fires wheel events, so momentum
+// scrolling on touchscreens is untouched. Reduced-motion skips the ease.
+function _setupSmoothWheelScroll() {
+  const libBody = $('lib-body');
+  if (!libBody) return;
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Per-frame easing — each frame closes 20% of the remaining distance.
+  const EASE = 0.2;
+
+  // True only when we're confident the event came from a physical mouse
+  // wheel. deltaMode 1 (line scrolling) is mouse-wheel-only; in Chromium
+  // and WebKit, wheel notches also report a wheelDeltaY that's a multiple
+  // of 120. Trackpads satisfy neither. False negatives just mean "no
+  // smoothing" (no regression); false positives would make a trackpad
+  // feel laggy, so the test is deliberately strict.
+  const isMouseWheel = (e) =>
+    e.deltaMode === 1 || (!!e.wheelDeltaY && e.wheelDeltaY % 120 === 0);
+
+  let scroller = null, axis = 'y', target = 0, rafId = null;
+
+  const tick = () => {
+    rafId = null;
+    if (!scroller || !scroller.isConnected) { scroller = null; return; }
+    const prop = axis === 'x' ? 'scrollLeft' : 'scrollTop';
+    const diff = target - scroller[prop];
+    if (Math.abs(diff) < 0.5) { scroller[prop] = target; scroller = null; return; }
+    scroller[prop] += diff * EASE;
+    rafId = requestAnimationFrame(tick);
+  };
+
+  const animate = (el, ax, delta, max) => {
+    const prop = ax === 'x' ? 'scrollLeft' : 'scrollTop';
+    // Resync the target whenever the element or axis changes, or when no
+    // animation is in flight — otherwise we'd ease from a stale target.
+    if (el !== scroller || ax !== axis) { scroller = el; axis = ax; target = el[prop]; }
+    target = Math.max(0, Math.min(target + delta, max));
+    if (!rafId) rafId = requestAnimationFrame(tick);
+  };
+
+  libBody.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) return; // pinch-zoom gesture — leave it to the browser
+
+    const grid = (currentView === 'grid') ? libBody.querySelector('.view-grid') : null;
+    if (grid && grid.contains(e.target)) {
+      // Grid view scrolls horizontally, driven by a pure vertical wheel
+      // delta. Anything carrying deltaX (trackpad horizontal/diagonal
+      // swipes) passes through to native scrolling.
+      if (e.deltaY === 0 || e.deltaX !== 0) return;
+      const max = grid.scrollWidth - grid.clientWidth;
+      if (max <= 0) return;
+      e.preventDefault();
+      const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      if (reduceMotion || !isMouseWheel(e)) {
+        grid.scrollLeft = Math.max(0, Math.min(grid.scrollLeft + delta, max));
+        if (scroller === grid) target = grid.scrollLeft;
+      } else {
+        animate(grid, 'x', delta, max);
+      }
+      return;
+    }
+
+    // Columns / table view — lib-body scrolls vertically. Trackpads
+    // already scroll smoothly, so only mouse wheels are intercepted;
+    // everything else falls through to native scrolling.
+    if (e.deltaY === 0) return;
+    if (reduceMotion || !isMouseWheel(e)) return;
+    const max = libBody.scrollHeight - libBody.clientHeight;
+    if (max <= 0) return;
+    e.preventDefault();
+    const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    animate(libBody, 'y', delta, max);
+  }, { passive: false });
+}
+
 // Columns view — compact title-scan, multi-column layout. No covers,
 // no authors prominent — just titles big enough to skim. A hairline
 // progress underline under each title shows reading state at a
@@ -10239,18 +10325,10 @@ function renderGreeting() {
   const initialRows = (savedLibSize >= 1 && savedLibSize <= 6) ? savedLibSize : 3;
   setLibrarySize(initialRows);
 
-  // Vertical scroll wheel → horizontal grid scroll. Trackpad two-finger
-  // horizontal swipes (which carry deltaX) pass through naturally.
-  const libBody = $('lib-body');
-  if (libBody) {
-    libBody.addEventListener('wheel', (e) => {
-      const grid = libBody.querySelector('.view-grid');
-      if (!grid || !grid.contains(e.target)) return;
-      if (e.deltaY === 0 || e.deltaX !== 0) return;
-      e.preventDefault();
-      grid.scrollLeft += e.deltaY;
-    }, { passive: false });
-  }
+  // Smooth wheel scrolling for the library — eases mouse-wheel input on
+  // both the vertical (columns/table) and horizontal (grid) axes. See
+  // _setupSmoothWheelScroll for the trackpad/touch/reduced-motion notes.
+  _setupSmoothWheelScroll();
 
   // Recompute card width on viewport resize — `rows` is fixed but the
   // available height changes, so we re-derive the per-card size. Debounced
