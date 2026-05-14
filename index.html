@@ -969,9 +969,12 @@ html, body {
 }
 
 /* Library body */
-/* Top padding reserves room for the absolutely-positioned lib-header
-   so the first row of books isn't hidden under it on initial render. */
-.lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 76px var(--lib-edge-pad) var(--lib-edge-pad); min-height: 0; }
+/* Top padding reserves room for the absolutely-positioned lib-header so
+   the first row of books isn't hidden under it. --grid-padding-top is the
+   header's JS-measured height (set by setLibrarySize) — shared with
+   .view-grid so columns/table and grid views start at the same y, and it
+   adapts when the header wraps to two rows on phones. */
+.lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: var(--grid-padding-top, 76px) var(--lib-edge-pad) var(--lib-edge-pad); min-height: 0; }
 /* Brand-tinted scrollbar — var(--brand) follows the active theme, so each
    theme gets a scrollbar in its own accent. Used by the columns + table
    views (the grid's horizontal bar is styled on .view-grid below). */
@@ -1373,11 +1376,12 @@ html, body {
 
 /* Book-open transition. On grid-card click the orchestrator (see
    summonAndOpen) marks the grid with .is-opening and the clicked
-   card with .is-opening-target. The other cards animate to opacity 0
-   with a touch of blur for atmosphere; the target stays in place,
-   nudged up slightly for a soft pop. After the fade settles the
-   reader screen activates with .is-just-opened, which cross-fades
-   the reader pages in. */
+   card with .is-opening-target. The other cards fade to opacity 0; the
+   target stays in place, nudged up slightly for a soft pop. After the
+   fade settles the reader screen activates with .is-just-opened, which
+   cross-fades the reader pages in. (The fade is opacity-only — an
+   earlier blur() pass animated the filter on every card at once and
+   dropped frames; opacity composites cheaply.) */
 .view-grid.is-opening .gc {
   pointer-events: none;
 }
@@ -1390,9 +1394,9 @@ html, body {
   animation: book-target-pop 1150ms cubic-bezier(0.4, 0, 0.4, 1) both;
 }
 @keyframes book-others-fade {
-  0%   { opacity: 1; filter: blur(0); }
-  60%  { opacity: 0.25; filter: blur(2px); }
-  100% { opacity: 0; filter: blur(3px); }
+  0%   { opacity: 1; }
+  60%  { opacity: 0.25; }
+  100% { opacity: 0; }
 }
 @keyframes book-target-pop {
   0%   { transform: translateY(0) scale(1); }
@@ -3549,14 +3553,11 @@ body.lib-select-mode .col-item {
     margin-right: 0;
     margin-top: 4px;
   }
-  /* On phones the header wraps to two rows (search drops below the
-     brand+toolbar), so the body needs extra top padding to stay clear. */
-  .lib-body { padding: 100px var(--lib-edge-pad) var(--lib-edge-pad); }
-  /* Smaller default minimum on phone, but still honoring the user's
-     slider override if they've set one. clamp() floors at 110px so a
-     desktop-bucket value pushed to 100 doesn't crush phone cards. */
+  /* Tighter row gap on phones — setLibrarySize reads this value live so
+     the row math (and therefore the 2:3 card sizing) stays correct. The
+     card width/height themselves come straight from the JS-set vars on
+     .gc, so the aspect ratio holds at every viewport. */
   .view-grid { gap: 12px; }
-  .gc { width: clamp(110px, var(--grid-card-min-width, 110px), 200px); }
   .tr-title { font-size: 16px; }
   .col-title { font-size: 15px; }
   .icon-btn { width: 32px; height: 32px; }
@@ -3569,11 +3570,6 @@ body.lib-select-mode .col-item {
   :root { --lib-edge-pad: 20px; }
   .lib-header { padding: 14px var(--lib-edge-pad); }
   .lib-search { flex-basis: 180px; margin-left: 12px; }
-}
-@media (min-width: 769px) {
-  /* Desktop minimum defers to the user's slider value (set on the
-     html element) or falls back to 150px when no preference saved. */
-  .gc { width: var(--grid-card-min-width, 150px); }
 }
 
 /* Mobile reader — single-page mode hides the right slot so the left slot
@@ -5352,6 +5348,19 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-view="grid"]')) return;
   el.classList.remove('open');
 });
+// Scrolling the grid also closes the popup — once you start browsing the
+// shelf you're done sizing. scroll doesn't bubble, so listen in capture;
+// only the grid's own scroll counts (the popup is grid-view-only anyway).
+document.addEventListener('scroll', e => {
+  if (!e.target.classList || !e.target.classList.contains('view-grid')) return;
+  const el = $('lib-size');
+  if (!el || !el.classList.contains('open')) return;
+  // Don't close while the user is actively working the slider — dragging
+  // it reflows the grid and can clamp scrollLeft, firing a scroll we'd
+  // otherwise misread as the user scrolling the shelf.
+  if (document.activeElement && el.contains(document.activeElement)) return;
+  el.classList.remove('open');
+}, true);
 
 // Live card-size adjustment in grid view. Writes a CSS custom property
 // the grid's sizing math reads, so cards reflow as soon as the user moves
@@ -5378,19 +5387,25 @@ function setLibrarySize(value) {
   // Before the first render, fall back to a viewport estimate (the grid
   // fills .screen): header height + bottom edge padding + a scrollbar nudge.
   const grid = document.querySelector('.view-grid');
-  let usable;
+  let usable, gap;
   if (grid && grid.clientHeight) {
     const cs = getComputedStyle(grid);
     usable = grid.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    // Read the real row gap — it's smaller on phones (.view-grid media
+    // query), and a stale constant here would mis-size every row.
+    gap = parseFloat(cs.rowGap) || 16;
   } else {
     const edgePad = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--lib-edge-pad'), 10) || 24;
     usable = window.innerHeight - headerH - edgePad - 8;
+    gap = 16;
   }
-  const gap = 16; // matches .view-grid `gap`
   // Floor the row height so rows*cardHeight + (rows-1)*gap stays at or
-  // below `usable` — subpixel overflow was the phantom-row culprit.
-  const cardHeight = Math.floor((usable - (rows - 1) * gap) / rows);
-  const cardWidth = Math.max(60, Math.floor(cardHeight * (2 / 3)));
+  // below `usable` — subpixel overflow was the phantom-row culprit. Width
+  // is derived straight from height at the fixed 2:3 cover aspect; neither
+  // dimension is clamped independently (that would skew the ratio), so the
+  // card stays 2:3 at every viewport size.
+  const cardHeight = Math.max(40, Math.floor((usable - (rows - 1) * gap) / rows));
+  const cardWidth = Math.round(cardHeight * 2 / 3);
   document.documentElement.style.setProperty('--grid-card-min-width', cardWidth + 'px');
   document.documentElement.style.setProperty('--grid-card-height', cardHeight + 'px');
   const slider = $('sl-libsize');
