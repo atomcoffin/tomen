@@ -5582,15 +5582,32 @@ function _setupSmoothWheelScroll() {
   const isMouseWheel = (e) =>
     e.deltaMode === 1 || (!!e.wheelDeltaY && e.wheelDeltaY % 120 === 0);
 
-  let scroller = null, axis = 'y', target = 0, rafId = null;
+  // lastSet tracks the scroll offset this loop last wrote, so tick() can
+  // tell when something else (a finger swipe, native momentum, a scrollbar
+  // drag) has moved the scroll out from under it. -1 = "not tracking yet".
+  let scroller = null, axis = 'y', target = 0, rafId = null, lastSet = -1;
+
+  // Drop any in-flight wheel glide — called when another input takes over
+  // or when the animation settles.
+  const cancel = () => {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    scroller = null;
+    lastSet = -1;
+  };
 
   const tick = () => {
     rafId = null;
-    if (!scroller || !scroller.isConnected) { scroller = null; return; }
+    if (!scroller || !scroller.isConnected) { cancel(); return; }
     const prop = axis === 'x' ? 'scrollLeft' : 'scrollTop';
-    const diff = target - scroller[prop];
-    if (Math.abs(diff) < 0.5) { scroller[prop] = target; scroller = null; return; }
-    scroller[prop] += diff * EASE;
+    const current = scroller[prop];
+    // If the scroll jumped somewhere we didn't put it, the user has taken
+    // over by touch / trackpad / scrollbar — abandon rather than fight.
+    // The fight is exactly what reads as the books "shaking" in place.
+    if (lastSet >= 0 && Math.abs(current - lastSet) > 1) { cancel(); return; }
+    const diff = target - current;
+    if (Math.abs(diff) < 0.5) { scroller[prop] = target; cancel(); return; }
+    scroller[prop] = current + diff * EASE;
+    lastSet = scroller[prop];
     rafId = requestAnimationFrame(tick);
   };
 
@@ -5598,7 +5615,8 @@ function _setupSmoothWheelScroll() {
     const prop = ax === 'x' ? 'scrollLeft' : 'scrollTop';
     // Resync the target whenever the element or axis changes, or when no
     // animation is in flight — otherwise we'd ease from a stale target.
-    if (el !== scroller || ax !== axis) { scroller = el; axis = ax; target = el[prop]; }
+    // Reset lastSet too so the first frame isn't misread as a takeover.
+    if (el !== scroller || ax !== axis) { scroller = el; axis = ax; target = el[prop]; lastSet = -1; }
     target = Math.max(0, Math.min(target + delta, max));
     if (!rafId) rafId = requestAnimationFrame(tick);
   };
@@ -5617,8 +5635,10 @@ function _setupSmoothWheelScroll() {
       e.preventDefault();
       const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
       if (reduceMotion || !isMouseWheel(e)) {
+        // Trackpad / reduced-motion: map straight onto scrollLeft. Drop any
+        // in-flight wheel glide first so it doesn't fight this direct write.
+        cancel();
         grid.scrollLeft = Math.max(0, Math.min(grid.scrollLeft + delta, max));
-        if (scroller === grid) target = grid.scrollLeft;
       } else {
         animate(grid, 'x', delta, max);
       }
@@ -5636,6 +5656,11 @@ function _setupSmoothWheelScroll() {
     const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
     animate(libBody, 'y', delta, max);
   }, { passive: false });
+
+  // A finger going down means the user is about to scroll by touch —
+  // cancel any in-flight wheel glide immediately so the two never fight
+  // over scrollLeft.
+  libBody.addEventListener('touchstart', cancel, { passive: true });
 }
 
 // ===== GRID SCROLL TILT =====
