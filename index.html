@@ -415,13 +415,6 @@ body.brutalist .lib-brand,
 body.brutalist .r-title {
   font-family: var(--font-read-mono);
 }
-/* Flat white toolbar + frame rails, no borders — matches the
-   no-decoration philosophy. */
-body.brutalist .r-toolbar,
-body.brutalist .r-toolbar-side {
-  background: #FFFFFF;
-}
-
 /* Horror — near-black page with a flashlight that follows the cursor.
    The world is dim and barely legible by default; the spotlight reveals
    a circle of warm light around wherever the reader is looking. Built
@@ -1337,14 +1330,28 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
 }
 
 /* ===== READER ===== */
-/* Frame geometry shared by the reader chrome. --r-bar-h is the nominal
-   top/bottom bar height (hand-synced with the padding + icon-btn math in
-   .r-toolbar-top/-bottom and the mobile overrides). The side rails are half
-   that wide; --r-frame-radius rounds the four interior corners so the page
-   reads as a card tucked behind the frame. */
+/* Frame variables shared by the reader chrome (toolbars, side rails, corner
+   patches). --r-bar-h is the nominal top/bottom bar height (hand-synced with
+   the padding + icon-btn math in .r-toolbar-top/-bottom and the mobile
+   overrides); the side rails are half that wide. --r-frame-radius rounds the
+   four interior corners so the page reads as a card tucked behind the frame.
+   --r-frame-bg is the brand wash every frame piece paints with — a 50/50
+   paper/brand mix so the frame reads as an unmistakable branded surface. */
 #screen-reader {
   --r-bar-h: 52px;
   --r-frame-radius: 16px;
+  --r-frame-bg: color-mix(in srgb, var(--paper) 50%, var(--brand) 50%);
+}
+/* Dark themes: a 50% brand mix on near-black paper muddies into olive, so
+   they carry a much quieter wash. */
+body.dark #screen-reader,
+body.inkwell #screen-reader,
+body.crt #screen-reader {
+  --r-frame-bg: color-mix(in srgb, var(--paper) 88%, var(--brand) 12%);
+}
+/* Brutalist: flat white, no brand tint — matches the no-decoration look. */
+body.brutalist #screen-reader {
+  --r-frame-bg: #FFFFFF;
 }
 .r-progress {
   position: fixed;
@@ -1370,13 +1377,9 @@ body.r-ui-visible .r-progress {
   position: absolute;
   left: 0; right: 0;
   z-index: 10;
-  /* Bold brand wash — a 50/50 mix of paper and the theme's brand color so
-     the bar reads as an unmistakable branded surface, not a subtle tint.
-     Dark themes override this below: a 50% brand mix on near-black paper
-     muddies into olive, so they keep a quiet bg and instead express the
-     same intensity through a thicker, fully saturated brand stripe at
-     the page-facing edge. */
-  background: color-mix(in srgb, var(--paper) 50%, var(--brand) 50%);
+  /* Brand wash shared by all four frame pieces — see --r-frame-bg on
+     #screen-reader, where the dark and brutalist themes override the tone. */
+  background: var(--r-frame-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   transition: opacity 180ms ease, transform 220ms var(--ease);
@@ -1389,17 +1392,6 @@ body.r-ui-visible .r-progress {
 .r-toolbar-bottom {
   bottom: 0;
   padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px)) 0;
-}
-/* Dark-theme toolbar treatment — bg stays close to paper (a 50% brand
-   mix on near-black bases produces muddy olive), so dark themes carry a
-   quieter brand wash than the light themes. */
-body.dark .r-toolbar,
-body.inkwell .r-toolbar,
-body.crt .r-toolbar,
-body.dark .r-toolbar-side,
-body.inkwell .r-toolbar-side,
-body.crt .r-toolbar-side {
-  background: color-mix(in srgb, var(--paper) 88%, var(--brand) 12%);
 }
 /* Icon contrast inside the now-loud bar. Default icon color was --stone
    (warm grey) which gets lost against a brand-heavy bg — bump to --ink
@@ -1456,7 +1448,7 @@ body.crt .r-toolbar .icon-btn.active {
   top: 0; bottom: 0;
   width: calc(var(--r-bar-h) / 2);
   z-index: 9;
-  background: color-mix(in srgb, var(--paper) 50%, var(--brand) 50%);
+  background: var(--r-frame-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   pointer-events: none;
@@ -1470,14 +1462,15 @@ body.r-ui-visible .r-toolbar-side {
   transform: translateX(0);
 }
 
-/* Interior rounded corners of the frame. Each toolbar carries two
-   quarter-disc pseudo-elements that bulge into the page area at the inner
-   corners — frame-colored, so they bite a convex round corner out of the
-   book content and the page reads as a rounded card. background/backdrop
-   inherit the toolbar's brand wash so every theme is covered automatically.
-   Anchored off the toolbar's own edge (top/bottom: 100%) so they stay glued
-   to the bar regardless of safe-area padding, and inset horizontally by the
-   side-rail width so they meet the rails' inner edge. */
+/* Interior rounded corners of the frame. Each toolbar carries two small
+   pseudo-elements that fill the inner corners where a bar meets a side rail.
+   Each is painted with a radial-gradient that's transparent within
+   --r-frame-radius of the corner pointing into the page and frame-colored
+   beyond — so the gradient bites a CONCAVE curve, leaving the book content
+   with a convex rounded corner (the page reads as a rounded card behind the
+   frame). Anchored off the toolbar's own edge (top/bottom: 100%) so they
+   stay glued to the bar regardless of safe-area padding, and inset
+   horizontally by the side-rail width so they meet the rails' inner edge. */
 .r-toolbar-top::before,
 .r-toolbar-top::after,
 .r-toolbar-bottom::before,
@@ -1486,30 +1479,35 @@ body.r-ui-visible .r-toolbar-side {
   position: absolute;
   width: var(--r-frame-radius);
   height: var(--r-frame-radius);
-  background: inherit;
-  backdrop-filter: inherit;
-  -webkit-backdrop-filter: inherit;
   pointer-events: none;
 }
 .r-toolbar-top::before {
   top: 100%;
   left: calc(var(--r-bar-h) / 2);
-  border-bottom-right-radius: var(--r-frame-radius);
+  background: radial-gradient(circle at bottom right,
+    transparent var(--r-frame-radius),
+    var(--r-frame-bg) calc(var(--r-frame-radius) + 0.5px));
 }
 .r-toolbar-top::after {
   top: 100%;
   right: calc(var(--r-bar-h) / 2);
-  border-bottom-left-radius: var(--r-frame-radius);
+  background: radial-gradient(circle at bottom left,
+    transparent var(--r-frame-radius),
+    var(--r-frame-bg) calc(var(--r-frame-radius) + 0.5px));
 }
 .r-toolbar-bottom::before {
   bottom: 100%;
   left: calc(var(--r-bar-h) / 2);
-  border-top-right-radius: var(--r-frame-radius);
+  background: radial-gradient(circle at top right,
+    transparent var(--r-frame-radius),
+    var(--r-frame-bg) calc(var(--r-frame-radius) + 0.5px));
 }
 .r-toolbar-bottom::after {
   bottom: 100%;
   right: calc(var(--r-bar-h) / 2);
-  border-top-left-radius: var(--r-frame-radius);
+  background: radial-gradient(circle at top left,
+    transparent var(--r-frame-radius),
+    var(--r-frame-bg) calc(var(--r-frame-radius) + 0.5px));
 }
 
 /* Toolbar mode swap. Reading toolbars shown by default; editing toolbar
