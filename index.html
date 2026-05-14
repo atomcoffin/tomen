@@ -507,6 +507,12 @@ html, body {
 .screen.active { display: flex; }
 
 /* ===== LIBRARY ===== */
+/* Shared horizontal "edge" padding for the library nav, tag strip, and all
+   three views, so their left/right (and the views' bottom) edges line up
+   exactly. Steps down on narrower viewports; the media queries below
+   override it and everything that references it follows. */
+:root { --lib-edge-pad: 24px; }
+
 /* Header overlays the library body — content scrolls under it rather
    than pushing it down. Transparent so the page bg shows behind the
    toolbar; the lib-body's padding-top reserves space for the initial
@@ -515,7 +521,7 @@ html, body {
   position: absolute;
   top: 0; left: 0; right: 0;
   z-index: 10;
-  padding: 16px 24px;
+  padding: 16px var(--lib-edge-pad);
   display: flex; align-items: center; gap: 12px;
   background: transparent;
   pointer-events: none;
@@ -555,7 +561,9 @@ html, body {
 }
 .lib-search-input {
   width: 100%;
-  padding: 7px 28px 7px 28px;
+  /* Right padding clears both the clear-X (at right: 28px) and the
+     trailing "add books" + button (at right: 4px). */
+  padding: 7px 52px 7px 28px;
   border: none;
   border-bottom: 0.5px solid var(--border);
   background: transparent;
@@ -570,7 +578,7 @@ html, body {
 .lib-search-input:focus { border-bottom-color: var(--brand-ink); }
 .lib-search:focus-within .lib-search-icon { color: var(--brand-ink); }
 .lib-search-clear {
-  position: absolute; right: 4px; top: 50%;
+  position: absolute; right: 28px; top: 50%;
   transform: translateY(-50%);
   width: 20px; height: 20px;
   border: none; background: transparent;
@@ -588,12 +596,38 @@ html, body {
 }
 .lib-search.has-value .lib-search-clear { display: flex; }
 
+/* "Add books" + button — pinned to the trailing end of the search bar.
+   .import-wrap is absolutely positioned here (it stays the containing
+   block for its own .import-menu dropdown). */
+.lib-search .import-wrap {
+  position: absolute;
+  right: 4px; top: 50%;
+  transform: translateY(-50%);
+}
+.lib-search-add {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent;
+  color: var(--stone);
+  cursor: pointer;
+  border-radius: 3px;
+  line-height: 1;
+  transition: color 140ms ease, background 140ms ease;
+}
+.lib-search-add:hover {
+  color: var(--brand-ink);
+  background: var(--linen);
+}
+.lib-search-add .ph { font-size: 16px; line-height: 1; }
+
 .lib-toolbar { display: flex; align-items: center; gap: 6px; }
 
 /* Import dropdown */
 .import-wrap { position: relative; }
+/* Anchored to the button's right edge so it drops down-left from the
+   "add books" + at the trailing end of the search bar, staying on-screen. */
 .import-menu {
-  position: absolute; top: 100%; left: 0; margin-top: 4px;
+  position: absolute; top: 100%; right: 0; left: auto; margin-top: 4px;
   background: var(--card); border: 0.5px solid var(--border);
   border-radius: var(--radius-sm); box-shadow: var(--shadow-float);
   padding: 4px; z-index: 100; display: none; min-width: 140px;
@@ -870,21 +904,34 @@ html, body {
 .icon-btn.active { color: var(--brand-ink); }
 
 /* View switcher */
+/* Wrapper is the positioning context for the floating .lib-size popup. */
+.view-switch-wrap { position: relative; display: flex; }
 .view-switch { display: flex; gap: 2px; background: var(--linen); border-radius: 6px; padding: 2px; }
 .view-switch .icon-btn { width: 32px; height: 32px; border-radius: 4px; }
 .view-switch .icon-btn.active { background: var(--card); }
 
-/* Library card-size slider — shown only when the user is in grid
-   view. Small icons frame the track for visual scale; the slider
-   drives a CSS custom property that the grid uses for its
-   minmax(...) so cards resize live. */
+/* Library card-size slider — a floating popup that hangs off the view
+   switcher. Opened by clicking the grid view icon (onGridViewClick);
+   closed by clicking the grid icon again, clicking outside, or switching
+   to another view. Floating rather than inline so it doesn't eat toolbar
+   space, especially on mobile. Small icons frame the track for visual
+   scale; the slider drives a CSS custom property the grid's sizing math
+   reads, so cards resize live. */
 .lib-size {
   display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
   align-items: center;
   gap: 8px;
-  padding: 0 6px;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-float);
 }
-body[data-lib-view="grid"] .lib-size { display: inline-flex; }
+.lib-size.open { display: flex; }
 .lib-size .ph {
   font-size: 12px;
   color: var(--stone);
@@ -922,9 +969,14 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
 /* Library body */
 /* Top padding reserves room for the absolutely-positioned lib-header
    so the first row of books isn't hidden under it on initial render. */
-.lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 76px 28px 28px; min-height: 0; }
-.lib-body::-webkit-scrollbar { width: 4px; }
-.lib-body::-webkit-scrollbar-thumb { background: var(--fog); border-radius: 2px; opacity: 0.3; }
+.lib-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 76px var(--lib-edge-pad) var(--lib-edge-pad); min-height: 0; }
+/* Brand-tinted scrollbar — var(--brand) follows the active theme, so each
+   theme gets a scrollbar in its own accent. Used by the columns + table
+   views (the grid's horizontal bar is styled on .view-grid below). */
+.lib-body { scrollbar-width: thin; scrollbar-color: var(--brand) transparent; }
+.lib-body::-webkit-scrollbar { width: 6px; }
+.lib-body::-webkit-scrollbar-track { background: transparent; }
+.lib-body::-webkit-scrollbar-thumb { background: var(--brand); border-radius: 3px; }
 
 /* Empty */
 .empty-lib {
@@ -1117,27 +1169,29 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
      offsets) carries the breathing room: the top padding is set by JS
      to match the nav bar's actual rendered height (so books stop at
      the header's bottom edge rather than bleeding underneath), and
-     28px on the other three sides for left, bottom, and trailing
-     right after the last column. */
+     --lib-edge-pad on the other three sides so the grid lines up with
+     the nav and the other views. */
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
   right: 0;
-  padding: var(--grid-padding-top, 76px) 28px 28px 28px;
+  padding: var(--grid-padding-top, 76px) var(--lib-edge-pad) var(--lib-edge-pad);
   gap: 16px;
   overflow-x: auto;
   overflow-y: hidden;
-  /* Scrollbar hidden across engines; scrolling itself still works
-     via wheel handler (in init) and trackpad/touch swipe. */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  /* Thin brand-tinted horizontal scrollbar that rides the bottom edge of
+     the viewport. var(--brand) follows the active theme. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--brand) transparent;
   /* Perspective kept so the 3D edge slabs on each .gc-cover render
      with depth if/when any rotation is reintroduced. No-op visually
      while .gc has no rotateX/Y. */
   perspective: 1400px;
 }
-.view-grid::-webkit-scrollbar { display: none; }
+.view-grid::-webkit-scrollbar { height: 6px; }
+.view-grid::-webkit-scrollbar-track { background: transparent; }
+.view-grid::-webkit-scrollbar-thumb { background: var(--brand); border-radius: 3px; }
 /* In grid view the lib-body's padding is zeroed via JS in setView()
    so books bleed from edge to edge of the viewport — both vertically
    (full height under the transparent overlay header) and horizontally
@@ -3204,8 +3258,9 @@ body.lib-select-mode .col-item {
   flex-wrap: nowrap;
   overflow-x: auto;
   gap: 8px;
-  padding: 4px 24px 12px;
+  padding: 4px var(--lib-edge-pad) 12px;
   scrollbar-width: thin;
+  scrollbar-color: var(--brand) transparent;
 }
 .lib-tag-strip[hidden] { display: none; }
 .lib-tag-chip {
@@ -3477,10 +3532,13 @@ body.lib-select-mode .col-item {
 
 /* Responsive */
 @media (max-width: 480px) {
+  /* Tighter edge padding on phones — nav, tag strip and all three views
+     follow this through --lib-edge-pad. */
+  :root { --lib-edge-pad: 12px; }
   /* On phones, let the search drop to its own row under the header so the
      toolbar icons don't compress into unusable tap targets. Flex-wrap on
      lib-header with full-width search + order:10 moves it below. */
-  .lib-header { padding: 12px 12px; gap: 8px; flex-wrap: wrap; }
+  .lib-header { padding: 12px var(--lib-edge-pad); gap: 8px; flex-wrap: wrap; }
   .lib-brand { font-size: 16px; }
   .lib-search {
     order: 10;
@@ -3491,7 +3549,7 @@ body.lib-select-mode .col-item {
   }
   /* On phones the header wraps to two rows (search drops below the
      brand+toolbar), so the body needs extra top padding to stay clear. */
-  .lib-body { padding: 100px 12px 12px; }
+  .lib-body { padding: 100px var(--lib-edge-pad) var(--lib-edge-pad); }
   /* Smaller default minimum on phone, but still honoring the user's
      slider override if they've set one. clamp() floors at 110px so a
      desktop-bucket value pushed to 100 doesn't crush phone cards. */
@@ -3504,10 +3562,10 @@ body.lib-select-mode .col-item {
   .icon-btn .ph { font-size: 18px; }
   .view-switch .icon-btn { width: 28px; height: 28px; }
   .sort-select { padding: 6px 24px 6px 8px; font-size: 11px; }
-  .import-menu { left: auto; right: 0; }
 }
 @media (min-width: 481px) and (max-width: 768px) {
-  .lib-header { padding: 14px 20px; }
+  :root { --lib-edge-pad: 20px; }
+  .lib-header { padding: 14px var(--lib-edge-pad); }
   .lib-search { flex-basis: 180px; margin-left: 12px; }
 }
 @media (min-width: 769px) {
@@ -3605,42 +3663,11 @@ body.lib-select-mode .col-item {
         tabindex="-1">
         <i class="ph ph-x"></i>
       </button>
-    </div>
-    <div class="lib-toolbar">
-      <!-- Grid card-size slider (visible only when grid view is active)
-           sits to the LEFT of the view switcher so the size control
-           reads as a property of the view choice it modifies. -->
-      <div class="lib-size" aria-label="Grid card size">
-        <i class="ph ph-square" aria-hidden="true"></i>
-        <input type="range" min="1" max="6" step="1" value="3" id="sl-libsize" oninput="setLibrarySize(this.value)" title="Visible rows">
-        <i class="ph ph-square is-large" aria-hidden="true"></i>
-      </div>
-      <!-- View switcher: Grid (default) → Columns → Table. Grid leads
-           because it's the most-used and the new-user default. -->
-      <div class="view-switch" id="view-switch" role="radiogroup" aria-label="Library view">
-        <button class="icon-btn active" data-view="grid" onclick="setView('grid')" title="Grid — browse covers" aria-label="Grid view" role="radio" aria-checked="true">
-          <i class="ph ph-squares-four"></i>
-        </button>
-        <button class="icon-btn" data-view="columns" onclick="setView('columns')" title="Columns — scan titles fast" aria-label="Columns view" role="radio" aria-checked="false">
-          <i class="ph ph-text-columns"></i>
-        </button>
-        <button class="icon-btn" data-view="table" onclick="setView('table')" title="Table — full details" aria-label="Table view" role="radio" aria-checked="false">
-          <i class="ph ph-rows"></i>
-        </button>
-      </div>
-      <select class="sort-select" id="sort-select" onchange="setSort(this.value)">
-        <option value="title">A — Z</option>
-        <option value="title-desc">Z — A</option>
-        <option value="author">Author</option>
-        <option value="recent">Recent</option>
-        <option value="progress">Progress</option>
-      </select>
-      <!-- Import sits next to Profile on the right edge — both are
-           account/library-management actions, conceptually distinct
-           from the view/sort controls in the middle. -->
+      <!-- "Add books" — a plus at the trailing end of the search bar.
+           Opens the import menu (Add books / Add folder). -->
       <div class="import-wrap">
-        <button class="icon-btn" onclick="toggleImportMenu()" title="Import books" aria-label="Import books">
-          <i class="ph ph-upload-simple"></i>
+        <button class="lib-search-add" onclick="toggleImportMenu()" title="Add books" aria-label="Add books">
+          <i class="ph ph-plus"></i>
         </button>
         <div class="import-menu" id="import-menu">
           <button class="import-option" onclick="document.getElementById('file-input').click(); closeImportMenu()">
@@ -3653,6 +3680,39 @@ body.lib-select-mode .col-item {
           </button>
         </div>
       </div>
+    </div>
+    <div class="lib-toolbar">
+      <!-- View switcher: Grid (default) → Columns → Table. Grid leads
+           because it's the most-used and the new-user default. The grid
+           card-size slider hangs off this wrapper as a floating popup. -->
+      <div class="view-switch-wrap">
+        <div class="view-switch" id="view-switch" role="radiogroup" aria-label="Library view">
+          <button class="icon-btn active" data-view="grid" onclick="onGridViewClick()" title="Grid — browse covers" aria-label="Grid view" role="radio" aria-checked="true">
+            <i class="ph ph-squares-four"></i>
+          </button>
+          <button class="icon-btn" data-view="columns" onclick="setView('columns')" title="Columns — scan titles fast" aria-label="Columns view" role="radio" aria-checked="false">
+            <i class="ph ph-text-columns"></i>
+          </button>
+          <button class="icon-btn" data-view="table" onclick="setView('table')" title="Table — full details" aria-label="Table view" role="radio" aria-checked="false">
+            <i class="ph ph-rows"></i>
+          </button>
+        </div>
+        <!-- Grid card-size slider — a floating popup, opened by clicking the
+             grid view icon (see onGridViewClick). Floating rather than inline
+             so it doesn't eat toolbar space, especially on mobile. -->
+        <div class="lib-size" id="lib-size" aria-label="Grid card size">
+          <i class="ph ph-square" aria-hidden="true"></i>
+          <input type="range" min="1" max="6" step="1" value="3" id="sl-libsize" oninput="setLibrarySize(this.value)" title="Visible rows">
+          <i class="ph ph-square is-large" aria-hidden="true"></i>
+        </div>
+      </div>
+      <select class="sort-select" id="sort-select" onchange="setSort(this.value)">
+        <option value="title">A — Z</option>
+        <option value="title-desc">Z — A</option>
+        <option value="author">Author</option>
+        <option value="recent">Recent</option>
+        <option value="progress">Progress</option>
+      </select>
       <button class="icon-btn" id="lib-profile-btn" onclick="toggleProfile()" title="Profile & settings" aria-label="Profile and settings">
         <i class="ph ph-user"></i>
         <span class="update-dot" id="lib-profile-update-dot" hidden></span>
@@ -5239,9 +5299,11 @@ function setView(v) {
     // accurate for assistive tech.
     b.setAttribute('aria-checked', on ? 'true' : 'false');
   });
-  // data-lib-view on body drives view-specific UI like the card-size
-  // slider, which is only useful when the grid is on screen.
-  document.body.setAttribute('data-lib-view', v);
+  // Leaving grid view closes the floating card-size slider — it's a
+  // grid-only control. Switching TO grid doesn't auto-open it; that's
+  // onGridViewClick's job, so a programmatic setView (e.g. on load)
+  // doesn't pop the slider unprompted.
+  if (v !== 'grid') setLibSizePopup(false);
   // Grid view: zero lib-body padding so books bleed to all four edges
   // of the viewport — they extend behind the transparent overlay
   // header at top and run off the screen edge horizontally as the
@@ -5258,6 +5320,36 @@ function setView(v) {
   const slider = $('sl-libsize');
   if (slider) setLibrarySize(slider.value);
 }
+
+// Grid view icon click. If grid is already the active view, toggle the
+// floating card-size slider; otherwise switch to grid and show the slider
+// once so the user sees the size control right after picking the view.
+function onGridViewClick() {
+  if (currentView === 'grid') {
+    toggleLibSizePopup();
+  } else {
+    setView('grid');
+    setLibSizePopup(true);
+  }
+}
+function setLibSizePopup(show) {
+  const el = $('lib-size');
+  if (el) el.classList.toggle('open', show);
+}
+function toggleLibSizePopup() {
+  const el = $('lib-size');
+  if (el) el.classList.toggle('open');
+}
+// Close the card-size popup on any click outside it. The grid view icon
+// is excluded — onGridViewClick already toggles the popup, and letting
+// this handler fire on the same click would just cancel that out.
+document.addEventListener('click', e => {
+  const el = $('lib-size');
+  if (!el || !el.classList.contains('open')) return;
+  if (e.target.closest('.lib-size')) return;
+  if (e.target.closest('[data-view="grid"]')) return;
+  el.classList.remove('open');
+});
 
 // Live card-size adjustment in grid view. Writes to a CSS custom
 // property the grid's minmax(...) reads, so cards reflow as soon as
@@ -5279,10 +5371,13 @@ function setLibrarySize(value) {
   const header = document.querySelector('.lib-header');
   const headerH = header ? header.offsetHeight : 76;
   document.documentElement.style.setProperty('--grid-padding-top', headerH + 'px');
-  // Usable height = viewport minus top padding (header height) and
-  // bottom padding (28px). Keep this synced with .view-grid's CSS
-  // `padding` shorthand.
-  const usable = window.innerHeight - headerH - 28;
+  // Usable height = viewport minus top padding (header height), the bottom
+  // edge padding, and the thin horizontal scrollbar that now rides the
+  // grid's bottom edge (~6px — harmless slack if the platform uses overlay
+  // scrollbars). edgePad is --lib-edge-pad (the shared nav/view edge value),
+  // read live so it tracks the responsive breakpoints.
+  const edgePad = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--lib-edge-pad'), 10) || 24;
+  const usable = window.innerHeight - headerH - edgePad - 8;
   const gap = 16; // matches .view-grid `gap`
   // Floor the row height so rows*cardHeight + (rows-1)*gap stays at or
   // below `usable` — subpixel overflow was the phantom-row culprit.
