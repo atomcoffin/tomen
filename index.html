@@ -10028,18 +10028,19 @@ function renderGreeting() {
 // behind a theme or a user preference later.
 
 const _AMBIENT = {
-  alpha: 0.62,          // peak ball alpha
-  ballRadius: 0.36,     // ball radius in normalized-y units (BIG)
-  pulseSpeed: 0.45,     // very slow breathing — ~14s per cycle
-  pulseAmount: 0.035,   // subtle radius oscillation
-  rippleSpeed: 0.55,    // wave-travel speed across the surface
-  rippleAmount: 0.20,   // how much the surface waves displace the lines
-  lineCount: 12.0,      // number of parallel latitude bands across the sphere
-  lineDarkness: 0.18,   // 0 = pure black at line center, 1 = invisible
-  lineSharpness: 0.10,  // smoothstep half-width — smaller = crisper lines
-  followLerp: 0.045,    // slow drift toward cursor for an "underwater" lag
-  fadeIdleMs: 800,
-  fadePerFrame: 0.975,
+  alpha: 0.68,          // peak ball alpha
+  ballRadius: 0.38,     // ball radius in normalized-y units (BIG)
+  morphSpeed: 0.12,     // how fast the noise-displacement progress oscillates (cycles/s)
+  morphMin: 1.0,        // min snoise frequency multiplier — calm phase
+  morphMax: 4.2,        // max snoise frequency multiplier — turbulent phase
+  morphDepth: 0.42,     // how much the noise displaces the lines/lighting
+  latLines: 22.0,       // number of parallel latitude bands across the sphere
+  lonLines: 22.0,       // number of meridian (longitude) bands wrapping the sphere
+  lineDarkness: 0.14,   // 0 = pure black at line center, 1 = invisible
+  lineSharpness: 0.08,  // smoothstep half-width — smaller = crisper lines
+  followLerp: 0.035,    // slow drift toward cursor for an "underwater" lag
+  fadeIdleMs: 900,
+  fadePerFrame: 0.978,
 };
 
 let _ambientCanvas = null;
@@ -10064,40 +10065,88 @@ const _AMBIENT_VS = `
   void main() { gl_Position = vec4(a_position, 0.0, 1.0); }
 `;
 
-// Fragment shader: soft 3D sphere with surface waves traveling across
-// it, wrapped in parallel latitude bands that bend with the waves —
-// reads as a rippling water bed with dark contour lines painted on
-// top. Slow timing throughout for the "underwater" feel.
+// Fragment shader: a morphing sphere displaced by 3D simplex noise,
+// wrapped in dense crossed contour lines (latitude × longitude) that
+// ride the deformation — the visual equivalent of Daniel Hult's
+// CodePen pen where 30k particles at radius 2 wrap around an
+// snoise-displaced sphere at radius 1. Single-pass per-pixel:
 //
-// Pipeline per pixel:
-//   1. Compute sphere depth & normal at this pixel
-//   2. Compute two crossed sine waves (the ripple) — they travel
-//      across the sphere over time
-//   3. Derive a "latitude" angle from the normal (asin of n.y)
-//   4. Displace the latitude by the ripple — lines bend with waves
-//   5. Stripe pattern from fract(displacedLat × lineCount), smoothstep'd
-//      so line edges are soft, not aliased
-//   6. Phong-ish diffuse + small specular for sphere shading; the
-//      normal is slightly perturbed by the ripple so the lit surface
-//      itself looks like it's catching the wave motion
-//   7. Multiply the lit color by the line mask to paint dark bands
-//   8. Soft edge alpha falloff so the silhouette blends to bg
+//   1. Sphere depth & normal at this pixel (visible hemisphere).
+//   2. Slow `power3.inOut`-style triangle wave drives a frequency
+//      multiplier `morph` that oscillates between morphMin..morphMax
+//      — calm → turbulent → calm — over ~16s.
+//   3. snoise(n * morph + t * 0.1) gives an organic surface field
+//      identical in spirit to the pen's `position * u_progress`.
+//   4. Latitude (asin of n.y) and longitude (atan of n.x,n.z) are
+//      both displaced by the noise — bands curve with the surface
+//      deformation, simulating the particle shell wrapping a
+//      morphing ball.
+//   5. Sky/ground directional lighting tinted by the brand color
+//      (matches the pen's sky/ground mix lighting).
+//   6. Soft silhouette falloff for clean blending.
 const _AMBIENT_FS = `
-  precision mediump float;
+  precision highp float;
   uniform vec2 u_resolution;
   uniform vec2 u_ballPos;
   uniform float u_time;
   uniform float u_activity;
   uniform vec3 u_color;
   uniform float u_ballRadius;
-  uniform float u_pulseSpeed;
-  uniform float u_pulseAmount;
-  uniform float u_rippleSpeed;
-  uniform float u_rippleAmount;
-  uniform float u_lineCount;
+  uniform float u_morphSpeed;
+  uniform float u_morphMin;
+  uniform float u_morphMax;
+  uniform float u_morphDepth;
+  uniform float u_latLines;
+  uniform float u_lonLines;
   uniform float u_lineDarkness;
   uniform float u_lineSharpness;
   uniform float u_alpha;
+
+  // ---- Stefan Gustavson 3D simplex noise (same as the source pen) ----
+  vec4 permute(vec4 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }
+  vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+  float snoise(vec3 v) {
+    const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
+    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+    vec3 i  = floor(v + dot(v, C.yyy));
+    vec3 x0 = v - i + dot(i, C.xxx);
+    vec3 g = step(x0.yzx, x0.xyz);
+    vec3 l = 1.0 - g;
+    vec3 i1 = min(g.xyz, l.zxy);
+    vec3 i2 = max(g.xyz, l.zxy);
+    vec3 x1 = x0 - i1 + 1.0 * C.xxx;
+    vec3 x2 = x0 - i2 + 2.0 * C.xxx;
+    vec3 x3 = x0 - 1.0 + 3.0 * C.xxx;
+    i = mod(i, 289.0);
+    vec4 p = permute(permute(permute(
+          i.z + vec4(0.0, i1.z, i2.z, 1.0))
+        + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+      + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+    float n_ = 1.0 / 7.0;
+    vec3 ns = n_ * D.wyz - D.xzx;
+    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+    vec4 x_ = floor(j * ns.z);
+    vec4 y_ = floor(j - 7.0 * x_);
+    vec4 x = x_ * ns.x + ns.yyyy;
+    vec4 y = y_ * ns.x + ns.yyyy;
+    vec4 h = 1.0 - abs(x) - abs(y);
+    vec4 b0 = vec4(x.xy, y.xy);
+    vec4 b1 = vec4(x.zw, y.zw);
+    vec4 s0 = floor(b0) * 2.0 + 1.0;
+    vec4 s1 = floor(b1) * 2.0 + 1.0;
+    vec4 sh = -step(h, vec4(0.0));
+    vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
+    vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
+    vec3 p0 = vec3(a0.xy, h.x);
+    vec3 p1 = vec3(a0.zw, h.y);
+    vec3 p2 = vec3(a1.xy, h.z);
+    vec3 p3 = vec3(a1.zw, h.w);
+    vec4 norm = taylorInvSqrt(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
+    p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+    vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
+    m = m * m;
+    return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
+  }
 
   void main() {
     vec2 fragUv = gl_FragCoord.xy / u_resolution;
@@ -10107,8 +10156,7 @@ const _AMBIENT_FS = `
     vec2 d = fragUv - ballUv;
     d.x *= aspect;
 
-    // Slow breathing pulse on the ball radius.
-    float radius = u_ballRadius * (1.0 + sin(u_time * u_pulseSpeed) * u_pulseAmount);
+    float radius = u_ballRadius;
     float r = length(d);
     if (r > radius) discard;
 
@@ -10116,41 +10164,56 @@ const _AMBIENT_FS = `
     float z = sqrt(radius * radius - r * r) / radius;
     vec3 n = normalize(vec3(d.x / radius, d.y / radius, z));
 
-    // Two crossed wave functions traveling over the sphere. Different
-    // frequencies and phase offsets so the result feels organic
-    // rather than mechanical.
-    float wave1 = sin(n.x * 6.0 + u_time * u_rippleSpeed);
-    float wave2 = cos(n.y * 5.0 + u_time * u_rippleSpeed * 0.7);
-    float wave3 = sin((n.x + n.y) * 4.0 - u_time * u_rippleSpeed * 0.5);
-    float ripple = (wave1 + wave2 * 0.8 + wave3 * 0.6) / 2.4;
+    // Slow eased morph: triangle wave 0→1→0 over (1/morphSpeed) seconds,
+    // smoothstep-eased toward power3.inOut. Drives the noise frequency.
+    float tri = abs(fract(u_time * u_morphSpeed) - 0.5) * 2.0;
+    float ease = tri * tri * (3.0 - 2.0 * tri);
+    float morph = mix(u_morphMin, u_morphMax, ease);
 
-    // Latitude angle from the normal — north pole = +pi/2, equator = 0.
-    float lat = asin(n.y);
-    // Displace by ripple so the lines bend along with surface waves.
-    float displacedLat = lat + ripple * u_rippleAmount;
+    // Organic noise field over the sphere surface (matches the pen's
+    // \`snoise(position * u_progress + t / 10)\` displacement).
+    float noise = snoise(n * morph + vec3(u_time * 0.10));
+    // Cheap analytic gradient via two extra samples, used for normal
+    // perturbation so light catches the deformation.
+    float eps = 0.06;
+    float nx = snoise(n * morph + vec3(eps, 0.0, 0.0) + vec3(u_time * 0.10)) - noise;
+    float ny = snoise(n * morph + vec3(0.0, eps, 0.0) + vec3(u_time * 0.10)) - noise;
 
-    // Stripe pattern. fract * lineCount gives lineCount cycles across
-    // the visible hemisphere; the abs(fract - 0.5) creates a triangle
-    // wave that peaks between lines and bottoms at line centers.
-    float bandPos = fract(displacedLat * u_lineCount);
-    float bandDist = abs(bandPos - 0.5);
-    // 0 right at a line center, 1 in the middle between lines.
-    float lineMask = smoothstep(0.0, u_lineSharpness, bandDist);
+    // Lat / lon angles. Displace BOTH by the noise so contour lines
+    // curve with the deformation — this is what reads as "lines that
+    // move with the waves".
+    float lat = asin(clamp(n.y, -1.0, 1.0));
+    float lon = atan(n.x, n.z);
+    float dispLat = lat + noise * u_morphDepth;
+    float dispLon = lon + noise * u_morphDepth * 0.7;
 
-    // Lighting. Normal is perturbed by the wave gradient so light
-    // catches the ripple peaks, reinforcing the "water bed" feel.
+    // Triangle-wave stripe masks, smoothstep'd for crisp soft edges.
+    float bandLat = abs(fract(dispLat * u_latLines / 3.14159) - 0.5);
+    float bandLon = abs(fract(dispLon * u_lonLines / 6.28318) - 0.5);
+    float maskLat = smoothstep(0.0, u_lineSharpness, bandLat);
+    float maskLon = smoothstep(0.0, u_lineSharpness, bandLon);
+    // Lines from EITHER direction darken the surface. min() = union of darkness.
+    float lineMask = min(maskLat, maskLon);
+
+    // Sky/ground directional lighting (mirrors the pen's mix). The
+    // sky tint pulls toward the brand color; ground is a dark wash
+    // so the unlit side of the ball sinks into the background.
     vec3 lightDir = normalize(vec3(0.35, 0.55, 0.75));
-    vec3 nPerturbed = normalize(n + vec3(wave1, wave2, 0.0) * 0.07);
-    float diffuse = max(0.0, dot(nPerturbed, lightDir));
-    vec3 reflectDir = reflect(-lightDir, nPerturbed);
-    float spec = pow(max(0.0, dot(vec3(0.0, 0.0, 1.0), reflectDir)), 22.0) * 0.35;
+    vec3 nPerturbed = normalize(n + vec3(nx, ny, 0.0) * 3.0);
+    float ld = dot(lightDir, nPerturbed) * 0.5 + 0.5;
+    vec3 skyColor = mix(u_color * 1.05, u_color, 0.4);
+    vec3 groundColor = u_color * 0.18;
+    vec3 baseColor = mix(groundColor, skyColor, ld);
 
-    // Base lit color, then darkened where the line mask is low.
-    vec3 baseColor = u_color * (0.30 + 0.60 * diffuse) + vec3(spec);
+    // Subtle hue/value modulation from the noise itself — the surface
+    // breathes color slightly as it morphs, like the pen's hsv shift.
+    baseColor *= 0.85 + noise * 0.25;
+
+    // Paint the dark line bands over the lit surface.
     vec3 finalColor = mix(baseColor * u_lineDarkness, baseColor, lineMask);
 
     // Soft silhouette falloff.
-    float edge = smoothstep(0.0, radius * 0.10, radius - r);
+    float edge = smoothstep(0.0, radius * 0.12, radius - r);
     float alpha = edge * u_activity * u_alpha;
     gl_FragColor = vec4(finalColor, alpha);
   }
@@ -10205,11 +10268,12 @@ function _initAmbientShader() {
     u_activity: gl.getUniformLocation(prog, 'u_activity'),
     u_color: gl.getUniformLocation(prog, 'u_color'),
     u_ballRadius: gl.getUniformLocation(prog, 'u_ballRadius'),
-    u_pulseSpeed: gl.getUniformLocation(prog, 'u_pulseSpeed'),
-    u_pulseAmount: gl.getUniformLocation(prog, 'u_pulseAmount'),
-    u_rippleSpeed: gl.getUniformLocation(prog, 'u_rippleSpeed'),
-    u_rippleAmount: gl.getUniformLocation(prog, 'u_rippleAmount'),
-    u_lineCount: gl.getUniformLocation(prog, 'u_lineCount'),
+    u_morphSpeed: gl.getUniformLocation(prog, 'u_morphSpeed'),
+    u_morphMin: gl.getUniformLocation(prog, 'u_morphMin'),
+    u_morphMax: gl.getUniformLocation(prog, 'u_morphMax'),
+    u_morphDepth: gl.getUniformLocation(prog, 'u_morphDepth'),
+    u_latLines: gl.getUniformLocation(prog, 'u_latLines'),
+    u_lonLines: gl.getUniformLocation(prog, 'u_lonLines'),
     u_lineDarkness: gl.getUniformLocation(prog, 'u_lineDarkness'),
     u_lineSharpness: gl.getUniformLocation(prog, 'u_lineSharpness'),
     u_alpha: gl.getUniformLocation(prog, 'u_alpha'),
@@ -10321,11 +10385,12 @@ function _renderAmbient(time, activity) {
   gl.uniform1f(_ambientUniforms.u_activity, activity);
   gl.uniform3f(_ambientUniforms.u_color, _ambientBrandRGB[0], _ambientBrandRGB[1], _ambientBrandRGB[2]);
   gl.uniform1f(_ambientUniforms.u_ballRadius, _AMBIENT.ballRadius);
-  gl.uniform1f(_ambientUniforms.u_pulseSpeed, _AMBIENT.pulseSpeed);
-  gl.uniform1f(_ambientUniforms.u_pulseAmount, _AMBIENT.pulseAmount);
-  gl.uniform1f(_ambientUniforms.u_rippleSpeed, _AMBIENT.rippleSpeed);
-  gl.uniform1f(_ambientUniforms.u_rippleAmount, _AMBIENT.rippleAmount);
-  gl.uniform1f(_ambientUniforms.u_lineCount, _AMBIENT.lineCount);
+  gl.uniform1f(_ambientUniforms.u_morphSpeed, _AMBIENT.morphSpeed);
+  gl.uniform1f(_ambientUniforms.u_morphMin, _AMBIENT.morphMin);
+  gl.uniform1f(_ambientUniforms.u_morphMax, _AMBIENT.morphMax);
+  gl.uniform1f(_ambientUniforms.u_morphDepth, _AMBIENT.morphDepth);
+  gl.uniform1f(_ambientUniforms.u_latLines, _AMBIENT.latLines);
+  gl.uniform1f(_ambientUniforms.u_lonLines, _AMBIENT.lonLines);
   gl.uniform1f(_ambientUniforms.u_lineDarkness, _AMBIENT.lineDarkness);
   gl.uniform1f(_ambientUniforms.u_lineSharpness, _AMBIENT.lineSharpness);
   gl.uniform1f(_ambientUniforms.u_alpha, _AMBIENT.alpha);
