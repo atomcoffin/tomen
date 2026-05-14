@@ -1135,14 +1135,13 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
   perspective: 1400px;
 }
 .view-grid::-webkit-scrollbar { display: none; }
-/* In grid view the lib-body drops its top/bottom padding so the
-   columns of books extend edge-to-edge vertically — books behind
-   the transparent overlay header are intentional bleed. Horizontal
-   padding stays so the first/last column isn't flush to the edge. */
-body[data-lib-view="grid"] .lib-body {
-  padding-top: 0;
-  padding-bottom: 0;
-}
+/* In grid view the lib-body's padding is zeroed via JS in setView()
+   so books bleed from edge to edge of the viewport — both vertically
+   (full height under the transparent overlay header) and horizontally
+   (the rightmost column scrolls off the screen edge). Inline style
+   from JS is used instead of a CSS rule so the size math in
+   setLibrarySize() can rely on getComputedStyle reading 0 padding
+   the moment it runs. */
 /* Note: content-visibility:auto used to live here for offscreen-card
    render deferral, but its paint containment clipped the 3D edge
    slabs (which extend outside the card's 2D bounds before rotation).
@@ -5101,10 +5100,19 @@ function setView(v) {
   // data-lib-view on body drives view-specific UI like the card-size
   // slider, which is only useful when the grid is on screen.
   document.body.setAttribute('data-lib-view', v);
+  // Grid view: zero lib-body padding so books bleed to all four edges
+  // of the viewport — they extend behind the transparent overlay
+  // header at top and run off the screen edge horizontally as the
+  // user scrolls. Inline-set so the change is observable by
+  // setLibrarySize's getComputedStyle on the very next line. Other
+  // views restore the CSS default by clearing the inline value.
+  const libBody = $('lib-body');
+  if (libBody) {
+    libBody.style.padding = (v === 'grid') ? '0' : '';
+  }
   renderLibrary();
-  // Grid view zeroes the lib-body's top/bottom padding for full-bleed
-  // — the usable height the size math reads from clientHeight changes,
-  // so re-derive the per-card width with the new content area.
+  // Re-derive the per-card width now that the padding context (and
+  // therefore the available content height) has changed.
   const slider = $('sl-libsize');
   if (slider) setLibrarySize(slider.value);
 }
