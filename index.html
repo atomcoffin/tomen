@@ -604,21 +604,23 @@ html, body {
   right: 4px; top: 50%;
   transform: translateY(-50%);
 }
+/* A small brand-filled square button — its own distinct element rather
+   than a transparent icon. var(--brand) / --brand-text / --brand-deep
+   mirror the active tag chip so "on brand" surfaces stay consistent
+   across every theme. */
 .lib-search-add {
   width: 22px; height: 22px;
   display: flex; align-items: center; justify-content: center;
-  border: none; background: transparent;
-  color: var(--stone);
+  border: none;
+  background: var(--brand);
+  color: var(--brand-text);
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: 4px;
   line-height: 1;
-  transition: color 140ms ease, background 140ms ease;
+  transition: background 140ms ease;
 }
-.lib-search-add:hover {
-  color: var(--brand-ink);
-  background: var(--linen);
-}
-.lib-search-add .ph { font-size: 16px; line-height: 1; }
+.lib-search-add:hover { background: var(--brand-deep); }
+.lib-search-add .ph { font-size: 15px; line-height: 1; }
 
 .lib-toolbar { display: flex; align-items: center; gap: 6px; }
 
@@ -5351,17 +5353,16 @@ document.addEventListener('click', e => {
   el.classList.remove('open');
 });
 
-// Live card-size adjustment in grid view. Writes to a CSS custom
-// property the grid's minmax(...) reads, so cards reflow as soon as
-// the user moves the slider. Persisted across sessions and shared
-// across device buckets — a setting like this is preference, not
-// device-bucketed reading config.
+// Live card-size adjustment in grid view. Writes a CSS custom property
+// the grid's sizing math reads, so cards reflow as soon as the user moves
+// the slider. Persisted across sessions and shared across device buckets —
+// a setting like this is preference, not device-bucketed reading config.
 // Slider value is the desired number of vertical rows of books (1-6).
-// Card height = (viewport_height - row_gaps) / rows; width follows
-// from the 2:3 cover aspect. Using window.innerHeight directly (rather
-// than lib-body's clientHeight - padding) sidesteps a flex sizing
-// quirk where percentage heights inside a flex:1 parent can resolve
-// to auto-sized values, leaving cards short of the viewport.
+// Card height = (column height - row gaps) / rows; width follows from the
+// 2:3 cover aspect. The column height is measured straight off the grid
+// element: it's absolutely positioned (not a flex item), so its
+// clientHeight is reliable and already nets out the horizontal scrollbar —
+// getting this even a pixel wrong wraps a phantom row.
 function setLibrarySize(value) {
   const rows = Math.max(1, Math.min(6, parseInt(value, 10) || 3));
   // Measure the nav bar's rendered height — flex-wrap on mobile makes
@@ -5371,13 +5372,20 @@ function setLibrarySize(value) {
   const header = document.querySelector('.lib-header');
   const headerH = header ? header.offsetHeight : 76;
   document.documentElement.style.setProperty('--grid-padding-top', headerH + 'px');
-  // Usable height = viewport minus top padding (header height), the bottom
-  // edge padding, and the thin horizontal scrollbar that now rides the
-  // grid's bottom edge (~6px — harmless slack if the platform uses overlay
-  // scrollbars). edgePad is --lib-edge-pad (the shared nav/view edge value),
-  // read live so it tracks the responsive breakpoints.
-  const edgePad = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--lib-edge-pad'), 10) || 24;
-  const usable = window.innerHeight - headerH - edgePad - 8;
+  // Height available for one column of cards. Measure the grid when it's
+  // on screen — clientHeight already excludes the horizontal scrollbar, so
+  // clientHeight minus its own top/bottom padding is the exact column box.
+  // Before the first render, fall back to a viewport estimate (the grid
+  // fills .screen): header height + bottom edge padding + a scrollbar nudge.
+  const grid = document.querySelector('.view-grid');
+  let usable;
+  if (grid && grid.clientHeight) {
+    const cs = getComputedStyle(grid);
+    usable = grid.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  } else {
+    const edgePad = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--lib-edge-pad'), 10) || 24;
+    usable = window.innerHeight - headerH - edgePad - 8;
+  }
   const gap = 16; // matches .view-grid `gap`
   // Floor the row height so rows*cardHeight + (rows-1)*gap stays at or
   // below `usable` — subpixel overflow was the phantom-row culprit.
