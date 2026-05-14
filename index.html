@@ -10028,15 +10028,18 @@ function renderGreeting() {
 // behind a theme or a user preference later.
 
 const _AMBIENT = {
-  alpha: 0.55,          // peak ball alpha
-  ballRadius: 0.18,     // ball radius in normalized-y units
-  pulseSpeed: 1.4,      // breaths per ~4.5 seconds (sin frequency)
-  pulseAmount: 0.07,    // 7% radius oscillation — subtle breathing
-  noiseScale: 4.0,      // surface texture frequency
-  noiseStrength: 0.08,  // surface texture intensity
-  followLerp: 0.08,     // per-frame catch-up toward cursor (lower = laggier)
-  fadeIdleMs: 600,      // grace period before activity starts decaying
-  fadePerFrame: 0.97,   // multiplied each frame past the grace period
+  alpha: 0.62,          // peak ball alpha
+  ballRadius: 0.36,     // ball radius in normalized-y units (BIG)
+  pulseSpeed: 0.45,     // very slow breathing — ~14s per cycle
+  pulseAmount: 0.035,   // subtle radius oscillation
+  rippleSpeed: 0.55,    // wave-travel speed across the surface
+  rippleAmount: 0.20,   // how much the surface waves displace the lines
+  lineCount: 12.0,      // number of parallel latitude bands across the sphere
+  lineDarkness: 0.18,   // 0 = pure black at line center, 1 = invisible
+  lineSharpness: 0.10,  // smoothstep half-width — smaller = crisper lines
+  followLerp: 0.045,    // slow drift toward cursor for an "underwater" lag
+  fadeIdleMs: 800,
+  fadePerFrame: 0.975,
 };
 
 let _ambientCanvas = null;
@@ -10061,16 +10064,24 @@ const _AMBIENT_VS = `
   void main() { gl_Position = vec4(a_position, 0.0, 1.0); }
 `;
 
-// Fragment shader renders a soft 3D-shaded sphere centered on the
-// (damped) cursor position. The shading model is simple Phong:
-//   - sphere depth z = sqrt(r^2 - d^2) at the current pixel
-//   - normal = position-from-center vector
-//   - diffuse from a fixed light direction
-//   - specular highlight from view = +Z
-//   - subtle value-noise on the surface for an organic, non-plastic feel
-// The radius pulses via sin(u_time * pulseSpeed) so the ball "breathes."
-// Final alpha is smoothstep'd at the edge so the silhouette is soft
-// rather than a hard cutout.
+// Fragment shader: soft 3D sphere with surface waves traveling across
+// it, wrapped in parallel latitude bands that bend with the waves —
+// reads as a rippling water bed with dark contour lines painted on
+// top. Slow timing throughout for the "underwater" feel.
+//
+// Pipeline per pixel:
+//   1. Compute sphere depth & normal at this pixel
+//   2. Compute two crossed sine waves (the ripple) — they travel
+//      across the sphere over time
+//   3. Derive a "latitude" angle from the normal (asin of n.y)
+//   4. Displace the latitude by the ripple — lines bend with waves
+//   5. Stripe pattern from fract(displacedLat × lineCount), smoothstep'd
+//      so line edges are soft, not aliased
+//   6. Phong-ish diffuse + small specular for sphere shading; the
+//      normal is slightly perturbed by the ripple so the lit surface
+//      itself looks like it's catching the wave motion
+//   7. Multiply the lit color by the line mask to paint dark bands
+//   8. Soft edge alpha falloff so the silhouette blends to bg
 const _AMBIENT_FS = `
   precision mediump float;
   uniform vec2 u_resolution;
@@ -10081,61 +10092,67 @@ const _AMBIENT_FS = `
   uniform float u_ballRadius;
   uniform float u_pulseSpeed;
   uniform float u_pulseAmount;
-  uniform float u_noiseScale;
-  uniform float u_noiseStrength;
+  uniform float u_rippleSpeed;
+  uniform float u_rippleAmount;
+  uniform float u_lineCount;
+  uniform float u_lineDarkness;
+  uniform float u_lineSharpness;
   uniform float u_alpha;
-
-  float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-  }
-  float vnoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(
-      mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-      mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
-      u.y);
-  }
 
   void main() {
     vec2 fragUv = gl_FragCoord.xy / u_resolution;
     vec2 ballUv = u_ballPos / u_resolution;
-    // WebGL origin is bottom-left; DOM coords are top-left.
     ballUv.y = 1.0 - ballUv.y;
     float aspect = u_resolution.x / u_resolution.y;
     vec2 d = fragUv - ballUv;
     d.x *= aspect;
 
-    // Breathing pulse — slow sinusoidal radius oscillation.
+    // Slow breathing pulse on the ball radius.
     float radius = u_ballRadius * (1.0 + sin(u_time * u_pulseSpeed) * u_pulseAmount);
     float r = length(d);
     if (r > radius) discard;
 
-    // Sphere depth at this pixel — Pythagoras on the visible hemisphere.
+    // Visible-hemisphere depth and normal.
     float z = sqrt(radius * radius - r * r) / radius;
     vec3 n = normalize(vec3(d.x / radius, d.y / radius, z));
 
-    // Light direction (top-right, slightly toward camera).
+    // Two crossed wave functions traveling over the sphere. Different
+    // frequencies and phase offsets so the result feels organic
+    // rather than mechanical.
+    float wave1 = sin(n.x * 6.0 + u_time * u_rippleSpeed);
+    float wave2 = cos(n.y * 5.0 + u_time * u_rippleSpeed * 0.7);
+    float wave3 = sin((n.x + n.y) * 4.0 - u_time * u_rippleSpeed * 0.5);
+    float ripple = (wave1 + wave2 * 0.8 + wave3 * 0.6) / 2.4;
+
+    // Latitude angle from the normal — north pole = +pi/2, equator = 0.
+    float lat = asin(n.y);
+    // Displace by ripple so the lines bend along with surface waves.
+    float displacedLat = lat + ripple * u_rippleAmount;
+
+    // Stripe pattern. fract * lineCount gives lineCount cycles across
+    // the visible hemisphere; the abs(fract - 0.5) creates a triangle
+    // wave that peaks between lines and bottoms at line centers.
+    float bandPos = fract(displacedLat * u_lineCount);
+    float bandDist = abs(bandPos - 0.5);
+    // 0 right at a line center, 1 in the middle between lines.
+    float lineMask = smoothstep(0.0, u_lineSharpness, bandDist);
+
+    // Lighting. Normal is perturbed by the wave gradient so light
+    // catches the ripple peaks, reinforcing the "water bed" feel.
     vec3 lightDir = normalize(vec3(0.35, 0.55, 0.75));
-    float diffuse = max(0.0, dot(n, lightDir));
+    vec3 nPerturbed = normalize(n + vec3(wave1, wave2, 0.0) * 0.07);
+    float diffuse = max(0.0, dot(nPerturbed, lightDir));
+    vec3 reflectDir = reflect(-lightDir, nPerturbed);
+    float spec = pow(max(0.0, dot(vec3(0.0, 0.0, 1.0), reflectDir)), 22.0) * 0.35;
 
-    // Specular highlight — Phong with view direction = +Z.
-    vec3 reflectDir = reflect(-lightDir, n);
-    float spec = pow(max(0.0, dot(vec3(0.0, 0.0, 1.0), reflectDir)), 28.0) * 0.65;
+    // Base lit color, then darkened where the line mask is low.
+    vec3 baseColor = u_color * (0.30 + 0.60 * diffuse) + vec3(spec);
+    vec3 finalColor = mix(baseColor * u_lineDarkness, baseColor, lineMask);
 
-    // Subtle surface noise — keeps the sphere feeling organic rather
-    // than synthetic-plastic. Modulates the diffuse component slightly.
-    float surf = (vnoise(d * u_noiseScale + u_time * 0.4) - 0.5) * 2.0 * u_noiseStrength;
-
-    // Combine: ambient base + diffuse * brand + specular highlight.
-    vec3 col = u_color * (0.32 + 0.62 * diffuse + surf) + vec3(spec);
-
-    // Soft edge falloff so the silhouette doesn't read as a hard
-    // cutout against the page bg.
-    float edge = smoothstep(0.0, radius * 0.18, radius - r);
+    // Soft silhouette falloff.
+    float edge = smoothstep(0.0, radius * 0.10, radius - r);
     float alpha = edge * u_activity * u_alpha;
-    gl_FragColor = vec4(col, alpha);
+    gl_FragColor = vec4(finalColor, alpha);
   }
 `;
 
@@ -10190,8 +10207,11 @@ function _initAmbientShader() {
     u_ballRadius: gl.getUniformLocation(prog, 'u_ballRadius'),
     u_pulseSpeed: gl.getUniformLocation(prog, 'u_pulseSpeed'),
     u_pulseAmount: gl.getUniformLocation(prog, 'u_pulseAmount'),
-    u_noiseScale: gl.getUniformLocation(prog, 'u_noiseScale'),
-    u_noiseStrength: gl.getUniformLocation(prog, 'u_noiseStrength'),
+    u_rippleSpeed: gl.getUniformLocation(prog, 'u_rippleSpeed'),
+    u_rippleAmount: gl.getUniformLocation(prog, 'u_rippleAmount'),
+    u_lineCount: gl.getUniformLocation(prog, 'u_lineCount'),
+    u_lineDarkness: gl.getUniformLocation(prog, 'u_lineDarkness'),
+    u_lineSharpness: gl.getUniformLocation(prog, 'u_lineSharpness'),
     u_alpha: gl.getUniformLocation(prog, 'u_alpha'),
   };
 
@@ -10303,8 +10323,11 @@ function _renderAmbient(time, activity) {
   gl.uniform1f(_ambientUniforms.u_ballRadius, _AMBIENT.ballRadius);
   gl.uniform1f(_ambientUniforms.u_pulseSpeed, _AMBIENT.pulseSpeed);
   gl.uniform1f(_ambientUniforms.u_pulseAmount, _AMBIENT.pulseAmount);
-  gl.uniform1f(_ambientUniforms.u_noiseScale, _AMBIENT.noiseScale);
-  gl.uniform1f(_ambientUniforms.u_noiseStrength, _AMBIENT.noiseStrength);
+  gl.uniform1f(_ambientUniforms.u_rippleSpeed, _AMBIENT.rippleSpeed);
+  gl.uniform1f(_ambientUniforms.u_rippleAmount, _AMBIENT.rippleAmount);
+  gl.uniform1f(_ambientUniforms.u_lineCount, _AMBIENT.lineCount);
+  gl.uniform1f(_ambientUniforms.u_lineDarkness, _AMBIENT.lineDarkness);
+  gl.uniform1f(_ambientUniforms.u_lineSharpness, _AMBIENT.lineSharpness);
   gl.uniform1f(_ambientUniforms.u_alpha, _AMBIENT.alpha);
 
   gl.enable(gl.BLEND);
