@@ -1112,20 +1112,22 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
 .tr-menu-hint .ph { font-size: 18px; }
 
 /* === GRID VIEW === */
+/* Horizontal-scrolling grid: cards lay out top-to-bottom in each
+   column, then wrap into a new column to the right. The container
+   fills the lib-body's height; columns extend rightward and the user
+   scrolls horizontally to traverse the library. */
 .view-grid {
-  display: grid;
-  /* Card minimum width is variable so a slider in the library top bar
-     can shrink or grow the cards live. Auto-fill keeps the grid dense
-     regardless of the user's setting. */
-  grid-template-columns: repeat(auto-fill, minmax(var(--grid-card-min-width, 150px), 1fr));
-  /* Gap is identical on both axes so the gutter between covers reads
-     the same horizontally and vertically — no title/author below
-     pads the rows out, so this is the only spacing that determines
-     the visual rhythm. */
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  height: 100%;
   gap: 16px;
-  /* 3D depth so each card's per-frame rotateX/Y reads as actual tilt
-     toward the cursor rather than a flat skew. JS writes --tilt-x /
-     --tilt-y per card in a rAF loop; see _TILT in script section. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Perspective kept so the 3D edge slabs on each .gc-cover render
+     with depth if/when any rotation is reintroduced. No-op visually
+     while .gc has no rotateX/Y. */
   perspective: 1400px;
 }
 /* Note: content-visibility:auto used to live here for offscreen-card
@@ -1136,13 +1138,15 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
 .gc {
   cursor: pointer;
   position: relative;
-  /* Live tilt driven by JS — angles default to 0 so cards render
-     flat before the first mousemove. The rAF loop overwrites these
-     each frame. Composed with the inner :hover translateY so both
-     effects coexist. */
-  transform: rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  /* Fixed width so flex-wrap can pack columns; height grows from the
+     2:3 aspect ratio on .gc-cover. flex:0 0 auto so cards don't
+     stretch or shrink to fill the column. */
+  width: var(--grid-card-min-width, 150px);
+  flex: 0 0 auto;
+  /* 3D infrastructure preserved (perspective on parent, preserve-3d
+     on cover) so the edge slabs are ready if a future transform on
+     .gc rotates the card. Currently no rotation = flat covers. */
   transform-style: preserve-3d;
-  will-change: transform;
 }
 .gc:hover .gc-cover { transform: translateY(-2px); }
 .gc-cover { cursor: pointer; }
@@ -3346,7 +3350,8 @@ body.lib-select-mode .col-item {
   /* Smaller default minimum on phone, but still honoring the user's
      slider override if they've set one. clamp() floors at 110px so a
      desktop-bucket value pushed to 100 doesn't crush phone cards. */
-  .view-grid { grid-template-columns: repeat(auto-fill, minmax(clamp(110px, var(--grid-card-min-width, 110px), 200px), 1fr)); gap: 12px; }
+  .view-grid { gap: 12px; }
+  .gc { width: clamp(110px, var(--grid-card-min-width, 110px), 200px); }
   .tr-title { font-size: 16px; }
   .col-title { font-size: 15px; }
   .icon-btn { width: 32px; height: 32px; }
@@ -3363,7 +3368,7 @@ body.lib-select-mode .col-item {
 @media (min-width: 769px) {
   /* Desktop minimum defers to the user's slider value (set on the
      html element) or falls back to 150px when no preference saved. */
-  .view-grid { grid-template-columns: repeat(auto-fill, minmax(var(--grid-card-min-width, 150px), 1fr)); }
+  .gc { width: var(--grid-card-min-width, 150px); }
 }
 
 /* Mobile reader — single-page mode hides the right slot so the left slot
@@ -5250,10 +5255,6 @@ function renderLibrary() {
   if (currentView === 'columns') renderColumnsView(body, sorted);
   else if (currentView === 'table') renderTableView(body, sorted);
   else renderGridView(body, sorted);
-  // Re-compute the dome tilt after the grid re-renders so the new
-  // cards land on the right slopes of the mound. Cheap rAF-coalesced
-  // call; no-op when grid view isn't active.
-  if (typeof _scheduleMoundUpdate === 'function') _scheduleMoundUpdate();
 }
 
 // Columns view — compact title-scan, multi-column layout. No covers,
@@ -9995,71 +9996,6 @@ function renderGreeting() {
   }
 }
 
-// ===== LIBRARY GRID MOUND TILT =====
-// Books are laid over an invisible dome whose apex sits at the
-// viewport's center. Each visible card's tilt is computed from its
-// own center's screen-space offset from that fixed apex — so the
-// cards near the middle sit flat at the crest of the mound, and the
-// further from center a card gets the more it tips outward along
-// the dome's slope. The effect is driven entirely by scroll position:
-// as the user scrolls, cards traverse the dome and roll over its
-// surface, briefly cresting flat as they pass through the center.
-//
-// No cursor input. The tilt is a pure function of viewport geometry,
-// which means every scrollwheel notch repaints the whole grid in a
-// single rAF-coalesced pass.
-const _MOUND = {
-  rafId: null,
-  // Dome "radius" controls the curve's softness. atan(d/R) is the
-  // tilt angle; at d = R the tilt is 45°. Larger R = gentler curve
-  // over a longer stretch; smaller R = sharper local hump.
-  radius: 1100,
-};
-
-function _attachLibraryMound() {
-  const libBody = document.getElementById('lib-body');
-  if (libBody) libBody.addEventListener('scroll', _scheduleMoundUpdate, { passive: true });
-  window.addEventListener('resize', _scheduleMoundUpdate);
-  // Initial paint after layout settles.
-  _scheduleMoundUpdate();
-}
-
-function _scheduleMoundUpdate() {
-  if (_MOUND.rafId == null) {
-    _MOUND.rafId = requestAnimationFrame(_updateMoundTilt);
-  }
-}
-
-function _updateMoundTilt() {
-  _MOUND.rafId = null;
-  const grid = document.querySelector('.view-grid');
-  if (!grid || grid.offsetParent === null) return;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const apexX = vw / 2;
-  const apexY = vh / 2;
-  const R = _MOUND.radius;
-  const RAD2DEG = 180 / Math.PI;
-  const cards = grid.children;
-  for (let i = 0; i < cards.length; i++) {
-    const card = cards[i];
-    if (!card.classList || !card.classList.contains('gc')) continue;
-    const rect = card.getBoundingClientRect();
-    // Skip cards well outside the viewport — they'll get their tilt
-    // the next time a scroll event fires once they're nearer.
-    if (rect.bottom < -200 || rect.top > vh + 200) continue;
-    const dx = (rect.left + rect.width / 2) - apexX;
-    const dy = (rect.top + rect.height / 2) - apexY;
-    // Dome's outward normal at offset (dx, dy): +rotateY when right
-    // of center (front face leans right, away from apex); -rotateX
-    // when below center (front face leans down, away from apex).
-    const ry = RAD2DEG * Math.atan(dx / R);
-    const rx = -RAD2DEG * Math.atan(dy / R);
-    card.style.setProperty('--tilt-x', rx.toFixed(2) + 'deg');
-    card.style.setProperty('--tilt-y', ry.toFixed(2) + 'deg');
-  }
-}
-
 // ===== INIT =====
 (async function init() {
   let t = localStorage.getItem('tomen_theme') || '';
@@ -10109,10 +10045,6 @@ function _updateMoundTilt() {
   // sit on every card.
   _attachLibraryLongPress();
 
-  // Wire the library grid's mound tilt — books roll over an invisible
-  // dome at the viewport center as the user scrolls. Pure scroll-driven,
-  // no cursor input.
-  _attachLibraryMound();
 
   // Once the library is visible, run the cover-storage migration in
   // the background — shrinks any raw v1 covers and moves them from
