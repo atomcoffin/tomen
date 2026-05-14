@@ -10028,17 +10028,18 @@ function renderGreeting() {
 // behind a theme or a user preference later.
 
 const _AMBIENT = {
-  alpha: 0.68,          // peak ball alpha
-  ballRadius: 0.38,     // ball radius in normalized-y units (BIG)
-  morphSpeed: 0.12,     // how fast the noise-displacement progress oscillates (cycles/s)
-  morphMin: 1.0,        // min snoise frequency multiplier — calm phase
-  morphMax: 4.2,        // max snoise frequency multiplier — turbulent phase
-  morphDepth: 0.42,     // how much the noise displaces the lines/lighting
-  latLines: 22.0,       // number of parallel latitude bands across the sphere
-  lonLines: 22.0,       // number of meridian (longitude) bands wrapping the sphere
-  lineDarkness: 0.14,   // 0 = pure black at line center, 1 = invisible
-  lineSharpness: 0.08,  // smoothstep half-width — smaller = crisper lines
-  followLerp: 0.035,    // slow drift toward cursor for an "underwater" lag
+  alpha: 0.95,          // peak ball alpha — refractive sphere reads strongest when opaque
+  ballRadius: 0.22,     // small glassy ball; the env stripes do the visual work through it
+  ior: 0.95,            // base refraction ratio (n1/n2). <1 spreads rays outward like real glass
+  dispersion: 0.030,    // per-channel IOR offset → chromatic aberration strength
+  fresnelPower: 3.0,    // edge fresnel falloff — higher = sharper rim reflection
+  fresnelScale: 0.85,   // overall reflection contribution at glancing angles
+  envStripeFreq: 7.5,   // primary stripe frequency in env-space
+  envSwirlAmp: 0.55,    // how much noise warps the stripe direction
+  envSpeed: 0.18,       // env-pattern drift speed (slow / "elegant")
+  surfaceWobble: 0.10,  // subtle slow normal perturbation → shimmering refraction
+  wobbleSpeed: 0.35,    // wobble cycle speed
+  followLerp: 0.06,
   fadeIdleMs: 900,
   fadePerFrame: 0.978,
 };
@@ -10065,25 +10066,26 @@ const _AMBIENT_VS = `
   void main() { gl_Position = vec4(a_position, 0.0, 1.0); }
 `;
 
-// Fragment shader: a morphing sphere displaced by 3D simplex noise,
-// wrapped in dense crossed contour lines (latitude × longitude) that
-// ride the deformation — the visual equivalent of Daniel Hult's
-// CodePen pen where 30k particles at radius 2 wrap around an
-// snoise-displaced sphere at radius 1. Single-pass per-pixel:
+// Fragment shader: a small refractive glass sphere over a procedural
+// striped environment — the single-fragment-shader port of Daniel
+// Hult's webgl-refraction pen. The pen uses a big env-sphere wrapping
+// the camera + a cube-mapped refractive small sphere; we collapse both
+// into one pass by treating the environment as a function envColor(dir)
+// and sampling it from reflected/refracted ray directions. No cube
+// render target needed.
 //
-//   1. Sphere depth & normal at this pixel (visible hemisphere).
-//   2. Slow `power3.inOut`-style triangle wave drives a frequency
-//      multiplier `morph` that oscillates between morphMin..morphMax
-//      — calm → turbulent → calm — over ~16s.
-//   3. snoise(n * morph + t * 0.1) gives an organic surface field
-//      identical in spirit to the pen's `position * u_progress`.
-//   4. Latitude (asin of n.y) and longitude (atan of n.x,n.z) are
-//      both displaced by the noise — bands curve with the surface
-//      deformation, simulating the particle shell wrapping a
-//      morphing ball.
-//   5. Sky/ground directional lighting tinted by the brand color
-//      (matches the pen's sky/ground mix lighting).
-//   6. Soft silhouette falloff for clean blending.
+// Pipeline per pixel:
+//   1. If outside the ball circle → discard (page bg shows through).
+//   2. Inside: compute the sphere normal at this pixel, perturbed
+//      slightly by a slow wobble for shimmering refraction.
+//   3. Compute the view ray I from a virtual camera at +z.
+//   4. Reflect & refract I against N. Refract 3 times with slightly
+//      different IORs → chromatic aberration (R/G/B channels split).
+//   5. Sample envColor() once per ray direction, building the
+//      refracted color channel-by-channel + the reflected color.
+//   6. Fresnel weight: more reflection at glancing angles, more
+//      refraction looking straight through.
+//   7. Soft edge alpha falloff so the rim blends cleanly to the page.
 const _AMBIENT_FS = `
   precision highp float;
   uniform vec2 u_resolution;
@@ -10092,60 +10094,72 @@ const _AMBIENT_FS = `
   uniform float u_activity;
   uniform vec3 u_color;
   uniform float u_ballRadius;
-  uniform float u_morphSpeed;
-  uniform float u_morphMin;
-  uniform float u_morphMax;
-  uniform float u_morphDepth;
-  uniform float u_latLines;
-  uniform float u_lonLines;
-  uniform float u_lineDarkness;
-  uniform float u_lineSharpness;
+  uniform float u_ior;
+  uniform float u_dispersion;
+  uniform float u_fresnelPower;
+  uniform float u_fresnelScale;
+  uniform float u_envStripeFreq;
+  uniform float u_envSwirlAmp;
+  uniform float u_envSpeed;
+  uniform float u_surfaceWobble;
+  uniform float u_wobbleSpeed;
   uniform float u_alpha;
 
-  // ---- Stefan Gustavson 3D simplex noise (same as the source pen) ----
-  vec4 permute(vec4 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }
-  vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
-  float snoise(vec3 v) {
-    const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
-    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
-    vec3 i  = floor(v + dot(v, C.yyy));
-    vec3 x0 = v - i + dot(i, C.xxx);
-    vec3 g = step(x0.yzx, x0.xyz);
-    vec3 l = 1.0 - g;
-    vec3 i1 = min(g.xyz, l.zxy);
-    vec3 i2 = max(g.xyz, l.zxy);
-    vec3 x1 = x0 - i1 + 1.0 * C.xxx;
-    vec3 x2 = x0 - i2 + 2.0 * C.xxx;
-    vec3 x3 = x0 - 1.0 + 3.0 * C.xxx;
-    i = mod(i, 289.0);
-    vec4 p = permute(permute(permute(
-          i.z + vec4(0.0, i1.z, i2.z, 1.0))
-        + i.y + vec4(0.0, i1.y, i2.y, 1.0))
-      + i.x + vec4(0.0, i1.x, i2.x, 1.0));
-    float n_ = 1.0 / 7.0;
-    vec3 ns = n_ * D.wyz - D.xzx;
-    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
-    vec4 x_ = floor(j * ns.z);
-    vec4 y_ = floor(j - 7.0 * x_);
-    vec4 x = x_ * ns.x + ns.yyyy;
-    vec4 y = y_ * ns.x + ns.yyyy;
-    vec4 h = 1.0 - abs(x) - abs(y);
-    vec4 b0 = vec4(x.xy, y.xy);
-    vec4 b1 = vec4(x.zw, y.zw);
-    vec4 s0 = floor(b0) * 2.0 + 1.0;
-    vec4 s1 = floor(b1) * 2.0 + 1.0;
-    vec4 sh = -step(h, vec4(0.0));
-    vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
-    vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
-    vec3 p0 = vec3(a0.xy, h.x);
-    vec3 p1 = vec3(a0.zw, h.y);
-    vec3 p2 = vec3(a1.xy, h.z);
-    vec3 p3 = vec3(a1.zw, h.w);
-    vec4 norm = taylorInvSqrt(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
-    p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
-    vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
-    m = m * m;
-    return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
+  // Cheap hash-based value noise — good enough for env warping,
+  // way lighter than simplex when we sample 4× per pixel.
+  float hash13(vec3 p) {
+    p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yzx + 19.19);
+    return fract((p.x + p.y) * p.z);
+  }
+  float vnoise(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float n000 = hash13(i);
+    float n100 = hash13(i + vec3(1.0, 0.0, 0.0));
+    float n010 = hash13(i + vec3(0.0, 1.0, 0.0));
+    float n110 = hash13(i + vec3(1.0, 1.0, 0.0));
+    float n001 = hash13(i + vec3(0.0, 0.0, 1.0));
+    float n101 = hash13(i + vec3(1.0, 0.0, 1.0));
+    float n011 = hash13(i + vec3(0.0, 1.0, 1.0));
+    float n111 = hash13(i + vec3(1.0, 1.0, 1.0));
+    float nx00 = mix(n000, n100, f.x);
+    float nx10 = mix(n010, n110, f.x);
+    float nx01 = mix(n001, n101, f.x);
+    float nx11 = mix(n011, n111, f.x);
+    float nxy0 = mix(nx00, nx10, f.y);
+    float nxy1 = mix(nx01, nx11, f.y);
+    return mix(nxy0, nxy1, f.z) * 2.0 - 1.0;
+  }
+
+  mat2 rot2D(float a) {
+    float c = cos(a), s = sin(a);
+    return mat2(c, -s, s, c);
+  }
+
+  // Procedural environment, sampled by ray direction. Mirrors the
+  // big-sphere shader in the source pen: noise-rotated stripes
+  // blending three colors (paper / accent / brand). Brand color is
+  // theme-driven so it works across all themes.
+  vec3 envColor(vec3 dir) {
+    vec3 paper = vec3(0.97, 0.96, 0.93);
+    vec3 brand = u_color;
+    vec3 accent = mix(brand, paper, 0.45);
+
+    // Noise-driven swirl angle — env feels alive without obvious motion.
+    float n = vnoise(dir * 1.8 + vec3(u_time * u_envSpeed));
+    vec2 uv = rot2D(n * u_envSwirlAmp) * dir.xy * 1.4;
+
+    // Two stripe scales, like the pen's basePattern / secondPattern.
+    float coarse = smoothstep(0.0, 0.75,
+      abs(0.5 * (sin(uv.x * u_envStripeFreq) + 1.0)));
+    float fine = smoothstep(0.0, 0.55,
+      abs(0.5 * (sin(uv.x * u_envStripeFreq * 3.0 + n * 1.2) + 0.4)));
+
+    vec3 c = mix(brand, paper, coarse);
+    c = mix(c, accent, fine * 0.4);
+    return c;
   }
 
   void main() {
@@ -10160,62 +10174,50 @@ const _AMBIENT_FS = `
     float r = length(d);
     if (r > radius) discard;
 
-    // Visible-hemisphere depth and normal.
+    // Visible-hemisphere depth and base normal.
     float z = sqrt(radius * radius - r * r) / radius;
-    vec3 n = normalize(vec3(d.x / radius, d.y / radius, z));
+    vec3 N = normalize(vec3(d.x / radius, d.y / radius, z));
 
-    // Slow eased morph: triangle wave 0→1→0 over (1/morphSpeed) seconds,
-    // smoothstep-eased toward power3.inOut. Drives the noise frequency.
-    float tri = abs(fract(u_time * u_morphSpeed) - 0.5) * 2.0;
-    float ease = tri * tri * (3.0 - 2.0 * tri);
-    float morph = mix(u_morphMin, u_morphMax, ease);
+    // Slow surface wobble — noise-perturb the normal so the refracted
+    // image shimmers like real glass with subtle deformations.
+    vec3 wobbleP = N * 2.5 + vec3(u_time * u_wobbleSpeed);
+    vec3 wobble = vec3(
+      vnoise(wobbleP),
+      vnoise(wobbleP + vec3(11.3, 0.0, 0.0)),
+      vnoise(wobbleP + vec3(0.0, 17.7, 0.0))
+    );
+    N = normalize(N + wobble * u_surfaceWobble);
 
-    // Organic noise field over the sphere surface (matches the pen's
-    // \`snoise(position * u_progress + t / 10)\` displacement).
-    float noise = snoise(n * morph + vec3(u_time * 0.10));
-    // Cheap analytic gradient via two extra samples, used for normal
-    // perturbation so light catches the deformation.
-    float eps = 0.06;
-    float nx = snoise(n * morph + vec3(eps, 0.0, 0.0) + vec3(u_time * 0.10)) - noise;
-    float ny = snoise(n * morph + vec3(0.0, eps, 0.0) + vec3(u_time * 0.10)) - noise;
+    // View ray from a virtual camera straight in front of the sphere.
+    // Slight off-axis offset keyed to ball position so the highlights
+    // shift as the cursor moves the ball around the screen.
+    vec3 camPos = vec3(0.0, 0.0, 2.0);
+    vec3 surfacePos = vec3(d.x, d.y, z * radius);
+    vec3 I = normalize(surfacePos - camPos);
 
-    // Lat / lon angles. Displace BOTH by the noise so contour lines
-    // curve with the deformation — this is what reads as "lines that
-    // move with the waves".
-    float lat = asin(clamp(n.y, -1.0, 1.0));
-    float lon = atan(n.x, n.z);
-    float dispLat = lat + noise * u_morphDepth;
-    float dispLon = lon + noise * u_morphDepth * 0.7;
+    // Chromatic refraction: three rays at slightly different IORs.
+    vec3 refR = refract(I, N, u_ior + u_dispersion);
+    vec3 refG = refract(I, N, u_ior);
+    vec3 refB = refract(I, N, u_ior - u_dispersion);
+    vec3 reflR = reflect(I, N);
 
-    // Triangle-wave stripe masks, smoothstep'd for crisp soft edges.
-    float bandLat = abs(fract(dispLat * u_latLines / 3.14159) - 0.5);
-    float bandLon = abs(fract(dispLon * u_lonLines / 6.28318) - 0.5);
-    float maskLat = smoothstep(0.0, u_lineSharpness, bandLat);
-    float maskLon = smoothstep(0.0, u_lineSharpness, bandLon);
-    // Lines from EITHER direction darken the surface. min() = union of darkness.
-    float lineMask = min(maskLat, maskLon);
+    vec3 refracted;
+    refracted.r = envColor(refR).r;
+    refracted.g = envColor(refG).g;
+    refracted.b = envColor(refB).b;
+    vec3 reflected = envColor(reflR);
 
-    // Sky/ground directional lighting (mirrors the pen's mix). The
-    // sky tint pulls toward the brand color; ground is a dark wash
-    // so the unlit side of the ball sinks into the background.
-    vec3 lightDir = normalize(vec3(0.35, 0.55, 0.75));
-    vec3 nPerturbed = normalize(n + vec3(nx, ny, 0.0) * 3.0);
-    float ld = dot(lightDir, nPerturbed) * 0.5 + 0.5;
-    vec3 skyColor = mix(u_color * 1.05, u_color, 0.4);
-    vec3 groundColor = u_color * 0.18;
-    vec3 baseColor = mix(groundColor, skyColor, ld);
+    // Fresnel — more reflection at glancing angles (silhouette rim),
+    // more refraction looking straight through the center.
+    float fresnel = pow(clamp(1.0 + dot(I, N), 0.0, 1.0), u_fresnelPower);
+    fresnel = clamp(fresnel * u_fresnelScale, 0.0, 1.0);
 
-    // Subtle hue/value modulation from the noise itself — the surface
-    // breathes color slightly as it morphs, like the pen's hsv shift.
-    baseColor *= 0.85 + noise * 0.25;
+    vec3 col = mix(refracted, reflected, fresnel);
 
-    // Paint the dark line bands over the lit surface.
-    vec3 finalColor = mix(baseColor * u_lineDarkness, baseColor, lineMask);
-
-    // Soft silhouette falloff.
-    float edge = smoothstep(0.0, radius * 0.12, radius - r);
+    // Soft silhouette falloff so the ball blends to the page bg.
+    float edge = smoothstep(0.0, radius * 0.06, radius - r);
     float alpha = edge * u_activity * u_alpha;
-    gl_FragColor = vec4(finalColor, alpha);
+    gl_FragColor = vec4(col, alpha);
   }
 `;
 
@@ -10268,14 +10270,15 @@ function _initAmbientShader() {
     u_activity: gl.getUniformLocation(prog, 'u_activity'),
     u_color: gl.getUniformLocation(prog, 'u_color'),
     u_ballRadius: gl.getUniformLocation(prog, 'u_ballRadius'),
-    u_morphSpeed: gl.getUniformLocation(prog, 'u_morphSpeed'),
-    u_morphMin: gl.getUniformLocation(prog, 'u_morphMin'),
-    u_morphMax: gl.getUniformLocation(prog, 'u_morphMax'),
-    u_morphDepth: gl.getUniformLocation(prog, 'u_morphDepth'),
-    u_latLines: gl.getUniformLocation(prog, 'u_latLines'),
-    u_lonLines: gl.getUniformLocation(prog, 'u_lonLines'),
-    u_lineDarkness: gl.getUniformLocation(prog, 'u_lineDarkness'),
-    u_lineSharpness: gl.getUniformLocation(prog, 'u_lineSharpness'),
+    u_ior: gl.getUniformLocation(prog, 'u_ior'),
+    u_dispersion: gl.getUniformLocation(prog, 'u_dispersion'),
+    u_fresnelPower: gl.getUniformLocation(prog, 'u_fresnelPower'),
+    u_fresnelScale: gl.getUniformLocation(prog, 'u_fresnelScale'),
+    u_envStripeFreq: gl.getUniformLocation(prog, 'u_envStripeFreq'),
+    u_envSwirlAmp: gl.getUniformLocation(prog, 'u_envSwirlAmp'),
+    u_envSpeed: gl.getUniformLocation(prog, 'u_envSpeed'),
+    u_surfaceWobble: gl.getUniformLocation(prog, 'u_surfaceWobble'),
+    u_wobbleSpeed: gl.getUniformLocation(prog, 'u_wobbleSpeed'),
     u_alpha: gl.getUniformLocation(prog, 'u_alpha'),
   };
 
@@ -10385,14 +10388,15 @@ function _renderAmbient(time, activity) {
   gl.uniform1f(_ambientUniforms.u_activity, activity);
   gl.uniform3f(_ambientUniforms.u_color, _ambientBrandRGB[0], _ambientBrandRGB[1], _ambientBrandRGB[2]);
   gl.uniform1f(_ambientUniforms.u_ballRadius, _AMBIENT.ballRadius);
-  gl.uniform1f(_ambientUniforms.u_morphSpeed, _AMBIENT.morphSpeed);
-  gl.uniform1f(_ambientUniforms.u_morphMin, _AMBIENT.morphMin);
-  gl.uniform1f(_ambientUniforms.u_morphMax, _AMBIENT.morphMax);
-  gl.uniform1f(_ambientUniforms.u_morphDepth, _AMBIENT.morphDepth);
-  gl.uniform1f(_ambientUniforms.u_latLines, _AMBIENT.latLines);
-  gl.uniform1f(_ambientUniforms.u_lonLines, _AMBIENT.lonLines);
-  gl.uniform1f(_ambientUniforms.u_lineDarkness, _AMBIENT.lineDarkness);
-  gl.uniform1f(_ambientUniforms.u_lineSharpness, _AMBIENT.lineSharpness);
+  gl.uniform1f(_ambientUniforms.u_ior, _AMBIENT.ior);
+  gl.uniform1f(_ambientUniforms.u_dispersion, _AMBIENT.dispersion);
+  gl.uniform1f(_ambientUniforms.u_fresnelPower, _AMBIENT.fresnelPower);
+  gl.uniform1f(_ambientUniforms.u_fresnelScale, _AMBIENT.fresnelScale);
+  gl.uniform1f(_ambientUniforms.u_envStripeFreq, _AMBIENT.envStripeFreq);
+  gl.uniform1f(_ambientUniforms.u_envSwirlAmp, _AMBIENT.envSwirlAmp);
+  gl.uniform1f(_ambientUniforms.u_envSpeed, _AMBIENT.envSpeed);
+  gl.uniform1f(_ambientUniforms.u_surfaceWobble, _AMBIENT.surfaceWobble);
+  gl.uniform1f(_ambientUniforms.u_wobbleSpeed, _AMBIENT.wobbleSpeed);
   gl.uniform1f(_ambientUniforms.u_alpha, _AMBIENT.alpha);
 
   gl.enable(gl.BLEND);
