@@ -1121,7 +1121,10 @@ body[data-lib-view="grid"] .lib-size { display: inline-flex; }
   flex-direction: column;
   flex-wrap: wrap;
   align-content: flex-start;
-  height: 100%;
+  /* 100vh (not 100%) — percentage heights inside flex:1 parents can
+     resolve to auto-sized values in some engines, leaving the grid
+     short of the viewport. vh is bulletproof. */
+  height: 100vh;
   gap: 16px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -5123,26 +5126,18 @@ function setView(v) {
 // across device buckets — a setting like this is preference, not
 // device-bucketed reading config.
 // Slider value is the desired number of vertical rows of books (1-6).
-// We size the cards so exactly that many fit in the lib-body's content
-// height: card height = (usable_height - row_gaps) / rows, card width =
-// card height × 2/3 (the cover aspect). Result is written into the
-// --grid-card-min-width custom property that .gc reads. Resize listener
-// elsewhere re-runs this whenever the viewport changes.
+// Card height = (viewport_height - row_gaps) / rows; width follows
+// from the 2:3 cover aspect. Using window.innerHeight directly (rather
+// than lib-body's clientHeight - padding) sidesteps a flex sizing
+// quirk where percentage heights inside a flex:1 parent can resolve
+// to auto-sized values, leaving cards short of the viewport.
 function setLibrarySize(value) {
   const rows = Math.max(1, Math.min(6, parseInt(value, 10) || 3));
-  const libBody = $('lib-body');
-  if (libBody) {
-    const styles = getComputedStyle(libBody);
-    const padTop = parseFloat(styles.paddingTop) || 0;
-    const padBottom = parseFloat(styles.paddingBottom) || 0;
-    const usable = libBody.clientHeight - padTop - padBottom;
-    const gap = 16; // matches .view-grid `gap`
-    if (usable > 0) {
-      const cardHeight = (usable - (rows - 1) * gap) / rows;
-      const cardWidth = Math.max(60, Math.floor(cardHeight * (2 / 3)));
-      document.documentElement.style.setProperty('--grid-card-min-width', cardWidth + 'px');
-    }
-  }
+  const usable = window.innerHeight;
+  const gap = 16; // matches .view-grid `gap`
+  const cardHeight = (usable - (rows - 1) * gap) / rows;
+  const cardWidth = Math.max(60, Math.floor(cardHeight * (2 / 3)));
+  document.documentElement.style.setProperty('--grid-card-min-width', cardWidth + 'px');
   const slider = $('sl-libsize');
   if (slider && slider.value != String(rows)) slider.value = rows;
   localStorage.setItem('tomen_libGridSize', String(rows));
