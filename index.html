@@ -1072,13 +1072,11 @@ html, body {
   overflow-y: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--brand) transparent;
-  /* Column snap: scroll always settles with whole columns flush to the
-     left padding — no partial column hanging off either edge. The wheel
-     handler rounds its smooth-scroll target to a column step so the
-     ease and the snap don't fight; trackpad / touch let the browser's
-     native snap finish them. */
-  scroll-snap-type: x mandatory;
-  scroll-padding-left: var(--lib-edge-pad);
+  /* Column snap is handled in JS, not via CSS scroll-snap — mandatory
+     CSS snap fights the smooth-wheel rAF loop (each partial-step write
+     gets instantly snapped back, killing the animation). Instead, the
+     wheel handler targets exact snap points, and a scrollend listener
+     pulls trackpad / touch scrolls onto the nearest column. */
   /* Drives the .col-item::before two-digit running index. Items now
      flow column-major (because of flex-direction: column + wrap), so
      the numbers run down a column before jumping to the next — natural
@@ -1102,9 +1100,6 @@ html, body {
   column-gap: 8px;
   cursor: pointer;
   counter-increment: bookindex;
-  /* Every item is a snap target; items in the same visual column share
-     an X position so the browser picks the leftmost as the snap. */
-  scroll-snap-align: start;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -6665,6 +6660,64 @@ function _setupSmoothWheelScroll() {
   libBody.addEventListener('touchstart', cancel, { passive: true });
 }
 
+// ===== COLUMNS-VIEW SNAP =====
+// After the text-view shelf finishes scrolling (touch release, trackpad
+// settle, scrollbar drag), pull the position to the nearest column
+// boundary so columns are always flush to the left edge. Mouse-wheel
+// targets already land exactly on a snap point via the smooth-wheel
+// handler, so this is a no-op for that path. Listens on lib-body
+// (delegated) so it survives .view-columns being recreated on every
+// render. Uses the modern scrollend event when available; otherwise
+// falls back to a debounced scroll listener.
+function _setupColumnSnap() {
+  const libBody = $('lib-body');
+  if (!libBody) return;
+  let debounceTimer = null;
+  // True while we're mid-programmatic snap — avoids re-snapping a snap.
+  let snapping = false;
+
+  const snapNow = (el) => {
+    if (!el || snapping) return;
+    const colW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lib-col-width')) || 0;
+    const colGap = parseFloat(getComputedStyle(el).columnGap) || 0;
+    const step = colW + colGap;
+    if (step <= 0) return;
+    const current = el.scrollLeft;
+    const max = el.scrollWidth - el.clientWidth;
+    const snapped = Math.max(0, Math.min(Math.round(current / step) * step, max));
+    if (Math.abs(snapped - current) < 0.5) return;
+    snapping = true;
+    el.scrollTo({ left: snapped, behavior: 'smooth' });
+    // Release the snapping flag after the smooth scroll finishes. 400ms
+    // is a generous cap — browsers' "smooth" scroll usually completes
+    // well under that.
+    setTimeout(() => { snapping = false; }, 400);
+  };
+
+  const onScroll = (e) => {
+    const el = e.target;
+    if (!el || !el.classList || !el.classList.contains('view-columns')) return;
+    if (currentView !== 'columns') return;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => snapNow(el), 120);
+  };
+  // scroll doesn't bubble — listen in capture phase so we catch it
+  // regardless of which descendant is the scroll source.
+  libBody.addEventListener('scroll', onScroll, true);
+
+  // Modern scrollend fires once after scrolling fully settles — preferred
+  // over the scroll-debounce since it's exact, not heuristic.
+  if ('onscrollend' in window) {
+    libBody.addEventListener('scrollend', (e) => {
+      const el = e.target;
+      if (!el || !el.classList || !el.classList.contains('view-columns')) return;
+      if (currentView !== 'columns') return;
+      clearTimeout(debounceTimer);
+      snapNow(el);
+    }, true);
+  }
+}
+
 // ===== GRID SCROLL TILT =====
 // Books in grid view turn slightly on their Y axis as the grid scrolls,
 // proportional to scroll speed — a flick sends them leaning into the
@@ -11671,6 +11724,8 @@ function renderGreeting() {
   _setupSmoothWheelScroll();
   // Grid-view books turn on their Y axis in response to scroll velocity.
   _setupGridScrollTilt();
+  // Text-view shelf snaps to column boundaries after the scroll settles.
+  _setupColumnSnap();
 
   // Recompute card width on viewport resize — `rows` is fixed but the
   // available height changes, so we re-derive the per-card size. Debounced
