@@ -1056,34 +1056,39 @@ html, body {
    show reading state without taking visual weight. */
 .view-columns {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 4px 28px;
-  padding: 4px 0;
+  /* Fewer, wider columns so the bumped-up titles have room to read. */
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 6px 32px;
+  padding: 8px 0;
 }
 .col-item {
-  padding: 10px 0;
+  padding: 14px 0;
   border-bottom: 0.5px solid var(--border);
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
 }
 .col-item:hover .col-title { color: var(--brand-ink); }
+/* Zune-ish title typography: confident, generous, in the reading face,
+   2-line clamp so long titles ellipsize cleanly. */
 .col-title {
-  font-family: var(--font-read); font-size: 17px; font-weight: 400;
-  line-height: 1.25; color: var(--ink);
-  letter-spacing: -0.2px;
+  font-family: var(--font-read); font-size: 36px; font-weight: 400;
+  line-height: 1.05; color: var(--ink);
+  letter-spacing: -0.6px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 .col-author {
-  font-size: 11px; color: var(--fog); margin-top: 2px;
+  font-size: 13px; color: var(--stone); margin-top: 8px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* Hairline progress underline — rendered only when progress > 0 (see
+   renderColumnsView). 1px brand stroke at the very bottom of the row. */
 .col-progress {
   height: 1px; background: transparent;
-  margin-top: 6px;
+  margin-top: 10px;
 }
 .col-progress-fill {
   height: 100%; background: var(--brand);
@@ -3791,7 +3796,10 @@ body.lib-select-mode .col-item {
      .gc, so the aspect ratio holds at every viewport. */
   .view-grid { --grid-gap: 16px; }
   .tr-title { font-size: 16px; }
-  .col-title { font-size: 15px; }
+  /* Scale Zune title down on phones — desktop 36px is too aggressive
+     at narrow widths, but we still want it noticeably bigger than the
+     old 15px so the menu feel survives. */
+  .col-title { font-size: 26px; letter-spacing: -0.4px; }
   .icon-btn { width: 32px; height: 32px; }
   .icon-btn svg { width: 18px; height: 18px; }
   .icon-btn .ph { font-size: 18px; }
@@ -6525,9 +6533,11 @@ function renderColumnsView(el, books) {
   el.innerHTML = '<div class="view-columns">' + books.map(b => {
     const p = b.progress || 0;
     const sel = _libSelectedIds.has(b.id) ? ' selected' : '';
+    // Unread books get no progress slot at all — the row keeps the
+     // bottom border for separation and stays as minimal as possible.
     const progressFill = p > 0
       ? `<div class="col-progress"><div class="col-progress-fill" style="width:${p}%"></div></div>`
-      : '<div class="col-progress"></div>';
+      : '';
     return `<div class="col-item${sel}" data-book-id="${b.id}" onclick="openBookById('${b.id}')" title="Right-click or long-press for options">
       <div class="col-title">${esc(b.title)}</div>
       <div class="col-author">${esc(b.author || 'Unknown')}</div>
