@@ -5064,14 +5064,9 @@ let _dragDropTarget = null;
 
 function _armDragSource(card, bookId, startX, startY, pointerId) {
   _dragSource = { card, bookId, startX, startY, pointerId };
-  // Capture the pointer to lib-body NOW (before the threshold check, not
-  // when drag mode actually enters). On touch, the long-press menu opens
-  // at the press point — without capture, the user's finger ends up over
-  // the menu (which lives at body level, outside lib-body), so subsequent
-  // pointermove events don't reach the lib-body handler and the drag
-  // threshold is never crossed. With capture, all pointer events for
-  // this pointerId route to lib-body until release.
-  try { $('lib-body').setPointerCapture(pointerId); } catch (_) {}
+  // No setPointerCapture — the pointermove/up listeners are attached at
+  // the document level (see _attachLibraryLongPress), so they fire even
+  // when the cursor is over the body-level book-menu or off the grid.
 }
 
 function _enterDragMode(clientX, clientY) {
@@ -5293,17 +5288,18 @@ function _attachLibraryLongPress() {
   if (!body || body.dataset.longPressAttached === '1') return;
   body.dataset.longPressAttached = '1';
   body.addEventListener('pointerdown', _onLibPointerDown);
-  // _onLibPointerUp finishes drags AND cancels pending long-press timers
-  // (replaces the old _cancelLongPressTimer attachment). pointercancel
-  // and pointerleave route through the same path so a stray release
-  // cleans up both the drag visuals and any in-flight timer.
-  body.addEventListener('pointerup', _onLibPointerUp);
-  body.addEventListener('pointercancel', _onLibPointerUp);
-  body.addEventListener('pointerleave', _onLibPointerUp);
-  // passive: false so _onLibPointerMove can preventDefault during an
-  // active drag (suppresses native touch scroll on the grid).
-  body.addEventListener('pointermove', _onLibPointerMove, { passive: false });
   body.addEventListener('contextmenu', _onLibContextMenu);
+  // pointermove / pointerup / pointercancel live on document, not lib-body.
+  // The long-press menu opens at body level (outside lib-body), so if
+  // those listeners were on lib-body the user's finger could move OVER
+  // the menu and the events would never bubble back. The handlers are
+  // already gated on _dragSource / _longPressTimer, so they're no-ops
+  // outside a library interaction.
+  // passive: false so an active drag can preventDefault native touch
+  // scroll on the grid.
+  document.addEventListener('pointermove', _onLibPointerMove, { passive: false });
+  document.addEventListener('pointerup', _onLibPointerUp);
+  document.addEventListener('pointercancel', _onLibPointerUp);
 }
 
 // ===== BULK SELECT =====
