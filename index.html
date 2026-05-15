@@ -1271,7 +1271,6 @@ html, body {
 .view-grid.is-tilting .gc {
   will-change: transform;
 }
-.gc:hover .gc-cover { transform: translateY(-2px); }
 .gc-cover { cursor: pointer; }
 .gc-title, .gc-author { cursor: pointer; }
 .gc-cover {
@@ -1296,6 +1295,12 @@ html, body {
   /* Each cover is its own 3D scene so the edge slabs render correctly
      in depth when the parent .gc tilts. */
   transform-style: preserve-3d;
+  /* Cursor-follow rotate — _setupHoverRotate sets --gc-hover-x/y on the
+     parent .gc while it's hovered and clears them on leave; the
+     transition eases the cover both as the cursor moves around and back
+     to flat when the cursor exits. */
+  transform: rotateY(var(--gc-hover-y, 0deg)) rotateX(var(--gc-hover-x, 0deg));
+  transition: transform 140ms ease-out;
 }
 .gc-cover > img {
   border-radius: 2px;
@@ -6045,6 +6050,67 @@ function _setupGridScrollTilt() {
     grid.classList.add('is-tilting');
     if (!rafId) rafId = requestAnimationFrame(tick);
   }, true);
+}
+
+// ===== HOVER ROTATE =====
+// While a book card is hovered, the cover follows the cursor — rotates
+// subtly around its center along the X and Y axes so the front face
+// "looks toward" the pointer. Listener is delegated to lib-body; only
+// real pointer devices (mouse, pen) participate, since touch has no
+// hover. Replaces the old flat translateY(-2px) lift.
+// Group containers (.gc-group) skip the effect because they have no
+// .gc-cover child — only the mini-books inside tilt individually, the
+// container itself stays flat.
+function _setupHoverRotate() {
+  const libBody = $('lib-body');
+  if (!libBody) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  const MAX_DEG = 7;
+  let hovered = null;
+  let pending = null;
+  let rafId = null;
+
+  const clear = (card) => {
+    if (!card) return;
+    card.style.removeProperty('--gc-hover-x');
+    card.style.removeProperty('--gc-hover-y');
+  };
+
+  const apply = () => {
+    rafId = null;
+    const p = pending; pending = null;
+    if (!p) return;
+    const card = p.target.closest && p.target.closest('.gc');
+    // Group containers don't tilt themselves; treat the gap between
+    // mini-books as "no card hovered" so the previous mini's rotate
+    // resets cleanly when the cursor wanders into the gap.
+    const tiltable = (card && !card.classList.contains('gc-group')) ? card : null;
+    if (tiltable !== hovered) {
+      clear(hovered);
+      hovered = tiltable;
+    }
+    if (!tiltable) return;
+    const rect = tiltable.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const normX = ((p.clientX - rect.left) / rect.width) * 2 - 1;
+    const normY = ((p.clientY - rect.top) / rect.height) * 2 - 1;
+    // Cursor right → face turns right (positive rotateY); cursor below
+    // → face tips down (negative rotateX, since CSS y grows downward).
+    tiltable.style.setProperty('--gc-hover-y', (normX * MAX_DEG).toFixed(2) + 'deg');
+    tiltable.style.setProperty('--gc-hover-x', (-normY * MAX_DEG).toFixed(2) + 'deg');
+  };
+
+  libBody.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch') return;
+    pending = { target: e.target, clientX: e.clientX, clientY: e.clientY };
+    if (!rafId) rafId = requestAnimationFrame(apply);
+  }, { passive: true });
+
+  libBody.addEventListener('pointerleave', () => {
+    clear(hovered);
+    hovered = null;
+  });
 }
 
 // Columns view — compact title-scan, multi-column layout. No covers,
@@ -10985,6 +11051,9 @@ function renderGreeting() {
   _setupSmoothWheelScroll();
   // Grid-view books turn on their Y axis in response to scroll velocity.
   _setupGridScrollTilt();
+  // Cursor-follow rotate on hover — the hovered card's cover tilts to
+  // track the pointer along X and Y.
+  _setupHoverRotate();
 
   // Recompute card width on viewport resize — `rows` is fixed but the
   // available height changes, so we re-derive the per-card size. Debounced
