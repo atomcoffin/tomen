@@ -1295,13 +1295,6 @@ html, body {
   /* Each cover is its own 3D scene so the edge slabs render correctly
      in depth when the parent .gc tilts. */
   transform-style: preserve-3d;
-  /* Cursor-follow rotate — _setupHoverRotate sets --gc-hover-x/y on the
-     parent .gc while it's hovered and clears them on leave. The long
-     duration + easeOutQuint-style curve gives the cover a lazy trailing
-     follow as the cursor moves, and a slow settle back to flat on exit —
-     matching the chill tempo of the rest of the library motion. */
-  transform: rotateY(var(--gc-hover-y, 0deg)) rotateX(var(--gc-hover-x, 0deg));
-  transition: transform 450ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .gc-cover > img {
   border-radius: 2px;
@@ -4900,6 +4893,79 @@ async function onNewGroupForBook(bookId) {
   renderLibrary();
 }
 
+// Group context menu — reuses the floating book-menu element and styling
+// since the popover is the same shape. Reachable via long-press or
+// right-click on a group's empty area (mini-books inside still own the
+// book menu via their own data-book-id).
+function openGroupMenu(ev, groupId, anchorEl) {
+  if (ev) {
+    if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+    if (typeof ev.preventDefault === 'function') ev.preventDefault();
+  }
+  const g = _findGroup(groupId);
+  if (!g) return;
+  const menu = $('book-menu');
+  if (!menu) return;
+  _bookMenuId = null;
+  menu.innerHTML = `
+    <button class="book-menu-item" role="menuitem" onclick="renameGroupPrompt('${groupId}')">
+      <i class="ph ph-pencil-simple"></i>Rename
+    </button>
+    <button class="book-menu-item danger" role="menuitem" onclick="confirmDeleteGroup('${groupId}')">
+      <i class="ph ph-trash"></i>Delete group
+    </button>`;
+  menu.classList.add('open');
+  if (ev && typeof ev.clientX === 'number' && typeof ev.clientY === 'number'
+      && (ev.clientX || ev.clientY)) {
+    _positionFloatingMenuAtPoint(menu, ev.clientX, ev.clientY);
+  } else if (anchorEl) {
+    positionFloatingMenu(menu, anchorEl);
+  } else if (ev && ev.currentTarget) {
+    positionFloatingMenu(menu, ev.currentTarget);
+  }
+}
+// Rename — preloads the prompt with the current name; empty input is
+// allowed and turns the group into an unnamed one.
+async function renameGroupPrompt(groupId) {
+  closeBookMenu();
+  const g = _findGroup(groupId);
+  if (!g) return;
+  const name = window.prompt('Group name (optional):', g.name || '');
+  if (name === null) return;
+  g.name = name.trim();
+  await _saveGroup(g);
+  _bumpLibraryVersion();
+  renderLibrary();
+}
+// Delete — themed confirm dialog (reuses confirmDialog). Books inside
+// aren't deleted; once the group record is gone the hide rule no longer
+// catches them, so they reappear in the main library.
+function confirmDeleteGroup(groupId) {
+  closeBookMenu();
+  const g = _findGroup(groupId);
+  if (!g) return;
+  const displayName = _groupDisplayName(g);
+  const memberCount = (g.bookIds || []).length;
+  const memberHint = memberCount > 0
+    ? ` The ${memberCount} book${memberCount === 1 ? '' : 's'} inside will return to your main library.`
+    : '';
+  confirmDialog({
+    title: 'Delete this group?',
+    message: `<strong>${esc(displayName)}</strong> will be removed.${memberHint} Your books and reading progress are not affected.`,
+    dangerLabel: 'Delete',
+    onConfirm: async () => {
+      await deleteGroupById(groupId);
+      if (_activeGroupId === groupId) _activeGroupId = null;
+      renderLibrary();
+    }
+  });
+}
+async function deleteGroupById(id) {
+  try { await dbDelete('groups', id); } catch (err) { console.error('delete group failed:', err); }
+  groups = groups.filter(g => g.id !== id);
+  _bumpLibraryVersion();
+}
+
 // Position a floating menu at a specific viewport point, clamped to
 // stay on screen. Used by right-click on book cards so the menu lands
 // where the cursor is, not where the card's anchor would put it.
@@ -4937,6 +5003,14 @@ function _findLibraryBookCard(target) {
   if (!target || typeof target.closest !== 'function') return null;
   return target.closest('.gc[data-book-id], .tr-item[data-book-id], .col-item[data-book-id]');
 }
+// Group cards (grid only) are matched separately so book actions don't
+// trigger on a group container, and vice versa. Right-click / long-press
+// on a mini-book inside a group still opens the book menu (the mini has
+// data-book-id and matches the book selector first).
+function _findLibraryGroupCard(target) {
+  if (!target || typeof target.closest !== 'function') return null;
+  return target.closest('.gc[data-group-id]');
+}
 
 function _onLibPointerDown(e) {
   // Only primary button on mouse; touch always has button:0.
@@ -4945,17 +5019,34 @@ function _onLibPointerDown(e) {
   // don't double-fire by also running the long-press timer.
   if (e.target && e.target.closest && e.target.closest('.gc-menu-hint, .tr-menu-hint')) return;
   const card = _findLibraryBookCard(e.target);
-  if (!card) return;
-  const bookId = card.dataset.bookId;
-  if (!bookId) return;
-  _longPressFired = false;
-  _longPressStartX = e.clientX;
-  _longPressStartY = e.clientY;
-  _longPressTimer = setTimeout(() => {
-    _longPressTimer = null;
-    _longPressFired = true;
-    openBookMenu(null, bookId, card);
-  }, _LONG_PRESS_MS);
+  if (card) {
+    const bookId = card.dataset.bookId;
+    if (!bookId) return;
+    _longPressFired = false;
+    _longPressStartX = e.clientX;
+    _longPressStartY = e.clientY;
+    _longPressTimer = setTimeout(() => {
+      _longPressTimer = null;
+      _longPressFired = true;
+      openBookMenu(null, bookId, card);
+    }, _LONG_PRESS_MS);
+    return;
+  }
+  // No book card under the pointer — try a group card next. Long-press on
+  // the group's empty area opens the group context menu (Rename / Delete).
+  const groupCard = _findLibraryGroupCard(e.target);
+  if (groupCard) {
+    const groupId = groupCard.dataset.groupId;
+    if (!groupId) return;
+    _longPressFired = false;
+    _longPressStartX = e.clientX;
+    _longPressStartY = e.clientY;
+    _longPressTimer = setTimeout(() => {
+      _longPressTimer = null;
+      _longPressFired = true;
+      openGroupMenu(null, groupId, groupCard);
+    }, _LONG_PRESS_MS);
+  }
 }
 
 function _onLibPointerMove(e) {
@@ -4981,11 +5072,21 @@ function _onLibContextMenu(e) {
   // position — what the user expects from a right-click — instead of
   // anchoring to the card's corner.
   const card = _findLibraryBookCard(e.target);
-  if (!card) return;
-  e.preventDefault();
-  const bookId = card.dataset.bookId;
-  if (!bookId) return;
-  openBookMenu(e, bookId);
+  if (card) {
+    e.preventDefault();
+    const bookId = card.dataset.bookId;
+    if (!bookId) return;
+    openBookMenu(e, bookId);
+    return;
+  }
+  // Right-click on a group's empty area opens the group menu.
+  const groupCard = _findLibraryGroupCard(e.target);
+  if (groupCard) {
+    e.preventDefault();
+    const groupId = groupCard.dataset.groupId;
+    if (!groupId) return;
+    openGroupMenu(e, groupId);
+  }
 }
 
 function _attachLibraryLongPress() {
@@ -6086,67 +6187,6 @@ function _setupGridScrollTilt() {
     grid.classList.add('is-tilting');
     if (!rafId) rafId = requestAnimationFrame(tick);
   }, true);
-}
-
-// ===== HOVER ROTATE =====
-// While a book card is hovered, the cover follows the cursor — rotates
-// subtly around its center along the X and Y axes so the front face
-// "looks toward" the pointer. Listener is delegated to lib-body; only
-// real pointer devices (mouse, pen) participate, since touch has no
-// hover. Replaces the old flat translateY(-2px) lift.
-// Group containers (.gc-group) skip the effect because they have no
-// .gc-cover child — only the mini-books inside tilt individually, the
-// container itself stays flat.
-function _setupHoverRotate() {
-  const libBody = $('lib-body');
-  if (!libBody) return;
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-  const MAX_DEG = 7;
-  let hovered = null;
-  let pending = null;
-  let rafId = null;
-
-  const clear = (card) => {
-    if (!card) return;
-    card.style.removeProperty('--gc-hover-x');
-    card.style.removeProperty('--gc-hover-y');
-  };
-
-  const apply = () => {
-    rafId = null;
-    const p = pending; pending = null;
-    if (!p) return;
-    const card = p.target.closest && p.target.closest('.gc');
-    // Group containers don't tilt themselves; treat the gap between
-    // mini-books as "no card hovered" so the previous mini's rotate
-    // resets cleanly when the cursor wanders into the gap.
-    const tiltable = (card && !card.classList.contains('gc-group')) ? card : null;
-    if (tiltable !== hovered) {
-      clear(hovered);
-      hovered = tiltable;
-    }
-    if (!tiltable) return;
-    const rect = tiltable.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    const normX = ((p.clientX - rect.left) / rect.width) * 2 - 1;
-    const normY = ((p.clientY - rect.top) / rect.height) * 2 - 1;
-    // Cursor right → face turns right (positive rotateY); cursor below
-    // → face tips down (negative rotateX, since CSS y grows downward).
-    tiltable.style.setProperty('--gc-hover-y', (normX * MAX_DEG).toFixed(2) + 'deg');
-    tiltable.style.setProperty('--gc-hover-x', (-normY * MAX_DEG).toFixed(2) + 'deg');
-  };
-
-  libBody.addEventListener('pointermove', (e) => {
-    if (e.pointerType === 'touch') return;
-    pending = { target: e.target, clientX: e.clientX, clientY: e.clientY };
-    if (!rafId) rafId = requestAnimationFrame(apply);
-  }, { passive: true });
-
-  libBody.addEventListener('pointerleave', () => {
-    clear(hovered);
-    hovered = null;
-  });
 }
 
 // Columns view — compact title-scan, multi-column layout. No covers,
@@ -11090,9 +11130,6 @@ function renderGreeting() {
   _setupSmoothWheelScroll();
   // Grid-view books turn on their Y axis in response to scroll velocity.
   _setupGridScrollTilt();
-  // Cursor-follow rotate on hover — the hovered card's cover tilts to
-  // track the pointer along X and Y.
-  _setupHoverRotate();
 
   // Recompute card width on viewport resize — `rows` is fixed but the
   // available height changes, so we re-derive the per-card size. Debounced
