@@ -1018,6 +1018,10 @@ html, body {
 .lib-body::-webkit-scrollbar { width: 6px; }
 .lib-body::-webkit-scrollbar-track { background: transparent; }
 .lib-body::-webkit-scrollbar-thumb { background: var(--brand); border-radius: 3px; }
+/* Hide the native scrollbar end-cap arrows across every scrollbar in the
+   app — they read as platform chrome, not Tomen chrome, and the bar is
+   already thin/branded enough to interact with on its own. */
+::-webkit-scrollbar-button { display: none; }
 
 /* Empty */
 .empty-lib {
@@ -4848,6 +4852,9 @@ async function deleteBook(id) {
     localStorage.removeItem('tomen_lastRead');
   }
   library = library.filter(b => b.id !== id);
+  // Strip the deleted book from every group it lived in; dissolve any
+  // group that's now empty as a result.
+  await _cleanupGroupsForDeletedBook(id);
   _bumpLibraryVersion();
 }
 
@@ -5346,6 +5353,13 @@ function _attachLibraryLongPress() {
   document.addEventListener('pointermove', _onLibPointerMove, { passive: false });
   document.addEventListener('pointerup', _onLibPointerUp);
   document.addEventListener('pointercancel', _onLibPointerUp);
+  // Touch backup: in some browsers preventDefault on pointermove doesn't
+  // suppress the underlying touchmove's scroll default. With a drag source
+  // armed, claim the touchmove too so the gesture doesn't get hijacked
+  // into a scroll mid-drag.
+  document.addEventListener('touchmove', (e) => {
+    if (_dragSource && e.cancelable) e.preventDefault();
+  }, { passive: false });
 }
 
 // ===== BULK SELECT =====
@@ -5777,16 +5791,43 @@ async function addBookToGroup(groupId, bookId) {
 // Remove a book from a group. Returns true if a removal happened. The
 // book record itself is untouched — once it's no longer in any group,
 // the default-view hide rule no longer catches it and it reappears in
-// the main library.
+// the main library. If the removal empties the group, the group itself
+// is dissolved (and the filter clears if it was filtered into it).
 async function removeBookFromGroup(groupId, bookId) {
   const g = _findGroup(groupId);
   if (!g || !bookId || !Array.isArray(g.bookIds)) return false;
   const idx = g.bookIds.indexOf(bookId);
   if (idx < 0) return false;
   g.bookIds.splice(idx, 1);
-  await _saveGroup(g);
-  _bumpLibraryVersion();
+  if (g.bookIds.length === 0) {
+    if (_activeGroupId === groupId) _activeGroupId = null;
+    await deleteGroupById(groupId); // already bumps the library version
+  } else {
+    await _saveGroup(g);
+    _bumpLibraryVersion();
+  }
   return true;
+}
+// When a book is deleted entirely, drop it from every group that contains
+// it, and dissolve any group it leaves empty. Keeps groups data tidy and
+// honors the same "empty groups dissolve themselves" rule.
+async function _cleanupGroupsForDeletedBook(bookId) {
+  const dissolvedIds = [];
+  for (const g of groups) {
+    if (!Array.isArray(g.bookIds)) continue;
+    const idx = g.bookIds.indexOf(bookId);
+    if (idx < 0) continue;
+    g.bookIds.splice(idx, 1);
+    if (g.bookIds.length === 0) {
+      dissolvedIds.push(g.id);
+    } else {
+      await _saveGroup(g);
+    }
+  }
+  for (const id of dissolvedIds) {
+    if (_activeGroupId === id) _activeGroupId = null;
+    await deleteGroupById(id);
+  }
 }
 
 // In-memory cache for cover data URLs fetched from the covers store.
