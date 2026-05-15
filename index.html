@@ -4870,13 +4870,28 @@ function openBookMenu(ev, bookId, anchorEl) {
   const book = library.find(b => b.id === bookId);
   if (!book) return;
   const menu = $('book-menu');
+  // "Remove from {group}" only appears when the user has filtered into a
+  // group AND this book is a member of it — i.e. the user is *inside*
+  // that group's view. That's the same context they'd be in when they
+  // want to evict a book; outside of it, the user uses Add-to-group to
+  // shuffle group membership.
+  let removeFromGroupItem = '';
+  if (_activeGroupId) {
+    const g = _findGroup(_activeGroupId);
+    if (g && Array.isArray(g.bookIds) && g.bookIds.includes(bookId)) {
+      removeFromGroupItem = `
+    <button class="book-menu-item" role="menuitem" onclick="removeBookFromGroupAndClose('${_activeGroupId}','${bookId}')">
+      <i class="ph ph-folder-minus"></i>Remove from ${esc(_groupDisplayName(g))}
+    </button>`;
+    }
+  }
   menu.innerHTML = `
     <button class="book-menu-item" role="menuitem" onclick="openTagEditor('${bookId}')">
       <i class="ph ph-tag"></i>Tags…
     </button>
     <button class="book-menu-item" role="menuitem" onclick="openGroupPickerForBook('${bookId}')">
       <i class="ph ph-folder-simple"></i>Add to group…
-    </button>
+    </button>${removeFromGroupItem}
     <button class="book-menu-item" role="menuitem" onclick="enterLibSelectMode('${bookId}')">
       <i class="ph ph-list-checks"></i>Select books
     </button>
@@ -4927,6 +4942,11 @@ async function addBookToGroupAndClose(groupId, bookId) {
   const added = await addBookToGroup(groupId, bookId);
   closeBookMenu();
   if (added) renderLibrary();
+}
+async function removeBookFromGroupAndClose(groupId, bookId) {
+  await removeBookFromGroup(groupId, bookId);
+  closeBookMenu();
+  renderLibrary();
 }
 async function onNewGroupForBook(bookId) {
   const name = window.prompt('Group name (optional):');
@@ -5045,7 +5065,12 @@ let _longPressStartY = 0;
 
 function _findLibraryBookCard(target) {
   if (!target || typeof target.closest !== 'function') return null;
-  return target.closest('.gc[data-book-id], .tr-item[data-book-id], .col-item[data-book-id]');
+  // Exclude .gc-mini — books inside a group don't own their own pointer
+  // interactions. Right-click / long-press anywhere inside a group goes
+  // to the group instead, and a click on a mini bubbles to the group's
+  // onclick (which filters the library to that group). To act on a
+  // specific book inside a group, the user filters into it first.
+  return target.closest('.gc[data-book-id]:not(.gc-mini), .tr-item[data-book-id], .col-item[data-book-id]');
 }
 // Group cards (grid only) are matched separately so book actions don't
 // trigger on a group container, and vice versa. Right-click / long-press
@@ -5215,18 +5240,22 @@ function _onLibPointerDown(e) {
 }
 
 function _onLibPointerMove(e) {
-  // Drag entry — once a source is armed and movement passes the threshold,
-  // promote to an active drag. After that, every move just updates the
-  // ghost + drop target and suppresses native scroll.
-  if (_dragSource && !_dragActive && e.pointerId === _dragSource.pointerId) {
-    const dx = e.clientX - _dragSource.startX;
-    const dy = e.clientY - _dragSource.startY;
-    if (Math.hypot(dx, dy) > _DRAG_THRESHOLD_PX) {
-      _enterDragMode(e.clientX, e.clientY);
+  // If a drag source is armed for this pointer (mouse pointerdown or a
+  // touch long-press that already fired), claim the gesture from the
+  // browser. preventDefault on every move keeps the browser from
+  // interpreting subsequent motion as a scroll and firing pointercancel,
+  // which on touch was producing the "ghost flickers and disappears"
+  // symptom — the cancel was tearing down the drag a frame after it
+  // started. Applies to both the pending phase and active drag.
+  if (_dragSource && e.pointerId === _dragSource.pointerId) {
+    if (!_dragActive) {
+      const dx = e.clientX - _dragSource.startX;
+      const dy = e.clientY - _dragSource.startY;
+      if (Math.hypot(dx, dy) > _DRAG_THRESHOLD_PX) {
+        _enterDragMode(e.clientX, e.clientY);
+      }
     }
-  }
-  if (_dragActive && _dragSource && e.pointerId === _dragSource.pointerId) {
-    _updateDrag(e);
+    if (_dragActive) _updateDrag(e);
     if (e.cancelable) e.preventDefault();
     return;
   }
@@ -5741,6 +5770,20 @@ async function addBookToGroup(groupId, bookId) {
   if (!Array.isArray(g.bookIds)) g.bookIds = [];
   if (g.bookIds.includes(bookId)) return false;
   g.bookIds.push(bookId);
+  await _saveGroup(g);
+  _bumpLibraryVersion();
+  return true;
+}
+// Remove a book from a group. Returns true if a removal happened. The
+// book record itself is untouched — once it's no longer in any group,
+// the default-view hide rule no longer catches it and it reappears in
+// the main library.
+async function removeBookFromGroup(groupId, bookId) {
+  const g = _findGroup(groupId);
+  if (!g || !bookId || !Array.isArray(g.bookIds)) return false;
+  const idx = g.bookIds.indexOf(bookId);
+  if (idx < 0) return false;
+  g.bookIds.splice(idx, 1);
   await _saveGroup(g);
   _bumpLibraryVersion();
   return true;
