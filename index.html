@@ -5814,7 +5814,17 @@ function setLibrarySize(value) {
   let usable, gap;
   if (grid && grid.clientHeight) {
     const cs = getComputedStyle(grid);
-    usable = grid.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    // If the horizontal scrollbar isn't currently visible, reserve room
+    // for it. A larger card size (e.g. stepping from rows=4 to rows=3)
+    // can push the content width over the viewport and bring the
+    // scrollbar back AFTER this function sets the new card vars, which
+    // would shrink clientHeight by the scrollbar height and wrap the
+    // last card in each column — a phantom-bottom-row regression.
+    // Going smaller rarely needs the buffer (the scrollbar at worst
+    // disappears, giving extra room), but the reservation is cheap.
+    const hasHScroll = grid.offsetHeight > grid.clientHeight + 0.5;
+    const scrollbarReserve = hasHScroll ? 0 : 10;
+    usable = grid.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - scrollbarReserve;
     // Read the real row gap — it's smaller on phones (.view-grid media
     // query), and a stale constant here would mis-size every row.
     gap = parseFloat(cs.rowGap) || 16;
