@@ -1055,23 +1055,42 @@ html, body {
    skim names fast. Progress underline fills under each title to
    show reading state without taking visual weight. */
 .view-columns {
-  display: grid;
-  /* Column count is user-controlled via the +/- popup that hangs off the
-     text-view icon. Default 3; setLibraryColumns rewrites --lib-cols. */
-  grid-template-columns: repeat(var(--lib-cols, 3), minmax(0, 1fr));
+  /* Shelf-style horizontal scroll, mirroring .view-grid: items flow
+     top-to-bottom into a column, then wrap into the next column to the
+     right; the wrapper scrolls horizontally for the rest. Row count
+     auto-fits the viewport; column width is set by setLibraryColumns
+     from the +/- "columns" popup (number of columns visible at once). */
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  position: absolute;
+  top: 0; bottom: 0; left: 0; right: 0;
+  padding: var(--grid-padding-top, 76px) var(--lib-edge-pad) var(--lib-edge-pad);
   gap: 6px 32px;
-  padding: 8px 0;
-  /* Drives the .col-item::before two-digit running index — gives the eye
-     a steady left-edge anchor, Zune-style. Counter resets per render so
-     filtering/sorting keeps the numbering in sync with what's on screen. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--brand) transparent;
+  /* Drives the .col-item::before two-digit running index. Items now
+     flow column-major (because of flex-direction: column + wrap), so
+     the numbers run down a column before jumping to the next — natural
+     reading order for a shelf. */
   counter-reset: bookindex;
 }
+.view-columns::-webkit-scrollbar { height: 6px; }
+.view-columns::-webkit-scrollbar-track { background: transparent; }
+.view-columns::-webkit-scrollbar-thumb { background: var(--brand); border-radius: 3px; }
 .col-item {
+  /* Fixed width + height so flex-wrap can pack a clean grid; both come
+     from setLibraryColumns. flex:0 0 auto keeps the item from being
+     stretched by align-content. */
+  width: var(--lib-col-width, 360px);
+  height: var(--lib-row-height, 92px);
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: 36px 1fr;
-  align-items: baseline;
   column-gap: 14px;
-  padding: 14px 0;
   border-bottom: 0.5px solid var(--border);
   cursor: pointer;
   counter-increment: bookindex;
@@ -1089,8 +1108,16 @@ html, body {
   color: var(--fog);
   letter-spacing: 0.8px;
   align-self: start;
-  padding-top: 14px;
+  padding-top: 18px;
   transition: color 140ms ease;
+}
+/* Stack title + author vertically inside the right grid cell. Padding
+   pushes them down from the row top so the index lines up with the
+   title's cap height. */
+.col-text {
+  align-self: start;
+  padding-top: 14px;
+  min-width: 0;
 }
 .col-item:hover .col-title { color: var(--brand-ink); }
 .col-item:hover::before { color: var(--stone); }
@@ -3822,9 +3849,10 @@ body.lib-select-mode .col-item {
      at narrow widths, but we still want it noticeably bigger than the
      old 15px so the menu feel survives. */
   .col-title { font-size: 26px; letter-spacing: -0.4px; }
-  /* Phones can't usefully hold the user-picked column count — force a
-     single column regardless of --lib-cols so titles get full width. */
-  .view-columns { grid-template-columns: 1fr; }
+  /* Phones get a tighter row gap on the shelf-style columns view. The
+     column width is set inline by setLibraryColumns from --lib-cols,
+     which is clamped to 1 on small viewports inside that function. */
+  .view-columns { gap: 4px 16px; }
   .icon-btn { width: 32px; height: 32px; }
   .icon-btn svg { width: 18px; height: 18px; }
   .icon-btn .ph { font-size: 18px; }
@@ -6073,16 +6101,19 @@ function setView(v) {
   // of the viewport — they extend behind the transparent overlay
   // header at top and run off the screen edge horizontally as the
   // user scrolls. Inline-set so the change is observable by
-  // setLibrarySize's getComputedStyle on the very next line. Other
-  // views restore the CSS default by clearing the inline value.
+  // setLibrarySize's getComputedStyle on the very next line. Columns
+  // view does the same: it's also full-viewport horizontal-scroll.
+  // Table view restores the standard lib-body padding by clearing
+  // the inline value.
   const libBody = $('lib-body');
   if (libBody) {
-    libBody.style.padding = (v === 'grid') ? '0' : '';
+    libBody.style.padding = (v === 'grid' || v === 'columns') ? '0' : '';
   }
   renderLibrary();
-  // Re-derive the per-card width now that the padding context (and
-  // therefore the available content height) has changed.
+  // Re-derive the per-card / per-row dimensions now that the padding
+  // context (and therefore the available content area) has changed.
   setLibrarySize(_currentLibSize());
+  setLibraryColumns(_currentLibCols());
 }
 
 // Grid view icon click. If grid is already the active view, toggle the
@@ -6233,13 +6264,59 @@ function _currentLibSize() {
 function libSizeInc() { setLibrarySize(_currentLibSize() + 1); }
 function libSizeDec() { setLibrarySize(_currentLibSize() - 1); }
 
-// Text-view column count — written to --lib-cols, read by .view-columns
-// in CSS. Range 1-6 mirrors the grid stepper. Persisted across sessions
-// (preference, not device-bucketed). No re-render needed: the CSS grid
-// reflows live when the custom property changes.
+// Text-view column count — drives the shelf-style horizontal layout.
+// `cols` is the number of columns visible at once; each item gets a
+// fixed pixel width (viewport / cols) so titles ellipsize cleanly at
+// the column edge. Row count auto-fits the viewport so there's never
+// a partial row at the bottom. Width and height are published as
+// --lib-col-width / --lib-row-height; .view-columns reads them for
+// the flex-wrap shelf layout. Range 1-6 mirrors the grid stepper.
 function setLibraryColumns(value) {
-  const cols = Math.max(1, Math.min(6, parseInt(value, 10) || 3));
+  let cols = Math.max(1, Math.min(6, parseInt(value, 10) || 3));
+  // On phones, the column-count picker is meaningless — force single
+  // column so each title gets full width. Saved preference is left
+  // alone so it's respected again on wider viewports.
+  if (window.innerWidth <= 480) cols = 1;
   document.documentElement.style.setProperty('--lib-cols', cols);
+
+  // Measure the available content area inside .screen, the same context
+  // .view-columns is absolutely positioned within. Falls back to the
+  // window if the screen element isn't laid out yet.
+  const screen = document.querySelector('.screen');
+  const header = document.querySelector('.lib-header');
+  const screenW = screen ? screen.clientWidth : window.innerWidth;
+  const screenH = screen ? screen.clientHeight : window.innerHeight;
+  const headerH = header ? header.offsetHeight : 76;
+  document.documentElement.style.setProperty('--grid-padding-top', headerH + 'px');
+  const edgePad = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--lib-edge-pad'), 10) || 24;
+
+  // Inter-column gap and inter-row gap — must match the CSS `gap` on
+  // .view-columns (and the mobile override). Read straight from the
+  // element when it's on screen so the two never drift out of sync.
+  const viewEl = document.querySelector('.view-columns');
+  let gapX = 32, gapY = 6;
+  if (viewEl) {
+    const cs = getComputedStyle(viewEl);
+    gapX = parseFloat(cs.columnGap) || gapX;
+    gapY = parseFloat(cs.rowGap) || gapY;
+  }
+
+  // Column width: split the inner content width N ways. Floor so the
+  // wrap math never overflows the viewport by a subpixel.
+  const innerW = screenW - edgePad * 2 - gapX * (cols - 1);
+  const colWidth = Math.max(160, Math.floor(innerW / cols));
+
+  // Row count: target an ~92px row (title 36 + author 11 + gaps + 14
+  // padding ≈ 89px), then fit as many whole rows as the available
+  // height allows. Final row height is derived so rows tile perfectly
+  // with no partial row at the bottom — same trick as setLibrarySize.
+  const TARGET_ROW = 92;
+  const usableH = screenH - headerH - edgePad - 10; // 10 reserves the scrollbar
+  const rows = Math.max(1, Math.floor((usableH + gapY) / (TARGET_ROW + gapY)));
+  const rowHeight = Math.max(60, Math.floor((usableH - gapY * (rows - 1)) / rows));
+  document.documentElement.style.setProperty('--lib-col-width', colWidth + 'px');
+  document.documentElement.style.setProperty('--lib-row-height', rowHeight + 'px');
+
   const numEl = $('lib-cols-num');
   if (numEl) numEl.textContent = String(cols);
   const dec = $('lib-cols-dec');
@@ -6511,13 +6588,18 @@ function _setupSmoothWheelScroll() {
   libBody.addEventListener('wheel', (e) => {
     if (e.ctrlKey) return; // pinch-zoom gesture — leave it to the browser
 
-    const grid = (currentView === 'grid') ? libBody.querySelector('.view-grid') : null;
-    if (grid && grid.contains(e.target)) {
-      // Grid view scrolls horizontally, driven by a pure vertical wheel
+    // Both grid view and text/columns view scroll horizontally — they
+    // share the shelf metaphor. Pick whichever wrapper is currently
+    // rendered; the mapping logic below is identical for either.
+    let hShelf = null;
+    if (currentView === 'grid') hShelf = libBody.querySelector('.view-grid');
+    else if (currentView === 'columns') hShelf = libBody.querySelector('.view-columns');
+    if (hShelf && hShelf.contains(e.target)) {
+      // Shelf scrolls horizontally, driven by a pure vertical wheel
       // delta. Anything carrying deltaX (trackpad horizontal/diagonal
       // swipes) passes through to native scrolling.
       if (e.deltaY === 0 || e.deltaX !== 0) return;
-      const max = grid.scrollWidth - grid.clientWidth;
+      const max = hShelf.scrollWidth - hShelf.clientWidth;
       if (max <= 0) return;
       e.preventDefault();
       const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
@@ -6525,9 +6607,9 @@ function _setupSmoothWheelScroll() {
         // Trackpad / reduced-motion: map straight onto scrollLeft. Drop any
         // in-flight wheel glide first so it doesn't fight this direct write.
         cancel();
-        grid.scrollLeft = Math.max(0, Math.min(grid.scrollLeft + delta, max));
+        hShelf.scrollLeft = Math.max(0, Math.min(hShelf.scrollLeft + delta, max));
       } else {
-        animate(grid, 'x', delta, max);
+        animate(hShelf, 'x', delta, max);
       }
       return;
     }
@@ -11565,6 +11647,9 @@ function renderGreeting() {
     if (_libSizeResizeTimer) clearTimeout(_libSizeResizeTimer);
     _libSizeResizeTimer = setTimeout(() => {
       setLibrarySize(_currentLibSize());
+      // Text view also depends on viewport — col width is viewport/N,
+      // row height fits the available height — so re-derive on resize.
+      setLibraryColumns(_currentLibCols());
     }, 150);
   });
 
