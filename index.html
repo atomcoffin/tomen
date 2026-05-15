@@ -1437,6 +1437,26 @@ html, body {
      blank space in the layout, in keeping with "no styling on the
      container". */
 }
+/* Name label — rendered only when the group has a name (unnamed groups
+   are identified by their four mini-covers alone, no chrome). Sits at
+   the bottom of the tile with a soft fade so it stays legible against
+   any cover color underneath without dominating the mini-books. */
+.gc-group-label {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 18px 8px 6px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 2;
+}
 /* Mini-book — a full .gc card scaled down to fit its grid cell. Width and
    height are 100% (the grid cell sizes them), --book-depth is halved so
    the 3D edges read at this scale, and the progress ribbon is narrowed
@@ -4857,7 +4877,7 @@ function openGroupPickerForBook(bookId) {
     <i class="ph ph-plus"></i>New group…
   </button>`];
   for (const g of groups) {
-    const safeName = esc(g.name);
+    const safeName = esc(_groupDisplayName(g));
     const inGroup = Array.isArray(g.bookIds) && g.bookIds.includes(bookId);
     const check = inGroup ? '<i class="ph ph-check" style="margin-left:auto;opacity:0.7" aria-hidden="true"></i>' : '';
     items.push(`<button class="book-menu-item" role="menuitem" onclick="addBookToGroupAndClose('${g.id}','${bookId}')">
@@ -4872,11 +4892,9 @@ async function addBookToGroupAndClose(groupId, bookId) {
   if (added) renderLibrary();
 }
 async function onNewGroupForBook(bookId) {
-  const name = window.prompt('New group name:');
+  const name = window.prompt('Group name (optional):');
   if (name === null) { closeBookMenu(); return; }
-  const trimmed = name.trim();
-  if (!trimmed) { closeBookMenu(); return; }
-  const g = await createGroup(trimmed);
+  const g = await createGroup(name);
   if (g) await addBookToGroup(g.id, bookId);
   closeBookMenu();
   renderLibrary();
@@ -5174,7 +5192,7 @@ function _renderTagFilterStrip() {
   const parts = [];
   // Group chip leads when active. Clicking the ✕ clears the group filter.
   if (groupChip) {
-    parts.push(`<button class="lib-tag-chip lib-group-chip active" onclick="setGroupFilter(null)" aria-label="Clear group filter"><i class="ph ph-folder-simple" aria-hidden="true"></i>${esc(groupChip.name)}<span class="lib-tag-chip-x" aria-hidden="true">✕</span></button>`);
+    parts.push(`<button class="lib-tag-chip lib-group-chip active" onclick="setGroupFilter(null)" aria-label="Clear group filter"><i class="ph ph-folder-simple" aria-hidden="true"></i>${esc(_groupDisplayName(groupChip))}<span class="lib-tag-chip-x" aria-hidden="true">✕</span></button>`);
   }
   if (tags.length > 0) {
     parts.push(`<button class="lib-tag-chip${_activeTagFilter === null ? ' active' : ''}" onclick="setTagFilter(null)">All</button>`);
@@ -5372,17 +5390,23 @@ async function loadGroups() {
 function _findGroup(id) {
   return groups.find(g => g.id === id) || null;
 }
+// Display name for a group — names are optional, so unnamed groups fall
+// back to "Untitled" in any chrome (book menu picker, filter chip, empty
+// state). The tile itself just hides its label entirely when unnamed.
+function _groupDisplayName(g) {
+  return (g && g.name) ? g.name : 'Untitled';
+}
 async function _saveGroup(g) {
   await dbPut('groups', g);
 }
-// Create a group with the given name (trimmed). Returns the new group, or
-// null if the name was empty. Adds to local array + persists.
+// Create a group with the given name (trimmed). Name is optional — an
+// empty / whitespace-only name yields an unnamed group, identifiable by
+// its four mini-covers alone. Returns the new group; adds to local
+// array + persists.
 async function createGroup(name) {
-  const trimmed = (name || '').trim();
-  if (!trimmed) return null;
   const g = {
     id: 'g_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    name: trimmed,
+    name: (name || '').trim(),
     bookIds: [],
     createdAt: Date.now()
   };
@@ -5881,7 +5905,7 @@ function renderLibrary() {
     const g = _findGroup(_activeGroupId);
     body.innerHTML = `<div class="empty-lib">
       <i class="ph ph-folder-simple"></i>
-      <h3>${g ? esc(g.name) : 'Group'} is empty</h3>
+      <h3>${esc(_groupDisplayName(g))} is empty</h3>
       <p>Add books to this group from the per-book menu (long-press a cover).</p>
       <button class="empty-lib-action" onclick="setGroupFilter(null)">Show all books</button>
     </div>`;
@@ -6245,20 +6269,23 @@ function _renderGroupTile(g) {
       <div class="gc-cover" data-book-id="${b.id}" style="--gc-spine:${spineColor}">${coverHtml}<div class="gc-edge gc-edge-r"></div><div class="gc-edge gc-edge-b"></div><div class="gc-edge gc-edge-t"></div><div class="gc-edge gc-edge-l"></div>${ribbon}</div>
     </div>`);
   }
-  const safeName = esc(g.name);
-  return `<div class="gc gc-group" data-group-id="${g.id}" title="${safeName}" role="button" tabindex="0" onclick="setGroupFilter('${g.id}')">
+  const tooltipName = esc(_groupDisplayName(g));
+  // Visible label only renders when the group actually has a name —
+  // unnamed groups stay identified by their four mini-covers alone.
+  const label = g.name ? `<div class="gc-group-label">${esc(g.name)}</div>` : '';
+  return `<div class="gc gc-group" data-group-id="${g.id}" title="${tooltipName}" role="button" tabindex="0" onclick="setGroupFilter('${g.id}')">
     <div class="gc-group-mosaic">${cells.join('')}</div>
+    ${label}
   </div>`;
 }
 // Prompt-driven create flow. Replace prompt() with a nicer modal later;
 // for v1 this is enough to get groups off the ground. Invoked from the
-// import menu's "New group" item.
+// import menu's "New group" item. Name is optional — pressing OK on an
+// empty input creates an unnamed group (identified by its mini-covers).
 async function onCreateGroupClick() {
-  const name = window.prompt('New group name:');
+  const name = window.prompt('Group name (optional):');
   if (name === null) return;
-  const trimmed = name.trim();
-  if (!trimmed) return;
-  const g = await createGroup(trimmed);
+  const g = await createGroup(name);
   if (g) renderLibrary();
 }
 
