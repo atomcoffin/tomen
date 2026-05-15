@@ -1215,7 +1215,10 @@ html, body {
   left: 0;
   right: 0;
   padding: var(--grid-padding-top, 76px) var(--lib-edge-pad) var(--lib-edge-pad);
-  gap: 20px;
+  /* Card gap lives on a custom property so group mosaics can halve it for
+     their inner mini-books (see .gc-group-mosaic). */
+  --grid-gap: 20px;
+  gap: var(--grid-gap);
   overflow-x: auto;
   overflow-y: hidden;
   /* Thin brand-tinted horizontal scrollbar that rides the bottom edge of
@@ -1401,48 +1404,45 @@ html, body {
   color: white; line-height: 1.3; margin-bottom: 4px;
 }
 .gc-placeholder .gcp-author { font-size: 10px; color: rgba(255,255,255,0.7); }
-/* Group tile — a user-defined collection rendered alongside book cards
-   in the grid. Uses the same .gc shape (and 3D edges) so it reads as a
-   book-shaped container, with a 2x2 mosaic of up to four member-book
-   mini-covers and a name label overlaid at the bottom. Click filters
-   the library to that group's members (see setGroupFilter). */
+/* Group tile — a user-defined collection rendered in the grid as a
+   book-sized but otherwise empty container. The visual weight lives on
+   the mini-books inside (each a fully styled .gc.gc-mini with its own
+   3D edges, spine, ribbon, and scroll-tilt), arranged in a 2x2 grid
+   with padding proportional to the main grid's gap. The container
+   itself doesn't tilt — only the mini-books inside do — so the inner
+   books rotate by the same amount as full-size books in the shelf
+   instead of compounding through the container. */
+.gc-group { transform: none; }
 .gc-group-mosaic {
   position: absolute;
   inset: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
-  gap: 2px;
-  border-radius: 2px;
-  overflow: hidden;
+  /* Halve the main grid's card gap so the inner spacing scales with the
+     mini-books (which are roughly half the size of full cards). */
+  gap: calc(var(--grid-gap, 20px) / 2);
+  transform-style: preserve-3d;
+  /* overflow: visible so the mini-books' 3D edges can still extend
+     slightly into the gaps when they tilt. */
 }
-.gc-group-mosaic-cell {
-  background: var(--linen);
-  overflow: hidden;
-  position: relative;
+.gc-group-slot-empty {
+  /* No visual — empty slots in groups with fewer than 4 books just leave
+     blank space in the layout, in keeping with "no styling on the
+     container". */
 }
-.gc-group-mosaic-cell img {
-  width: 100%; height: 100%; object-fit: cover; display: block;
+/* Mini-book — a full .gc card scaled down to fit its grid cell. Width and
+   height are 100% (the grid cell sizes them), --book-depth is halved so
+   the 3D edges read at this scale, and the progress ribbon is narrowed
+   to match. Inherits the cover/edge/spine/tilt styling from .gc directly. */
+.gc-mini { width: 100%; height: 100%; }
+.gc-mini .gc-cover { --book-depth: 9px; }
+.gc-mini .gc-prog {
+  left: 6px;
+  width: 6px;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 2px), 50% 100%, 0 calc(100% - 2px));
 }
-.gc-group-mosaic-cell-empty {
-  background: color-mix(in srgb, var(--ink) 6%, var(--card));
-}
-.gc-group-label {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  padding: 18px 8px 6px;
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.1px;
-  color: #fff;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.65), rgba(0, 0, 0, 0));
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  pointer-events: none;
-  z-index: 2;
-}
+
 /* "+ New group" tile — a flatter, dashed-border variant that sits at the
    end of the grid as a clear create affordance. */
 .gc-group-create > .gc-cover {
@@ -1457,10 +1457,6 @@ html, body {
   border-color: var(--brand-ink);
   color: var(--brand-ink);
 }
-/* Drop the 3D edges + ribbon on the create tile — it isn't a book and
-   shouldn't render as one. */
-.gc-group-create .gc-edge,
-.gc-group-create .gc-prog { display: none; }
 
 /* Reading-progress bookmark ribbon. A brand strip pinned to the top of
    the cover, inset from the left (spine) edge; its height is the reading
@@ -1504,7 +1500,9 @@ html, body {
 .view-grid.is-opening .gc {
   pointer-events: none;
 }
-.view-grid.is-opening .gc:not(.is-opening-target) {
+.view-grid.is-opening .gc:not(.is-opening-target):not(.gc-mini) {
+  /* Skip .gc-mini so books inside a group don't double-fade — they
+     already fade through their group container's animation. */
   animation: book-others-fade 600ms cubic-bezier(0.4, 0, 0.4, 1) 280ms both;
 }
 .gc.is-opening-target {
@@ -3736,7 +3734,7 @@ body.lib-select-mode .col-item {
      the row math (and therefore the 2:3 card sizing) stays correct. The
      card width/height themselves come straight from the JS-set vars on
      .gc, so the aspect ratio holds at every viewport. */
-  .view-grid { gap: 16px; }
+  .view-grid { --grid-gap: 16px; }
   .tr-title { font-size: 16px; }
   .col-title { font-size: 15px; }
   .icon-btn { width: 32px; height: 32px; }
@@ -6138,9 +6136,12 @@ function renderTableView(el, books) {
   _observeBookCovers(el, '.tr-cover[data-book-id]');
 }
 
-// Render a single group tile: a .gc-shaped container with a 2x2 mosaic
-// of up to four member-book mini-covers and the group name overlaid.
-// Clicks bubble to the outer .gc, which filters the library to the group.
+// Render a single group tile: a book-sized but otherwise invisible
+// container with up to four full-styled mini-books arranged 2x2 inside.
+// Each mini-book is a real .gc.gc-mini with its own cover, 3D edges,
+// spine, progress ribbon, and scroll-tilt — the container itself doesn't
+// tilt, so the mini-books rotate by the same amount as books in the
+// main shelf. Outer click bubbles to setGroupFilter to scope the library.
 function _renderGroupTile(g) {
   const members = (g.bookIds || [])
     .map(id => library.find(b => b.id === id))
@@ -6150,28 +6151,32 @@ function _renderGroupTile(g) {
   for (let i = 0; i < 4; i++) {
     const b = members[i];
     if (!b) {
-      cells.push('<div class="gc-group-mosaic-cell gc-group-mosaic-cell-empty"></div>');
+      cells.push('<div class="gc-group-slot-empty"></div>');
       continue;
     }
+    const p = b.progress || 0;
+    const c = strColor(b.title);
+    const spineColor = (b.spineColor && b.spineColor[0]) || c[0];
     const cached = _coverCache.has(b.id) ? _coverCache.get(b.id) : undefined;
-    const src = b.cover || (cached && cached !== 'loading' ? cached : null);
-    if (src) {
-      cells.push(`<div class="gc-group-mosaic-cell"><img src="${src}" alt="" loading="lazy" decoding="async"></div>`);
+    let coverHtml;
+    if (b.cover) {
+      coverHtml = `<img src="${b.cover}" alt="" loading="lazy" decoding="async">`;
+    } else if (cached && cached !== 'loading') {
+      coverHtml = `<img src="${cached}" alt="" loading="lazy" decoding="async">`;
     } else {
-      const c = strColor(b.title);
-      cells.push(`<div class="gc-group-mosaic-cell" style="background:linear-gradient(145deg,${c[0]},${c[1]})"></div>`);
+      coverHtml = `<div class="gc-placeholder" style="background:linear-gradient(145deg,${c[0]},${c[1]})">
+             <div class="gcp-title">${esc(b.title)}</div>
+             <div class="gcp-author">${esc(b.author || '')}</div>
+           </div>`;
     }
+    const ribbon = p > 0 ? `<div class="gc-prog" style="height:${p}%"></div>` : '';
+    cells.push(`<div class="gc gc-mini" data-book-id="${b.id}" title="${esc(b.title)}">
+      <div class="gc-cover" data-book-id="${b.id}" style="--gc-spine:${spineColor}">${coverHtml}<div class="gc-edge gc-edge-r"></div><div class="gc-edge gc-edge-b"></div><div class="gc-edge gc-edge-t"></div><div class="gc-edge gc-edge-l"></div>${ribbon}</div>
+    </div>`);
   }
   const safeName = esc(g.name);
   return `<div class="gc gc-group" data-group-id="${g.id}" title="${safeName}" role="button" tabindex="0" onclick="setGroupFilter('${g.id}')">
-    <div class="gc-cover" style="--gc-spine:var(--brand-deep)">
-      <div class="gc-group-mosaic">${cells.join('')}</div>
-      <div class="gc-group-label">${safeName}</div>
-      <div class="gc-edge gc-edge-r"></div>
-      <div class="gc-edge gc-edge-b"></div>
-      <div class="gc-edge gc-edge-t"></div>
-      <div class="gc-edge gc-edge-l"></div>
-    </div>
+    <div class="gc-group-mosaic">${cells.join('')}</div>
   </div>`;
 }
 // Render the trailing "+ New group" affordance. Sits at the end of the
@@ -7231,7 +7236,9 @@ function summonAndOpen(ev, id) {
   }
   if (_openInFlight) return;
   const grid = document.querySelector('.view-grid');
-  const card = grid && grid.querySelector(`.gc[data-book-id="${CSS.escape(id)}"]`);
+  // Exclude .gc-mini so the press-and-burst animation lands on the
+  // full-size card, not a mini-book inside a group with the same id.
+  const card = grid && grid.querySelector(`.gc[data-book-id="${CSS.escape(id)}"]:not(.gc-mini)`);
   if (!grid || !card) {
     openBookById(id);
     return;
