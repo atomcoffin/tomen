@@ -1433,6 +1433,38 @@ html, body {
      blank space in the layout, in keeping with "no styling on the
      container". */
 }
+/* Drag-and-drop visuals. The dragged card's clone follows the cursor as
+   .gc-drag-ghost; the original is dimmed via .gc-drag-source; valid drop
+   targets get a brand outline. body.lib-dragging suppresses text
+   selection and forces a grabbing cursor for the duration. */
+.gc-drag-ghost {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  transition: none;
+  will-change: left, top;
+}
+.gc-drag-source {
+  opacity: 0.3;
+  transition: opacity 140ms ease;
+}
+.gc-drop-target {
+  outline: 2px solid var(--brand);
+  outline-offset: 4px;
+  border-radius: 2px;
+  transition: outline 140ms ease;
+}
+body.lib-dragging {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+}
+body.lib-dragging .view-grid {
+  cursor: grabbing;
+  /* Disable native touch panning during a drag so finger movement
+     becomes drag input, not horizontal scroll. */
+  touch-action: none;
+}
+
 /* Name label — rendered only when the group has a name (unnamed groups
    are identified by their four mini-covers alone, no chrome). Sits at
    the bottom of the tile with a soft fade so it stays legible against
@@ -5016,6 +5048,115 @@ function _findLibraryGroupCard(target) {
   return target.closest('.gc[data-group-id]');
 }
 
+// ===== DRAG TO GROUP =====
+// Drag a book card onto another book → create a new group with both.
+// Drag onto an existing group (or onto a mini-book inside one) → add
+// the source book to that group. Activation differs by pointer type:
+// mouse drags start on any movement past _DRAG_THRESHOLD_PX; touch waits
+// for the long-press to fire first, so a finger swipe still scrolls the
+// shelf rather than picking up a book. Mini-books, columns view, and
+// table view aren't drag sources in v1 (the source matcher excludes them).
+const _DRAG_THRESHOLD_PX = 8;
+let _dragSource = null;   // { card, bookId, startX, startY, pointerId } when armed
+let _dragActive = false;
+let _dragGhost = null;
+let _dragDropTarget = null;
+
+function _armDragSource(card, bookId, startX, startY, pointerId) {
+  _dragSource = { card, bookId, startX, startY, pointerId };
+}
+
+function _enterDragMode(clientX, clientY) {
+  if (!_dragSource || _dragActive) return;
+  _dragActive = true;
+  // Close any menu opened by long-press — the drag is taking over.
+  closeBookMenu();
+  // Build a ghost clone of the source card and float it under the pointer.
+  const rect = _dragSource.card.getBoundingClientRect();
+  const ghost = _dragSource.card.cloneNode(true);
+  ghost.classList.add('gc-drag-ghost');
+  ghost.style.position = 'fixed';
+  ghost.style.left = (clientX - rect.width / 2) + 'px';
+  ghost.style.top = (clientY - rect.height / 2) + 'px';
+  ghost.style.width = rect.width + 'px';
+  ghost.style.height = rect.height + 'px';
+  ghost.style.margin = '0';
+  ghost.style.zIndex = '500';
+  ghost.style.opacity = '0.92';
+  ghost.style.transform = 'scale(0.92) rotate(-2deg)';
+  ghost.style.transformOrigin = 'center center';
+  document.body.appendChild(ghost);
+  _dragGhost = ghost;
+  _dragSource.card.classList.add('gc-drag-source');
+  document.body.classList.add('lib-dragging');
+  // Pointer capture keeps events flowing to lib-body even if the cursor
+  // leaves the grid bounds mid-drag.
+  try { $('lib-body').setPointerCapture(_dragSource.pointerId); } catch (_) {}
+}
+
+function _updateDrag(e) {
+  if (!_dragActive || !_dragGhost) return;
+  const rect = _dragSource.card.getBoundingClientRect();
+  _dragGhost.style.left = (e.clientX - rect.width / 2) + 'px';
+  _dragGhost.style.top = (e.clientY - rect.height / 2) + 'px';
+  // Find the drop target under the cursor. Hide the ghost briefly so the
+  // hit-test doesn't return the ghost itself.
+  _dragGhost.style.visibility = 'hidden';
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  _dragGhost.style.visibility = '';
+  let dropCard = null;
+  if (el && el.closest) {
+    // Group card → drop adds the source book to that group.
+    const groupCard = el.closest('.gc[data-group-id]');
+    if (groupCard && groupCard !== _dragSource.card) {
+      dropCard = groupCard;
+    } else {
+      // Mini-book inside a group → resolve to its enclosing group.
+      const mini = el.closest('.gc-mini[data-book-id]');
+      if (mini) {
+        const enclosing = mini.closest('.gc[data-group-id]');
+        if (enclosing && enclosing !== _dragSource.card) dropCard = enclosing;
+      } else {
+        // Plain book card → drop creates a new (unnamed) group with both.
+        const bookCard = el.closest('.gc[data-book-id]:not(.gc-mini)');
+        if (bookCard && bookCard !== _dragSource.card) dropCard = bookCard;
+      }
+    }
+  }
+  if (dropCard !== _dragDropTarget) {
+    if (_dragDropTarget) _dragDropTarget.classList.remove('gc-drop-target');
+    if (dropCard) dropCard.classList.add('gc-drop-target');
+    _dragDropTarget = dropCard;
+  }
+}
+
+async function _finishDrag() {
+  if (!_dragActive || !_dragSource || !_dragDropTarget) return;
+  const sourceBookId = _dragSource.bookId;
+  const target = _dragDropTarget;
+  if (target.dataset.groupId) {
+    await addBookToGroup(target.dataset.groupId, sourceBookId);
+  } else if (target.dataset.bookId) {
+    // Two-book drop → make a new unnamed group containing the target
+    // (the book already on the shelf) and the source (the one dragged in).
+    const g = await createGroup('');
+    if (g) {
+      await addBookToGroup(g.id, target.dataset.bookId);
+      await addBookToGroup(g.id, sourceBookId);
+    }
+  }
+  renderLibrary();
+}
+
+function _cleanupDrag() {
+  if (_dragGhost) { _dragGhost.remove(); _dragGhost = null; }
+  if (_dragDropTarget) { _dragDropTarget.classList.remove('gc-drop-target'); _dragDropTarget = null; }
+  if (_dragSource && _dragSource.card) _dragSource.card.classList.remove('gc-drag-source');
+  document.body.classList.remove('lib-dragging');
+  _dragSource = null;
+  _dragActive = false;
+}
+
 function _onLibPointerDown(e) {
   // Only primary button on mouse; touch always has button:0.
   if (e.button !== undefined && e.button !== 0) return;
@@ -5026,12 +5167,23 @@ function _onLibPointerDown(e) {
   if (card) {
     const bookId = card.dataset.bookId;
     if (!bookId) return;
+    // Only full-size grid book cards are drag sources (no minis, no
+    // columns/table rows). For mouse: arm immediately so a move past the
+    // threshold starts the drag. For touch: arm only when the long-press
+    // fires, so a finger swipe still scrolls the shelf.
+    const isFullGridCard = card.classList.contains('gc') && !card.classList.contains('gc-mini');
+    if (isFullGridCard && e.pointerType === 'mouse') {
+      _armDragSource(card, bookId, e.clientX, e.clientY, e.pointerId);
+    }
     _longPressFired = false;
     _longPressStartX = e.clientX;
     _longPressStartY = e.clientY;
     _longPressTimer = setTimeout(() => {
       _longPressTimer = null;
       _longPressFired = true;
+      if (isFullGridCard && e.pointerType !== 'mouse') {
+        _armDragSource(card, bookId, _longPressStartX, _longPressStartY, e.pointerId);
+      }
       openBookMenu(null, bookId, card);
     }, _LONG_PRESS_MS);
     return;
@@ -5054,12 +5206,49 @@ function _onLibPointerDown(e) {
 }
 
 function _onLibPointerMove(e) {
-  if (!_longPressTimer) return;
-  const dx = Math.abs(e.clientX - _longPressStartX);
-  const dy = Math.abs(e.clientY - _longPressStartY);
-  if (dx > _LONG_PRESS_MOVE_THRESHOLD || dy > _LONG_PRESS_MOVE_THRESHOLD) {
-    _cancelLongPressTimer();
+  // Drag entry — once a source is armed and movement passes the threshold,
+  // promote to an active drag. After that, every move just updates the
+  // ghost + drop target and suppresses native scroll.
+  if (_dragSource && !_dragActive && e.pointerId === _dragSource.pointerId) {
+    const dx = e.clientX - _dragSource.startX;
+    const dy = e.clientY - _dragSource.startY;
+    if (Math.hypot(dx, dy) > _DRAG_THRESHOLD_PX) {
+      _enterDragMode(e.clientX, e.clientY);
+    }
   }
+  if (_dragActive && _dragSource && e.pointerId === _dragSource.pointerId) {
+    _updateDrag(e);
+    if (e.cancelable) e.preventDefault();
+    return;
+  }
+  // Long-press cancel on jitter — anything past the threshold means the
+  // user is scrolling, not pressing.
+  if (_longPressTimer) {
+    const dx = Math.abs(e.clientX - _longPressStartX);
+    const dy = Math.abs(e.clientY - _longPressStartY);
+    if (dx > _LONG_PRESS_MOVE_THRESHOLD || dy > _LONG_PRESS_MOVE_THRESHOLD) {
+      _cancelLongPressTimer();
+    }
+  }
+}
+
+function _onLibPointerUp(e) {
+  if (_dragActive && _dragSource && e.pointerId === _dragSource.pointerId) {
+    // Suppress the impending click on the source card so summonAndOpen
+    // doesn't fire after a drag-release. Reuses the existing flag the
+    // long-press path uses for the same purpose.
+    _longPressFired = true;
+    const finish = _finishDrag();
+    finish.then(() => _cleanupDrag(), () => _cleanupDrag());
+    _cancelLongPressTimer();
+    return;
+  }
+  // Pending drag that never crossed the threshold (e.g. a quick click).
+  // Just discard the armed source.
+  if (_dragSource && (!e.pointerId || e.pointerId === _dragSource.pointerId)) {
+    _cleanupDrag();
+  }
+  _cancelLongPressTimer();
 }
 
 function _cancelLongPressTimer() {
@@ -5098,10 +5287,16 @@ function _attachLibraryLongPress() {
   if (!body || body.dataset.longPressAttached === '1') return;
   body.dataset.longPressAttached = '1';
   body.addEventListener('pointerdown', _onLibPointerDown);
-  body.addEventListener('pointerup', _cancelLongPressTimer);
-  body.addEventListener('pointercancel', _cancelLongPressTimer);
-  body.addEventListener('pointerleave', _cancelLongPressTimer);
-  body.addEventListener('pointermove', _onLibPointerMove);
+  // _onLibPointerUp finishes drags AND cancels pending long-press timers
+  // (replaces the old _cancelLongPressTimer attachment). pointercancel
+  // and pointerleave route through the same path so a stray release
+  // cleans up both the drag visuals and any in-flight timer.
+  body.addEventListener('pointerup', _onLibPointerUp);
+  body.addEventListener('pointercancel', _onLibPointerUp);
+  body.addEventListener('pointerleave', _onLibPointerUp);
+  // passive: false so _onLibPointerMove can preventDefault during an
+  // active drag (suppresses native touch scroll on the grid).
+  body.addEventListener('pointermove', _onLibPointerMove, { passive: false });
   body.addEventListener('contextmenu', _onLibContextMenu);
 }
 
