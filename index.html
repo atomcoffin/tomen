@@ -1414,36 +1414,62 @@ html, body {
   clip-path: polygon(0 0, 100% 0, 100% calc(100% - 4px), 50% 100%, 0 calc(100% - 4px));
 }
 
+/* Register --book-depth as a <length> so the press animation can
+   interpolate it smoothly. Without this, animating a custom property
+   would jump in discrete steps — every edge slab is sized off this var,
+   so we need the in-between values to land cleanly each frame. */
+@property --book-depth {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 18px;
+}
+
 /* Book-open transition. On grid-card click the orchestrator (see
-   summonAndOpen) marks the grid with .is-opening and the clicked
-   card with .is-opening-target. The other cards fade to opacity 0; the
-   target stays in place, nudged up slightly for a soft pop. After the
-   fade settles the reader screen activates with .is-just-opened, which
-   cross-fades the reader pages in. (The fade is opacity-only — an
-   earlier blur() pass animated the filter on every card at once and
-   dropped frames; opacity composites cheaply.) */
+   summonAndOpen) marks the grid with .is-opening and the clicked card
+   with .is-opening-target, sequencing four beats:
+     1. Press (0-280ms): the target's --book-depth animates 18px -> 0, so
+        every edge slab collapses to zero thickness and the book lays flat
+        — reads as the front cover pressing back into the page block.
+     2. Others fade (280-880ms): every non-target card fades to opacity 0.
+     3. Burst (800-1150ms): the now-flat target dissolves while
+        _spawnBookBurst scatters sparkles in its dominant color from its
+        footprint (see the spawn setTimeout in summonAndOpen).
+     4. Reader (1150ms+): screen-reader activates and .is-just-opened
+        cross-fades the reader pages in. */
 .view-grid.is-opening .gc {
   pointer-events: none;
 }
 .view-grid.is-opening .gc:not(.is-opening-target) {
-  animation: book-others-fade 1150ms cubic-bezier(0.4, 0, 0.4, 1) both;
+  animation: book-others-fade 600ms cubic-bezier(0.4, 0, 0.4, 1) 280ms both;
 }
 .gc.is-opening-target {
   position: relative;
   z-index: 5;
-  animation: book-target-dissolve 1150ms cubic-bezier(0.4, 0, 0.4, 1) both;
+  animation: book-target-dissolve 350ms cubic-bezier(0.4, 0, 0.4, 1) 800ms both;
+}
+/* The target's cover gets the press animation — putting it on .gc-cover
+   (where --book-depth is declared) lets the animated value reach the
+   edge slabs that read the var from their parent. */
+.gc.is-opening-target > .gc-cover {
+  animation: book-target-press 280ms cubic-bezier(0.33, 0, 0.2, 1) both;
 }
 @keyframes book-others-fade {
   0%   { opacity: 1; }
   60%  { opacity: 0.25; }
   100% { opacity: 0; }
 }
-/* The selected book dissolves — fades out with a slight outward swell as
-   the sparkle burst (see _spawnBookBurst) scatters from its footprint. */
+/* Once the cover is flat, dissolve it — opacity fade with a slight
+   outward swell — as the sparkle burst scatters from its footprint. */
 @keyframes book-target-dissolve {
   0%   { opacity: 1; transform: scale(1); }
-  50%  { opacity: 0; transform: scale(1.08); }
   100% { opacity: 0; transform: scale(1.08); }
+}
+/* Press the book flat: the depth var collapses to 0, every edge slab
+   (width / height sized off --book-depth) shrinks with it, and the cover
+   ends up lying flat at z=0. */
+@keyframes book-target-press {
+  0%   { --book-depth: 18px; }
+  100% { --book-depth: 0px; }
 }
 
 /* Book-open sparkle burst — a short-lived layer dropped over the selected
@@ -1473,7 +1499,7 @@ html, body {
   100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0.35); }
 }
 #screen-reader.is-just-opened {
-  animation: reader-cross-fade 700ms ease both;
+  animation: reader-cross-fade 400ms ease both;
 }
 @keyframes reader-cross-fade {
   0%   { opacity: 0; }
@@ -6946,12 +6972,15 @@ function summonAndOpen(ev, id) {
   grid.classList.add('is-opening');
   card.classList.add('is-opening-target');
   // Sparkle burst from the card's footprint, in the book's own dominant
-  // cover color. Skipped under reduced-motion (the dissolve fade remains).
+  // cover color. Delayed until after the press collapses the book flat
+  // (~280ms) and the others have started fading (~280-880ms), so the
+  // burst lands as the now-flat target pops out into sparkles. Skipped
+  // under reduced-motion (the dissolve fade remains).
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     const book = library.find(b => b.id === id);
     const color = (book && book.spineColor && book.spineColor[0]) ||
       (book ? strColor(book.title)[0] : null);
-    if (color) _spawnBookBurst(card, color);
+    if (color) setTimeout(() => _spawnBookBurst(card, color), 800);
   }
   setTimeout(() => {
     // Tag the reader screen before it activates so its own fade-in
@@ -6961,13 +6990,13 @@ function summonAndOpen(ev, id) {
     openBookById(id);
     // Defensive cleanup once the reader has fully faded in; if the
     // user navigates back fast these classes shouldn't linger on
-    // the grid cards.
+    // the grid cards. Sized for the snappier 400ms reader cross-fade.
     setTimeout(() => {
       grid.classList.remove('is-opening');
       card.classList.remove('is-opening-target');
       if (reader) reader.classList.remove('is-just-opened');
       _openInFlight = false;
-    }, 850);
+    }, 500);
   }, _OPEN_FADE_MS);
 }
 
