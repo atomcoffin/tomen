@@ -967,38 +967,41 @@ html, body {
   box-shadow: var(--shadow-float);
 }
 .lib-size.open { display: flex; }
-.lib-size .ph {
+.lib-size-label {
+  font-family: var(--font-ui);
   font-size: 12px;
   color: var(--stone);
-  flex-shrink: 0;
+  margin-right: 2px;
 }
-.lib-size .ph.is-large { font-size: 18px; }
-.lib-size input[type="range"] {
-  width: 90px;
-  -webkit-appearance: none;
-  appearance: none;
-  height: 3px;
-  border-radius: 0;
-  background: color-mix(in srgb, var(--ink) 22%, transparent);
-  outline: none;
+.lib-size-btn {
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent;
+  color: var(--ink);
   cursor: pointer;
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
+  transition: background 140ms ease, color 140ms ease;
 }
-.lib-size input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
-  border-radius: 0;
-  background: var(--brand);
-  border: 1px solid var(--ink);
-  cursor: pointer;
+.lib-size-btn:hover { background: var(--linen); color: var(--brand-ink); }
+.lib-size-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  color: var(--stone);
 }
-.lib-size input[type="range"]::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  border-radius: 0;
-  background: var(--brand);
-  border: 1px solid var(--ink);
-  cursor: pointer;
+.lib-size-btn:disabled:hover { background: transparent; color: var(--stone); }
+.lib-size-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
 }
 
 /* Library body */
@@ -3889,10 +3892,11 @@ body.lib-select-mode .col-item {
       <!-- Grid card-size slider — a floating popup, opened by clicking the
            grid view icon (see onGridViewClick). Floating rather than inline
            so it doesn't eat toolbar space, especially on mobile. -->
-      <div class="lib-size" id="lib-size" aria-label="Grid card size">
-        <i class="ph ph-square" aria-hidden="true"></i>
-        <input type="range" min="1" max="6" step="1" value="3" id="sl-libsize" oninput="setLibrarySize(this.value)" title="Visible rows">
-        <i class="ph ph-square is-large" aria-hidden="true"></i>
+      <div class="lib-size" id="lib-size" aria-label="Grid rows">
+        <span class="lib-size-label">rows</span>
+        <button class="lib-size-btn" id="lib-size-dec" onclick="libSizeDec()" aria-label="Fewer rows">−</button>
+        <span class="lib-size-num" id="lib-size-num" aria-live="polite">3</span>
+        <button class="lib-size-btn" id="lib-size-inc" onclick="libSizeInc()" aria-label="More rows">+</button>
       </div>
     </div>
     <!-- Right group: sort + profile. -->
@@ -5736,8 +5740,7 @@ function setView(v) {
   renderLibrary();
   // Re-derive the per-card width now that the padding context (and
   // therefore the available content height) has changed.
-  const slider = $('sl-libsize');
-  if (slider) setLibrarySize(slider.value);
+  setLibrarySize(_currentLibSize());
 }
 
 // Grid view icon click. If grid is already the active view, toggle the
@@ -5829,10 +5832,24 @@ function setLibrarySize(value) {
   const cardWidth = Math.round(cardHeight * 2 / 3);
   document.documentElement.style.setProperty('--grid-card-min-width', cardWidth + 'px');
   document.documentElement.style.setProperty('--grid-card-height', cardHeight + 'px');
-  const slider = $('sl-libsize');
-  if (slider && slider.value != String(rows)) slider.value = rows;
+  // Sync the stepper popup — current row count + disabled-at-limit state
+  // on the +/- buttons. The old <input type="range"> is gone.
+  const numEl = $('lib-size-num');
+  if (numEl) numEl.textContent = String(rows);
+  const dec = $('lib-size-dec');
+  const inc = $('lib-size-inc');
+  if (dec) dec.disabled = rows <= 1;
+  if (inc) inc.disabled = rows >= 6;
   localStorage.setItem('tomen_libGridSize', String(rows));
 }
+// Current row count, source of truth = localStorage (setLibrarySize writes
+// it). Used by the +/- stepper and the setView / resize re-derivation.
+function _currentLibSize() {
+  const saved = parseInt(localStorage.getItem('tomen_libGridSize'), 10);
+  return (saved >= 1 && saved <= 6) ? saved : 3;
+}
+function libSizeInc() { setLibrarySize(_currentLibSize() + 1); }
+function libSizeDec() { setLibrarySize(_currentLibSize() - 1); }
 
 function setSort(s) {
   currentSort = s;
@@ -11138,8 +11155,7 @@ function renderGreeting() {
   window.addEventListener('resize', () => {
     if (_libSizeResizeTimer) clearTimeout(_libSizeResizeTimer);
     _libSizeResizeTimer = setTimeout(() => {
-      const slider = $('sl-libsize');
-      if (slider) setLibrarySize(slider.value);
+      setLibrarySize(_currentLibSize());
     }, 150);
   });
 
