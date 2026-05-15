@@ -1072,6 +1072,13 @@ html, body {
   overflow-y: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--brand) transparent;
+  /* Column snap: scroll always settles with whole columns flush to the
+     left padding — no partial column hanging off either edge. The wheel
+     handler rounds its smooth-scroll target to a column step so the
+     ease and the snap don't fight; trackpad / touch let the browser's
+     native snap finish them. */
+  scroll-snap-type: x mandatory;
+  scroll-padding-left: var(--lib-edge-pad);
   /* Drives the .col-item::before two-digit running index. Items now
      flow column-major (because of flex-direction: column + wrap), so
      the numbers run down a column before jumping to the next — natural
@@ -1089,11 +1096,15 @@ html, body {
   height: var(--lib-row-height, 92px);
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: 36px 1fr;
-  column-gap: 14px;
-  border-bottom: 0.5px solid var(--border);
+  /* Tight index gutter — the number reads as a small label next to the
+     title, not a separate alignment column. */
+  grid-template-columns: 24px 1fr;
+  column-gap: 8px;
   cursor: pointer;
   counter-increment: bookindex;
+  /* Every item is a snap target; items in the same visual column share
+     an X position so the browser picks the leftmost as the snap. */
+  scroll-snap-align: start;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -6575,13 +6586,20 @@ function _setupSmoothWheelScroll() {
     rafId = requestAnimationFrame(tick);
   };
 
-  const animate = (el, ax, delta, max) => {
+  const animate = (el, ax, delta, max, snapStep) => {
     const prop = ax === 'x' ? 'scrollLeft' : 'scrollTop';
     // Resync the target whenever the element or axis changes, or when no
     // animation is in flight — otherwise we'd ease from a stale target.
     // Reset lastSet too so the first frame isn't misread as a takeover.
     if (el !== scroller || ax !== axis) { scroller = el; axis = ax; target = el[prop]; lastSet = -1; }
     target = Math.max(0, Math.min(target + delta, max));
+    // When the container has CSS scroll-snap, round the smooth-scroll
+    // target to a snap point so the wheel ease and the browser's snap
+    // don't fight at the end. snapStep is the distance between adjacent
+    // snap points (column width + column gap for the text shelf).
+    if (snapStep && snapStep > 0) {
+      target = Math.max(0, Math.min(Math.round(target / snapStep) * snapStep, max));
+    }
     if (!rafId) rafId = requestAnimationFrame(tick);
   };
 
@@ -6603,13 +6621,24 @@ function _setupSmoothWheelScroll() {
       if (max <= 0) return;
       e.preventDefault();
       const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      // Columns view snaps to column boundaries — compute the step
+      // (col width + col gap) so the wheel target lands exactly on one.
+      // Grid view has no snap; pass undefined to skip the rounding.
+      let snapStep = 0;
+      if (currentView === 'columns') {
+        const cs = getComputedStyle(hShelf);
+        const colW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lib-col-width')) || 0;
+        const colGap = parseFloat(cs.columnGap) || 0;
+        snapStep = colW + colGap;
+      }
       if (reduceMotion || !isMouseWheel(e)) {
         // Trackpad / reduced-motion: map straight onto scrollLeft. Drop any
         // in-flight wheel glide first so it doesn't fight this direct write.
+        // CSS scroll-snap handles the final settle for the columns view.
         cancel();
         hShelf.scrollLeft = Math.max(0, Math.min(hShelf.scrollLeft + delta, max));
       } else {
-        animate(hShelf, 'x', delta, max);
+        animate(hShelf, 'x', delta, max, snapStep);
       }
       return;
     }
