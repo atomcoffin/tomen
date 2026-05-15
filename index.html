@@ -6592,13 +6592,17 @@ function _setupSmoothWheelScroll() {
     // animation is in flight — otherwise we'd ease from a stale target.
     // Reset lastSet too so the first frame isn't misread as a takeover.
     if (el !== scroller || ax !== axis) { scroller = el; axis = ax; target = el[prop]; lastSet = -1; }
-    target = Math.max(0, Math.min(target + delta, max));
-    // When the container has CSS scroll-snap, round the smooth-scroll
-    // target to a snap point so the wheel ease and the browser's snap
-    // don't fight at the end. snapStep is the distance between adjacent
-    // snap points (column width + column gap for the text shelf).
     if (snapStep && snapStep > 0) {
-      target = Math.max(0, Math.min(Math.round(target / snapStep) * snapStep, max));
+      // Column-snap mode: each wheel tick advances exactly one column,
+      // independent of deltaY magnitude. A single mouse notch (~48px)
+      // would otherwise round back to zero against a much larger step,
+      // making mouse-wheel scroll feel dead. Rounding the starting
+      // target first re-aligns the position if a previous touch /
+      // trackpad gesture left it off-snap.
+      target = Math.round(target / snapStep) * snapStep;
+      target = Math.max(0, Math.min(target + Math.sign(delta) * snapStep, max));
+    } else {
+      target = Math.max(0, Math.min(target + delta, max));
     }
     if (!rafId) rafId = requestAnimationFrame(tick);
   };
