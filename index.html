@@ -1401,6 +1401,67 @@ html, body {
   color: white; line-height: 1.3; margin-bottom: 4px;
 }
 .gc-placeholder .gcp-author { font-size: 10px; color: rgba(255,255,255,0.7); }
+/* Group tile — a user-defined collection rendered alongside book cards
+   in the grid. Uses the same .gc shape (and 3D edges) so it reads as a
+   book-shaped container, with a 2x2 mosaic of up to four member-book
+   mini-covers and a name label overlaid at the bottom. Click filters
+   the library to that group's members (see setGroupFilter). */
+.gc-group-mosaic {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.gc-group-mosaic-cell {
+  background: var(--linen);
+  overflow: hidden;
+  position: relative;
+}
+.gc-group-mosaic-cell img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.gc-group-mosaic-cell-empty {
+  background: color-mix(in srgb, var(--ink) 6%, var(--card));
+}
+.gc-group-label {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 18px 8px 6px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.65), rgba(0, 0, 0, 0));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 2;
+}
+/* "+ New group" tile — a flatter, dashed-border variant that sits at the
+   end of the grid as a clear create affordance. */
+.gc-group-create > .gc-cover {
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1.5px dashed color-mix(in srgb, var(--ink) 25%, transparent);
+  color: var(--stone);
+  box-shadow: none;
+}
+.gc-group-create > .gc-cover .ph { font-size: 36px; line-height: 1; }
+.gc-group-create:hover > .gc-cover {
+  border-color: var(--brand-ink);
+  color: var(--brand-ink);
+}
+/* Drop the 3D edges + ribbon on the create tile — it isn't a book and
+   shouldn't render as one. */
+.gc-group-create .gc-edge,
+.gc-group-create .gc-prog { display: none; }
+
 /* Reading-progress bookmark ribbon. A brand strip pinned to the top of
    the cover, inset from the left (spine) edge; its height is the reading
    progress, so it hangs further down the more you've read — full height,
@@ -3387,6 +3448,17 @@ body.lib-select-mode .col-item {
   color: var(--brand-text);
   font-weight: 500;
 }
+/* Group-filter chip — same chip family as tags, with a folder icon
+   leading and a "✕" trailing to make the dismiss target obvious. */
+.lib-group-chip { display: inline-flex; align-items: center; gap: 6px; }
+.lib-group-chip .ph { font-size: 13px; line-height: 1; }
+.lib-tag-chip-x {
+  margin-left: 2px;
+  opacity: 0.75;
+  font-size: 11px;
+  line-height: 1;
+}
+.lib-group-chip:hover .lib-tag-chip-x { opacity: 1; }
 
 /* Tag editor — bottom sheet, mirrors note-editor styling so the two
    modal patterns feel like one family. */
@@ -4360,6 +4432,9 @@ body.lib-select-mode .col-item {
 <script>
 // ===== STATE =====
 let library = []; // Metadata only: {id, title, author, cover, progress, chapterIndex, scrollPos}
+// User-defined collections. Each: { id, name, bookIds: [bookId, ...], createdAt }.
+let groups = [];
+let _activeGroupId = null; // when set, the library is filtered to this group
 // Monotonic version counter bumped on any library mutation that could
 // affect sort/filter output. Used by getSortedLibrary and the tag-strip
 // renderer to skip recomputing when nothing relevant has changed.
@@ -4399,7 +4474,7 @@ let globalReadingFace = localStorage.getItem('tomen_readingFace') || 'serif';
 
 // ===== INDEXEDDB STORAGE =====
 const DB_NAME = 'tomen';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 let db = null;
 
 function openDB() {
@@ -4460,6 +4535,13 @@ function openDB() {
       // does the post-upgrade data move in the background.
       if (!d.objectStoreNames.contains('covers')) {
         d.createObjectStore('covers', { keyPath: 'id' });
+      }
+      // v4 — user-defined groups (collections). Each record:
+      // { id, name, bookIds: [bookId, ...], createdAt }. Membership lives
+      // on the group, not on the book, so renaming or deleting a group
+      // doesn't have to touch every book record.
+      if (!d.objectStoreNames.contains('groups')) {
+        d.createObjectStore('groups', { keyPath: 'id' });
       }
     };
     req.onsuccess = (e) => { db = e.target.result; resolve(db); };
@@ -4738,6 +4820,9 @@ function openBookMenu(ev, bookId, anchorEl) {
     <button class="book-menu-item" role="menuitem" onclick="openTagEditor('${bookId}')">
       <i class="ph ph-tag"></i>Tags…
     </button>
+    <button class="book-menu-item" role="menuitem" onclick="openGroupPickerForBook('${bookId}')">
+      <i class="ph ph-folder-simple"></i>Add to group…
+    </button>
     <button class="book-menu-item" role="menuitem" onclick="enterLibSelectMode('${bookId}')">
       <i class="ph ph-list-checks"></i>Select books
     </button>
@@ -4759,6 +4844,45 @@ function openBookMenu(ev, bookId, anchorEl) {
   } else if (ev && ev.currentTarget) {
     positionFloatingMenu(menu, ev.currentTarget);
   }
+}
+
+// Replace the per-book menu with a group picker for adding the book to a
+// collection. Always offers "New group…" at the top so the very first
+// group can be made without leaving the menu; below it, the existing
+// groups, each marked with a check if the book is already a member.
+function openGroupPickerForBook(bookId) {
+  const book = library.find(b => b.id === bookId);
+  if (!book) return;
+  const menu = $('book-menu');
+  if (!menu) return;
+  _bookMenuId = bookId;
+  const items = [`<button class="book-menu-item" role="menuitem" onclick="onNewGroupForBook('${bookId}')">
+    <i class="ph ph-plus"></i>New group…
+  </button>`];
+  for (const g of groups) {
+    const safeName = esc(g.name);
+    const inGroup = Array.isArray(g.bookIds) && g.bookIds.includes(bookId);
+    const check = inGroup ? '<i class="ph ph-check" style="margin-left:auto;opacity:0.7" aria-hidden="true"></i>' : '';
+    items.push(`<button class="book-menu-item" role="menuitem" onclick="addBookToGroupAndClose('${g.id}','${bookId}')">
+      <i class="ph ph-folder-simple"></i>${safeName}${check}
+    </button>`);
+  }
+  menu.innerHTML = items.join('');
+}
+async function addBookToGroupAndClose(groupId, bookId) {
+  const added = await addBookToGroup(groupId, bookId);
+  closeBookMenu();
+  if (added) renderLibrary();
+}
+async function onNewGroupForBook(bookId) {
+  const name = window.prompt('New group name:');
+  if (name === null) { closeBookMenu(); return; }
+  const trimmed = name.trim();
+  if (!trimmed) { closeBookMenu(); return; }
+  const g = await createGroup(trimmed);
+  if (g) await addBookToGroup(g.id, bookId);
+  closeBookMenu();
+  renderLibrary();
 }
 
 // Position a floating menu at a specific viewport point, clamped to
@@ -5027,15 +5151,18 @@ function deleteTagGlobally(tag) {
 }
 
 // Memoized tag-strip renderer. The strip rebuilds only when the set of
-// tags or the active filter actually changes — collecting tags scans
-// every book in the library, and replacing innerHTML thrashes the DOM
-// for no gain when neither has shifted since the last render.
+// tags / the active filter / the active group filter actually changes —
+// collecting tags scans every book in the library, and replacing innerHTML
+// thrashes the DOM for no gain when nothing has shifted since the last
+// render. The strip is shared by tag chips and the group-filter chip.
 let _tagStripCache = null;
 function _renderTagFilterStrip() {
   const strip = $('lib-tag-strip');
   if (!strip) return;
   const tags = _allLibraryTags();
-  if (tags.length === 0) {
+  const groupChip = _activeGroupId ? _findGroup(_activeGroupId) : null;
+  // Strip is hidden only when there are no tags AND no active group filter.
+  if (tags.length === 0 && !groupChip) {
     if (_tagStripCache !== 'empty') {
       strip.hidden = true;
       strip.innerHTML = '';
@@ -5044,20 +5171,35 @@ function _renderTagFilterStrip() {
     _activeTagFilter = null;
     return;
   }
-  const cacheKey = tags.join('|') + '||' + (_activeTagFilter || '');
+  const cacheKey = tags.join('|') + '||' + (_activeTagFilter || '') + '||g:' + (groupChip ? groupChip.id + ':' + groupChip.name : '');
   if (_tagStripCache === cacheKey) return;
   strip.hidden = false;
-  const all = `<button class="lib-tag-chip${_activeTagFilter === null ? ' active' : ''}" onclick="setTagFilter(null)">All</button>`;
-  const chips = tags.map(t => {
-    const safe = esc(t);
-    return `<button class="lib-tag-chip${_activeTagFilter === t ? ' active' : ''}" onclick="setTagFilter('${safe.replace(/'/g, "\\'")}')">${safe}</button>`;
-  }).join('');
-  strip.innerHTML = all + chips;
+  const parts = [];
+  // Group chip leads when active. Clicking the ✕ clears the group filter.
+  if (groupChip) {
+    parts.push(`<button class="lib-tag-chip lib-group-chip active" onclick="setGroupFilter(null)" aria-label="Clear group filter"><i class="ph ph-folder-simple" aria-hidden="true"></i>${esc(groupChip.name)}<span class="lib-tag-chip-x" aria-hidden="true">✕</span></button>`);
+  }
+  if (tags.length > 0) {
+    parts.push(`<button class="lib-tag-chip${_activeTagFilter === null ? ' active' : ''}" onclick="setTagFilter(null)">All</button>`);
+    for (const t of tags) {
+      const safe = esc(t);
+      parts.push(`<button class="lib-tag-chip${_activeTagFilter === t ? ' active' : ''}" onclick="setTagFilter('${safe.replace(/'/g, "\\'")}')">${safe}</button>`);
+    }
+  }
+  strip.innerHTML = parts.join('');
   _tagStripCache = cacheKey;
 }
 
 function setTagFilter(tag) {
   _activeTagFilter = tag ? _normalizeTag(tag) : null;
+  _renderTagFilterStrip();
+  renderLibrary();
+}
+
+// Set the active group filter (or null to clear). Re-renders the strip and
+// the library; the sorted-library cache picks up _activeGroupId already.
+function setGroupFilter(groupId) {
+  _activeGroupId = groupId || null;
   _renderTagFilterStrip();
   renderLibrary();
 }
@@ -5216,6 +5358,52 @@ async function migrateFromLocalStorage() {
 async function loadLibrary() {
   library = await dbGetAll('books');
   _bumpLibraryVersion();
+}
+
+// ===== GROUPS (user-defined collections) =====
+// Groups are kept in their own IDB store ({id, name, bookIds, createdAt})
+// rather than as a per-book field, so renaming or deleting a group doesn't
+// have to touch every book. Membership lookups are linear over `groups`,
+// which is fine at the scale this app runs.
+async function loadGroups() {
+  groups = await dbGetAll('groups');
+  // Stable display order — newest first feels right for collections you've
+  // just made; the user can curate later if needed.
+  groups.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  _bumpLibraryVersion();
+}
+function _findGroup(id) {
+  return groups.find(g => g.id === id) || null;
+}
+async function _saveGroup(g) {
+  await dbPut('groups', g);
+}
+// Create a group with the given name (trimmed). Returns the new group, or
+// null if the name was empty. Adds to local array + persists.
+async function createGroup(name) {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return null;
+  const g = {
+    id: 'g_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    name: trimmed,
+    bookIds: [],
+    createdAt: Date.now()
+  };
+  groups.unshift(g);
+  await _saveGroup(g);
+  _bumpLibraryVersion();
+  return g;
+}
+// Add a book to a group (idempotent — already-member calls are no-ops).
+async function addBookToGroup(groupId, bookId) {
+  const g = _findGroup(groupId);
+  if (!g || !bookId) return false;
+  if (!Array.isArray(g.bookIds)) g.bookIds = [];
+  if (g.bookIds.includes(bookId)) return false;
+  g.bookIds.push(bookId);
+  await _saveGroup(g);
+  _bumpLibraryVersion();
+  return true;
 }
 
 // In-memory cache for cover data URLs fetched from the covers store.
@@ -5582,7 +5770,7 @@ function clearLibrarySearch() {
 // skip re-rendering when nothing meaningful has changed.
 let _sortedLibraryCache = null;
 function getSortedLibrary() {
-  const cacheKey = `${_libraryVersion}|${currentSort}|${librarySearchQuery}|${_activeTagFilter || ''}|${getLastReadId() || ''}`;
+  const cacheKey = `${_libraryVersion}|${currentSort}|${librarySearchQuery}|${_activeTagFilter || ''}|${_activeGroupId || ''}|${getLastReadId() || ''}`;
   if (_sortedLibraryCache && _sortedLibraryCache.key === cacheKey) {
     return _sortedLibraryCache.value;
   }
@@ -5597,6 +5785,13 @@ function getSortedLibrary() {
   // Tag filter stacks on top of the text search. Both must match.
   if (_activeTagFilter) {
     pool = pool.filter(b => Array.isArray(b.tags) && b.tags.includes(_activeTagFilter));
+  }
+  // Group filter — narrow to books in the active group's bookIds. Stacks
+  // with tag + search; bookIds for a missing group fall through as empty.
+  if (_activeGroupId) {
+    const g = _findGroup(_activeGroupId);
+    const ids = (g && Array.isArray(g.bookIds)) ? new Set(g.bookIds) : new Set();
+    pool = pool.filter(b => ids.has(b.id));
   }
   const sorted = q ? pool : pool;  // pool is already a fresh array in both branches
   switch (currentSort) {
@@ -5669,6 +5864,18 @@ function renderLibrary() {
       <h3>No books with this tag</h3>
       <p>Nothing in your library is tagged "${esc(_activeTagFilter)}".</p>
       <button class="empty-lib-action" onclick="setTagFilter(null)">Show all</button>
+    </div>`;
+    return;
+  }
+  // Active-group empty state — the user opened a group that has no books
+  // yet (or all its members were deleted). Offers a way back to all books.
+  if (sorted.length === 0 && _activeGroupId) {
+    const g = _findGroup(_activeGroupId);
+    body.innerHTML = `<div class="empty-lib">
+      <i class="ph ph-folder-simple"></i>
+      <h3>${g ? esc(g.name) : 'Group'} is empty</h3>
+      <p>Add books to this group from the per-book menu (long-press a cover).</p>
+      <button class="empty-lib-action" onclick="setGroupFilter(null)">Show all books</button>
     </div>`;
     return;
   }
@@ -5931,8 +6138,68 @@ function renderTableView(el, books) {
   _observeBookCovers(el, '.tr-cover[data-book-id]');
 }
 
+// Render a single group tile: a .gc-shaped container with a 2x2 mosaic
+// of up to four member-book mini-covers and the group name overlaid.
+// Clicks bubble to the outer .gc, which filters the library to the group.
+function _renderGroupTile(g) {
+  const members = (g.bookIds || [])
+    .map(id => library.find(b => b.id === id))
+    .filter(Boolean)
+    .slice(0, 4);
+  const cells = [];
+  for (let i = 0; i < 4; i++) {
+    const b = members[i];
+    if (!b) {
+      cells.push('<div class="gc-group-mosaic-cell gc-group-mosaic-cell-empty"></div>');
+      continue;
+    }
+    const cached = _coverCache.has(b.id) ? _coverCache.get(b.id) : undefined;
+    const src = b.cover || (cached && cached !== 'loading' ? cached : null);
+    if (src) {
+      cells.push(`<div class="gc-group-mosaic-cell"><img src="${src}" alt="" loading="lazy" decoding="async"></div>`);
+    } else {
+      const c = strColor(b.title);
+      cells.push(`<div class="gc-group-mosaic-cell" style="background:linear-gradient(145deg,${c[0]},${c[1]})"></div>`);
+    }
+  }
+  const safeName = esc(g.name);
+  return `<div class="gc gc-group" data-group-id="${g.id}" title="${safeName}" role="button" tabindex="0" onclick="setGroupFilter('${g.id}')">
+    <div class="gc-cover" style="--gc-spine:var(--brand-deep)">
+      <div class="gc-group-mosaic">${cells.join('')}</div>
+      <div class="gc-group-label">${safeName}</div>
+      <div class="gc-edge gc-edge-r"></div>
+      <div class="gc-edge gc-edge-b"></div>
+      <div class="gc-edge gc-edge-t"></div>
+      <div class="gc-edge gc-edge-l"></div>
+    </div>
+  </div>`;
+}
+// Render the trailing "+ New group" affordance. Sits at the end of the
+// grid so the user always has a clear way to start a new collection.
+function _renderCreateGroupTile() {
+  return `<div class="gc gc-group gc-group-create" role="button" aria-label="New group" title="New group" tabindex="0" onclick="onCreateGroupClick()">
+    <div class="gc-cover"><i class="ph ph-plus" aria-hidden="true"></i></div>
+  </div>`;
+}
+// Prompt-driven create flow. Replace prompt() with a nicer modal later;
+// for v1 this is enough to get groups off the ground.
+async function onCreateGroupClick() {
+  const name = window.prompt('New group name:');
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const g = await createGroup(trimmed);
+  if (g) renderLibrary();
+}
+
 function renderGridView(el, books) {
-  el.innerHTML = '<div class="view-grid">' + books.map(b => {
+  // Group tiles and the "+ New group" create tile only render when the
+  // library isn't already filtered to a group's members — inside a
+  // group, the view is just that group's books.
+  const showGroups = !_activeGroupId;
+  const groupTiles = showGroups ? groups.map(_renderGroupTile).join('') : '';
+  const createTile = showGroups ? _renderCreateGroupTile() : '';
+  el.innerHTML = '<div class="view-grid">' + groupTiles + books.map(b => {
     const p = b.progress || 0;
     const c = strColor(b.title);
     // Spine color = the cover's stored dominant color (same extraction the
@@ -5971,7 +6238,7 @@ function renderGridView(el, books) {
       <button class="gc-menu-hint" tabindex="-1" aria-hidden="true" onclick="openBookMenu(event, '${b.id}')"><i class="ph ph-dots-three"></i></button>
       <div class="gc-cover${sel}" data-book-id="${b.id}" style="--gc-spine:${spineColor}" onclick="summonAndOpen(event, '${b.id}')">${coverHtml}<div class="gc-edge gc-edge-r"></div><div class="gc-edge gc-edge-b"></div><div class="gc-edge gc-edge-t"></div><div class="gc-edge gc-edge-l"></div>${p > 0 ? `<div class="gc-prog" style="height:${p}%"></div>` : ''}</div>
     </div>`;
-  }).join('') + '</div>';
+  }).join('') + createTile + '</div>';
   _observeBookCovers(el, '.gc-cover[data-book-id]');
 }
 
@@ -10704,6 +10971,7 @@ function renderGreeting() {
     await openDB();
     await migrateFromLocalStorage();
     await loadLibrary();
+    await loadGroups();
   } catch (err) {
     console.error('Storage init failed:', err);
   }
