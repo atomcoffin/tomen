@@ -1014,19 +1014,24 @@ html, body {
 .view-switch-btn:hover { color: var(--ink); }
 .view-switch-btn.active { background: var(--card); color: var(--ink); }
 
-/* Inline +/- buttons that flank the active view icon inside .view-switch.
-   setView reorders them in the DOM so they always bracket the active
-   button; hidden entirely when Detail/table is active. One pair of
-   buttons serves grid (rows) and columns (cols) — viewStepDec/Inc
-   dispatch by currentView.
+/* Inline +/- buttons that flank each sizable view button inside .view-switch.
+   Each sizable view (grid → rows, columns → cols) owns its own pair; only
+   the active view's pair is visible. Switching views cross-fades the
+   pairs in place — the +/- never fly between buttons. Detail/table has
+   no pair (no size knob).
 
-   Visual grouping: when shown, they share the active button's white
-   `--card` background and meet it flush (no gap), so [- icon +] reads
-   as one connected pill against the linen track. Outer corners round
-   on dec/inc, inner corners go square via the `.flanked` class that
-   placeViewSteppers stamps on the active view-switch-btn. Negative
-   margins cancel the parent's 3px flex gap so the three buttons abut
-   without seams. */
+   Visual grouping: when its view is active, the pair shares that
+   button's white --card background and meets it flush (no gap), so
+   [- icon +] reads as one connected pill against the linen track.
+   Outer corners round on dec/inc; inner corners go square via the
+   .flanked class that updateViewSteppers stamps on the active button.
+   Negative margins cancel the parent's 3px flex gap so the three
+   buttons abut without seams.
+
+   Hidden state uses .is-hidden (opacity 0 + visibility hidden, delayed
+   so opacity fades first) rather than [hidden]/display:none, so the
+   inactive pair preserves its slot and the row never reflows between
+   grid and columns. */
 .view-step-btn {
   display: inline-flex;
   align-items: center;
@@ -1048,13 +1053,22 @@ html, body {
   font-weight: 700;
   line-height: 1;
   padding: 0;
-  transition: color 200ms ease;
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 200ms ease, color 200ms ease, background 200ms ease, visibility 0s linear 0s;
 }
 .view-step-btn:hover { color: var(--brand-ink); }
 .view-step-btn:disabled { cursor: default; opacity: 0.4; }
 .view-step-btn:disabled:hover { color: var(--fog); }
-.view-step-btn[hidden] { display: none; }
-#view-step-dec {
+.view-step-btn.is-hidden {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  /* Delay visibility:hidden until after opacity finishes fading so the
+     bg cross-fades smoothly rather than vanishing instantly. */
+  transition: opacity 200ms ease, color 200ms ease, background 200ms ease, visibility 0s linear 200ms;
+}
+.view-step-dec {
   border-radius: 5px 0 0 5px;
   margin-right: -3px;
   /* Glyph hugs the right (inner) edge near the active icon; the wider
@@ -1062,14 +1076,14 @@ html, body {
   justify-content: flex-end;
   padding-right: 4px;
 }
-#view-step-inc {
+.view-step-inc {
   border-radius: 0 5px 5px 0;
   margin-left: -3px;
   justify-content: flex-start;
   padding-left: 4px;
 }
 /* The active view button between the +/- has square inner corners so the
-   three buttons fuse into one pill. Stamped by placeViewSteppers; absent
+   three buttons fuse into one pill. Stamped by updateViewSteppers; absent
    when Detail is active (its lone-button pill stays fully rounded). */
 .view-switch-btn.flanked { border-radius: 0; }
 
@@ -4145,14 +4159,16 @@ body.lib-select-mode .col-item {
          they hide when Detail/table is active since it has no size knob. -->
     <div class="view-switch-wrap">
       <div class="view-switch" id="view-switch" role="radiogroup" aria-label="Library view">
-        <button class="view-step-btn" id="view-step-dec" onclick="viewStepDec()" aria-label="Fewer">−</button>
-        <button class="view-switch-btn active" data-view="grid" onclick="setView('grid')" title="Grid — browse covers" aria-label="Grid view" role="radio" aria-checked="true">
+        <button class="view-step-btn view-step-dec" data-stepper-for="grid" onclick="viewStepDec()" aria-label="Fewer rows">−</button>
+        <button class="view-switch-btn active flanked" data-view="grid" onclick="setView('grid')" title="Grid — browse covers" aria-label="Grid view" role="radio" aria-checked="true">
           <i class="ph ph-squares-four"></i>
         </button>
-        <button class="view-step-btn" id="view-step-inc" onclick="viewStepInc()" aria-label="More">+</button>
+        <button class="view-step-btn view-step-inc" data-stepper-for="grid" onclick="viewStepInc()" aria-label="More rows">+</button>
+        <button class="view-step-btn view-step-dec is-hidden" data-stepper-for="columns" onclick="viewStepDec()" aria-label="Fewer columns">−</button>
         <button class="view-switch-btn" data-view="columns" onclick="setView('columns')" title="Text — scan titles fast" aria-label="Text view" role="radio" aria-checked="false">
           <i class="ph ph-text-columns"></i>
         </button>
+        <button class="view-step-btn view-step-inc is-hidden" data-stepper-for="columns" onclick="viewStepInc()" aria-label="More columns">+</button>
         <button class="view-switch-btn" data-view="table" onclick="setView('table')" title="Detail — full info" aria-label="Detail view" role="radio" aria-checked="false">
           <i class="ph ph-rows"></i>
         </button>
@@ -6416,9 +6432,9 @@ function setView(v) {
     // accurate for assistive tech.
     b.setAttribute('aria-checked', on ? 'true' : 'false');
   });
-  // Place the +/- stepper buttons so they bracket the active view's
-  // icon inside .view-switch (or hide them when Detail/table is active).
-  placeViewSteppers(v);
+  // Show the active view's +/- pair and hide the other; stamp .flanked
+  // on the active button so its inner corners square against the pair.
+  updateViewSteppers(v);
   // Grid view: zero lib-body padding so books bleed to all four edges
   // of the viewport — they extend behind the transparent overlay
   // header at top and run off the screen edge horizontally as the
@@ -6438,68 +6454,34 @@ function setView(v) {
   setLibraryColumns(_currentLibCols());
 }
 
-// Move the shared +/- stepper buttons in the DOM so they flank whichever
-// view button is currently active. Grid/columns each have a 1-6 size; Detail
-// (table) has no size knob, so the buttons hide entirely. One pair of
-// buttons serves both views — viewStepDec/Inc dispatch by currentView.
-function placeViewSteppers(v) {
-  const dec = $('view-step-dec');
-  const inc = $('view-step-inc');
-  if (!dec || !inc) return;
-  // FIRST — record the +/- pre-move positions so we can FLIP-animate
-  // them sliding to their new slots. Null if they were hidden (no
-  // animation needed; they'll fade in at the new spot via the bg
-  // transition on the active-pill underneath).
-  const decFirst = dec.hidden ? null : dec.getBoundingClientRect();
-  const incFirst = inc.hidden ? null : inc.getBoundingClientRect();
-  // Clear any previous flanked marker — only the currently-active view
-  // (when it has +/- siblings) should get the squared inner corners.
-  document.querySelectorAll('#view-switch .view-switch-btn').forEach(b => b.classList.remove('flanked'));
-  if (v === 'table') {
-    dec.hidden = true;
-    inc.hidden = true;
-    return;
-  }
-  const targetBtn = document.querySelector(`#view-switch .view-switch-btn[data-view="${v}"]`);
-  if (!targetBtn || !targetBtn.parentNode) return;
-  targetBtn.parentNode.insertBefore(dec, targetBtn);
-  targetBtn.parentNode.insertBefore(inc, targetBtn.nextSibling);
-  dec.hidden = false;
-  inc.hidden = false;
-  targetBtn.classList.add('flanked');
+// Show the active view's stepper pair and hide the other; stamp .flanked
+// on the active button when it has a pair so the [- icon +] trio fuses
+// into one rounded pill. Each pair stays in its own DOM slot (next to
+// its view button) — switching views cross-fades pairs in place instead
+// of sliding glyphs between view buttons.
+function updateViewSteppers(v) {
+  document.querySelectorAll('#view-switch .view-step-btn').forEach(btn => {
+    btn.classList.toggle('is-hidden', btn.dataset.stepperFor !== v);
+  });
+  document.querySelectorAll('#view-switch .view-switch-btn').forEach(b => {
+    const hasPair = b.dataset.view === v && (v === 'grid' || v === 'columns');
+    b.classList.toggle('flanked', hasPair);
+  });
   syncViewStepperDisabled();
-  // LAST + INVERT + PLAY — slide each stepper from its prior position
-  // to its new slot. Skipped under prefers-reduced-motion and when the
-  // delta is zero (e.g. setView called with the already-active view).
-  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  if (reduceMotion) return;
-  const slide = (el, first) => {
-    if (!first) return;
-    const last = el.getBoundingClientRect();
-    const dx = first.left - last.left;
-    if (!dx) return;
-    el.animate(
-      [{ transform: `translateX(${dx}px)` }, { transform: 'translateX(0)' }],
-      { duration: 220, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' }
-    );
-  };
-  slide(dec, decFirst);
-  slide(inc, incFirst);
 }
 
-// Reflect the active view's size bounds on the +/- buttons. Called by
-// placeViewSteppers and by setLibrarySize/setLibraryColumns whenever the
-// active view's count changes.
+// Reflect each view's size bounds on its own +/- pair. Safe to call any
+// time either count changes — only the matching pair gets touched.
 function syncViewStepperDisabled() {
-  const dec = $('view-step-dec');
-  const inc = $('view-step-inc');
-  if (!dec || !inc) return;
-  let n;
-  if (currentView === 'grid') n = _currentLibSize();
-  else if (currentView === 'columns') n = _currentLibCols();
-  else return;
-  dec.disabled = n <= 1;
-  inc.disabled = n >= 6;
+  const setPair = (view, n) => {
+    const pair = document.querySelectorAll(`#view-switch .view-step-btn[data-stepper-for="${view}"]`);
+    if (pair.length !== 2) return;
+    // Document order: dec then inc.
+    pair[0].disabled = n <= 1;
+    pair[1].disabled = n >= 6;
+  };
+  setPair('grid', _currentLibSize());
+  setPair('columns', _currentLibCols());
 }
 
 function viewStepDec() {
@@ -6571,9 +6553,8 @@ function setLibrarySize(value) {
   document.documentElement.style.setProperty('--grid-card-min-width', cardWidth + 'px');
   document.documentElement.style.setProperty('--grid-card-height', cardHeight + 'px');
   localStorage.setItem('tomen_libGridSize', String(rows));
-  // Sync the shared +/- buttons (disabled at 1 and 6). No-op if columns
-  // is the active view — syncViewStepperDisabled reads currentView.
-  if (currentView === 'grid') syncViewStepperDisabled();
+  // Sync the disabled-at-limit state on grid's own +/- pair.
+  syncViewStepperDisabled();
 }
 // Current row count, source of truth = localStorage (setLibrarySize writes
 // it). Used by the +/- stepper and the setView / resize re-derivation.
@@ -6636,9 +6617,8 @@ function setLibraryColumns(value) {
   document.documentElement.style.setProperty('--lib-row-height', rowHeight + 'px');
 
   localStorage.setItem('tomen_libColsCount', String(cols));
-  // Sync the shared +/- buttons (disabled at 1 and 6). No-op if grid is
-  // the active view.
-  if (currentView === 'columns') syncViewStepperDisabled();
+  // Sync the disabled-at-limit state on cols's own +/- pair.
+  syncViewStepperDisabled();
 }
 function _currentLibCols() {
   const saved = parseInt(localStorage.getItem('tomen_libColsCount'), 10);
