@@ -1028,10 +1028,10 @@ html, body {
    Negative margins cancel the parent's 3px flex gap so the three
    buttons abut without seams.
 
-   Hidden state uses .is-hidden (opacity 0 + visibility hidden, delayed
-   so opacity fades first) rather than [hidden]/display:none, so the
-   inactive pair preserves its slot and the row never reflows between
-   grid and columns. */
+   Hidden state uses .is-hidden, which collapses width + padding + the
+   dec/inc negative margins so the inactive view reads as just the icon
+   (no reserved space). Width/margin/opacity all animate together so the
+   active view widens smoothly into its pair on switch. */
 .view-step-btn {
   display: inline-flex;
   align-items: center;
@@ -1053,20 +1053,43 @@ html, body {
   font-weight: 700;
   line-height: 1;
   padding: 0;
+  overflow: hidden;
   visibility: visible;
   opacity: 1;
-  transition: opacity 200ms ease, color 200ms ease, background 200ms ease, visibility 0s linear 0s;
+  transition:
+    width 200ms ease,
+    margin 200ms ease,
+    padding 200ms ease,
+    opacity 200ms ease,
+    color 200ms ease,
+    background 200ms ease,
+    visibility 0s linear 0s;
 }
 .view-step-btn:hover { color: var(--brand-ink); }
 .view-step-btn:disabled { cursor: default; opacity: 0.4; }
 .view-step-btn:disabled:hover { color: var(--fog); }
 .view-step-btn.is-hidden {
+  /* Collapse the slot entirely — width, padding, and the dec/inc negative
+     margin all animate to nothing so the inactive view button reads as
+     just the icon (no reserved space for absent +/-). The -1.5px margins
+     eat half of each surrounding parent flex-gap so the row collapses by
+     exactly one gap (3px) per hidden item — zero net width contribution. */
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  margin-left: -1.5px;
+  margin-right: -1.5px;
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  /* Delay visibility:hidden until after opacity finishes fading so the
-     bg cross-fades smoothly rather than vanishing instantly. */
-  transition: opacity 200ms ease, color 200ms ease, background 200ms ease, visibility 0s linear 200ms;
+  transition:
+    width 200ms ease,
+    margin 200ms ease,
+    padding 200ms ease,
+    opacity 200ms ease,
+    color 200ms ease,
+    background 200ms ease,
+    visibility 0s linear 200ms;
 }
 .view-step-dec {
   border-radius: 5px 0 0 5px;
