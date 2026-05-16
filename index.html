@@ -1457,18 +1457,10 @@ html, body {
   /* 3D scene: perspective on the parent grid + preserve-3d here lets the
      .gc-cover edge slabs render with depth when the card tilts. */
   transform-style: preserve-3d;
-  /* Tilt composition:
-     - rotateY(--gc-tilt) is the scroll-velocity-driven turn that
-       reveals the spine and fore-edge as books lean.
-     - rotateX(--gc-x-tilt) is a tiny constant lean-back (~5deg by
-       default) so the head (top) page-edge slab is never perfectly
-       edge-on to the viewer. Without it, the gc-edge-t / gc-edge-b
-       slabs sit perpendicular to the camera at rest, projecting to
-       a 1-pixel sliver that gets visually occluded by the cover
-       plane. The tilt exposes the top edge like a book on a low
-       shelf, at the cost of hiding the bottom edge — a fair trade
-       since shelved books read more naturally from above. */
-  transform: rotateY(var(--gc-tilt, 0deg)) rotateX(var(--gc-x-tilt, 5deg));
+  /* Y-axis tilt driven by horizontal scroll velocity — _setupGridScrollTilt
+     publishes --gc-tilt on .view-grid and every card inherits it. 0deg at
+     rest; the parent's perspective renders the turn with depth. */
+  transform: rotateY(var(--gc-tilt, 0deg));
 }
 /* While the grid is actively tilting, promote each card to its own
    compositor layer so the per-frame rotateY is a cheap re-composite
