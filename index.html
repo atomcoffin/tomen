@@ -4569,6 +4569,13 @@ body.lib-select-mode .col-item {
      vibe-first rather than reading-first. Floats above the overlays via
      z-index 300; positioned at open time relative to the trigger. -->
 <div class="theme-menu" id="theme-menu" role="menu" aria-label="Choose theme">
+  <!-- Per-book override reset. Shown only inside the reader when the
+       open book has a custom theme set; clearing it makes the book
+       follow the library's global theme again. -->
+  <button class="theme-menu-item" role="menuitem" data-theme-reset onclick="resetBookTheme()" hidden>
+    <i class="ph ph-arrow-counter-clockwise" aria-hidden="true" style="font-size:14px;color:var(--stone)"></i>
+    <span class="theme-menu-name">Use library theme</span>
+  </button>
   <div class="theme-menu-section">Reading</div>
   <button class="theme-menu-item" role="menuitem" data-theme="" onclick="pickTheme('')">
     <span class="swatch-chip" data-swatch="light"></span>
@@ -4921,6 +4928,11 @@ function bookMetaFromBook(book) {
     // covers store so a Reset can restore it. The flag drives whether
     // the "Reset cover" menu item is shown.
     customCover: !!book.customCover,
+    // Per-book theme override. null = follow the global library theme;
+    // a theme key ('' for Light, 'dark', 'paper', etc.) = pin this book
+    // to that theme. Applied on open and persisted independently of
+    // the global preference.
+    theme: book.theme == null ? null : book.theme,
     // User-defined tags. Free-form strings, lowercased+trimmed on save
     // for stable de-duplication across the library. No separate tag
     // store — the global tag list is derived from this union at render.
@@ -8439,6 +8451,13 @@ async function openBookById(id) {
     // default. Done BEFORE renderChapter so the first paint uses the right
     // metrics and we don't flash-then-reflow.
     applyReadingFace(currentBook.fontFace || globalReadingFace);
+    // Per-book theme override. If the book was pinned to a specific
+    // theme, swap to it now; otherwise inherit the library's global
+    // theme (also via _renderTheme so the .theme-current widget and
+    // menu-active marker stay in sync). showLibrary undoes this on
+    // close. _renderTheme is pure visual — the in-memory book record
+    // already holds the override, no persistence happens here.
+    _renderTheme(_resolveBookTheme(currentBook));
     $('r-title').textContent = currentBook.title;
     updateTopTitle();
     $('screen-lib').classList.remove('active');
@@ -8499,6 +8518,10 @@ function showLibrary() {
   // regardless of which book was last open. The per-book override will be
   // re-applied the next time that book is opened.
   applyReadingFace(globalReadingFace);
+  // Same idea for theme — if the book had a per-book theme override,
+  // restore the global library theme on return. Pure visual swap; the
+  // book's saved override is untouched and re-applies on next open.
+  _renderTheme(localStorage.getItem('tomen_theme') || '');
   // Free chapter memory. A 10MB EPUB held the full chapter HTML in two
   // slot inners plus the chapters[] array; without this, every book read
   // in a session stayed resident until tab close. Safe to null currentBook
@@ -10847,28 +10870,24 @@ const _THEME_INFO = {
   'brutalist': { name: 'Brutalist', category: 'experimental', forcesFace: 'mono' },
   'horror':    { name: 'Horror',    category: 'experimental' }
 };
-function setTheme(theme) {
-  // Remove old theme classes without wiping other body classes (r-ui-visible,
-  // r-mode-editing, r-debug, etc.)
+// Apply a theme's visuals: body class, .theme-current widget sync, theme
+// menu active marker, typeface lock note, system bar tint. Pure UI — does
+// not persist anywhere. setTheme handles persistence (with scope), and
+// the book-open / library-return paths use this directly to swap themes
+// without touching the saved preference.
+function _renderTheme(theme) {
   _THEME_CLASSES.forEach(c => document.body.classList.remove(c));
   if (theme) document.body.classList.add(theme);
   const info = _THEME_INFO[theme || ''] || _THEME_INFO[''];
-  // Sync every .theme-current trigger (Appearance + Profile) so the
-  // displayed chip + name reflect the new theme.
   document.querySelectorAll('.theme-current').forEach(btn => {
     const chip = btn.querySelector('.swatch-chip');
     const name = btn.querySelector('.theme-current-name');
     if (chip) chip.dataset.swatch = theme || 'light';
     if (name) name.textContent = info.name;
   });
-  // Sync the theme menu's active marker, in case it's open during a
-  // programmatic theme change (rare but cheap to keep correct).
   document.querySelectorAll('.theme-menu-item[data-theme]').forEach(item => {
     item.classList.toggle('is-active', item.dataset.theme === (theme || ''));
   });
-  // Typeface lock — when the theme hardcodes a reading face, dim the
-  // Appearance panel's Face row and show an explanatory note. The
-  // saved face preference is left untouched; the lock is visual only.
   const faceCell = document.querySelector('.face-cell');
   if (faceCell) {
     const forced = info.forcesFace;
@@ -10879,8 +10898,57 @@ function setTheme(theme) {
       note.textContent = `${info.name} requires ${faceLabel}.`;
     }
   }
-  localStorage.setItem('tomen_theme', theme);
   updateSystemBarColor(theme);
+}
+
+// Resolve which theme to apply for a given book — its per-book override
+// if one is set, otherwise the saved global theme. null/undefined on the
+// book record means "follow global"; an explicit '' means the book was
+// pinned to Light (a real choice, distinct from "no override").
+function _resolveBookTheme(book) {
+  if (book && book.theme != null) return book.theme;
+  return localStorage.getItem('tomen_theme') || '';
+}
+
+// Theme picker callback used by the swatch menus in Settings (library
+// scope) and the reader's Appearance menu (book scope). Persists into
+// the right place based on where the user is right now:
+//   - Inside an open book → currentBook.theme (per-book override)
+//   - Anywhere else        → localStorage 'tomen_theme' (global)
+// Both code paths end with _renderTheme so the visual change is live.
+function setTheme(theme) {
+  const inReader = $('screen-reader')?.classList.contains('active');
+  if (inReader && currentBook) {
+    currentBook.theme = theme;
+    const idx = library.findIndex(b => b.id === currentBook.id);
+    if (idx >= 0) {
+      library[idx].theme = theme;
+      _bumpLibraryVersion();
+    }
+    // Fire-and-forget — the in-memory swap is what matters for the
+    // user; the disk write catches up momentarily.
+    saveBookMeta(currentBook).catch(() => {});
+  } else {
+    localStorage.setItem('tomen_theme', theme);
+  }
+  _renderTheme(theme);
+}
+
+// Clear a book's per-book theme override so it follows the global
+// preference again. Called from the "Use library theme" reset item
+// in the reader's Appearance menu, which is only shown when an
+// override is actually set.
+function resetBookTheme() {
+  closeThemeMenu();
+  if (!currentBook) return;
+  currentBook.theme = null;
+  const idx = library.findIndex(b => b.id === currentBook.id);
+  if (idx >= 0) {
+    library[idx].theme = null;
+    _bumpLibraryVersion();
+  }
+  saveBookMeta(currentBook).catch(() => {});
+  _renderTheme(localStorage.getItem('tomen_theme') || '');
 }
 
 // Theme menu: open/close + apply. The menu is a singleton popover
@@ -10894,12 +10962,25 @@ function openThemeMenu(ev) {
     closeThemeMenu();
     return;
   }
-  // Mark the current theme as active before measuring so the
-  // is-active style doesn't trigger a layout shift after open.
-  const current = localStorage.getItem('tomen_theme') || '';
+  // Mark the current theme as active before measuring — the active
+  // marker should reflect what's actually applied right now, not just
+  // the global preference. Inside a book with an override, that's the
+  // override; everywhere else, the global value.
+  const inReader = $('screen-reader')?.classList.contains('active');
+  const current = (inReader && currentBook)
+    ? _resolveBookTheme(currentBook)
+    : (localStorage.getItem('tomen_theme') || '');
   menu.querySelectorAll('.theme-menu-item[data-theme]').forEach(item => {
     item.classList.toggle('is-active', item.dataset.theme === current);
   });
+  // Show the "Use library theme" reset row only inside a book that
+  // actually has a per-book override — outside the reader, or when the
+  // book is already following global, the entry has nothing to reset.
+  const resetRow = menu.querySelector('[data-theme-reset]');
+  if (resetRow) {
+    const hasOverride = inReader && currentBook && currentBook.theme != null;
+    resetRow.hidden = !hasOverride;
+  }
   menu.classList.add('open');
   positionFloatingMenu(menu, ev.currentTarget);
   ev.stopPropagation();
