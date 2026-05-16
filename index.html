@@ -1047,10 +1047,9 @@ html, body {
   color: var(--fog);
   cursor: pointer;
   font-family: var(--font-ui);
-  /* Match the view-icon glyph weight: 20px to match .view-switch-btn .ph,
-     700 weight so the text +/- doesn't read thinner than the icon line. */
+  /* Sized to match .view-switch-btn .ph so the +/- icons share the
+     view-icon's line weight. */
   font-size: 20px;
-  font-weight: 700;
   line-height: 1;
   padding: 0;
   overflow: hidden;
@@ -1122,6 +1121,7 @@ html, body {
    three buttons fuse into one pill. Stamped by updateViewSteppers; absent
    when Detail is active (its lone-button pill stays fully rounded). */
 .view-switch-btn.flanked { border-radius: 0; }
+.view-step-btn .ph { font-size: 20px; line-height: 1; }
 
 /* Library body */
 /* Top padding reserves room for the absolutely-positioned lib-header so
@@ -4195,16 +4195,16 @@ body.lib-select-mode .col-item {
          they hide when Detail/table is active since it has no size knob. -->
     <div class="view-switch-wrap">
       <div class="view-switch" id="view-switch" role="radiogroup" aria-label="Library view">
-        <button class="view-step-btn view-step-dec" data-stepper-for="grid" onclick="viewStepDec()" aria-label="Fewer rows">−</button>
+        <button class="view-step-btn view-step-dec" data-stepper-for="grid" onclick="viewStepDec()" aria-label="Fewer rows"><i class="ph ph-minus" aria-hidden="true"></i></button>
         <button class="view-switch-btn active flanked" data-view="grid" onclick="setView('grid')" title="Grid — browse covers" aria-label="Grid view" role="radio" aria-checked="true">
           <i class="ph ph-squares-four"></i>
         </button>
-        <button class="view-step-btn view-step-inc" data-stepper-for="grid" onclick="viewStepInc()" aria-label="More rows">+</button>
-        <button class="view-step-btn view-step-dec is-hidden" data-stepper-for="columns" onclick="viewStepDec()" aria-label="Fewer columns">−</button>
+        <button class="view-step-btn view-step-inc" data-stepper-for="grid" onclick="viewStepInc()" aria-label="More rows"><i class="ph ph-plus" aria-hidden="true"></i></button>
+        <button class="view-step-btn view-step-dec is-hidden" data-stepper-for="columns" onclick="viewStepDec()" aria-label="Fewer columns"><i class="ph ph-minus" aria-hidden="true"></i></button>
         <button class="view-switch-btn" data-view="columns" onclick="setView('columns')" title="Text — scan titles fast" aria-label="Text view" role="radio" aria-checked="false">
           <i class="ph ph-text-columns"></i>
         </button>
-        <button class="view-step-btn view-step-inc is-hidden" data-stepper-for="columns" onclick="viewStepInc()" aria-label="More columns">+</button>
+        <button class="view-step-btn view-step-inc is-hidden" data-stepper-for="columns" onclick="viewStepInc()" aria-label="More columns"><i class="ph ph-plus" aria-hidden="true"></i></button>
         <button class="view-switch-btn" data-view="table" onclick="setView('table')" title="Detail — full info" aria-label="Detail view" role="radio" aria-checked="false">
           <i class="ph ph-rows"></i>
         </button>
