@@ -994,7 +994,13 @@ html, body {
 /* Wrapper is the positioning context for the floating .lib-size popup,
    and flex:0 0 auto so it keeps its natural width as the centered third
    of the header. */
-.view-switch-wrap { position: relative; display: flex; flex: 0 0 auto; }
+.view-switch-wrap {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 14px;
+}
 .view-switch { display: flex; gap: 3px; background: var(--linen); border-radius: 8px; padding: 4px; }
 /* Icon-only view buttons, sized for tappability and to match the bumped
    nav scale. */
@@ -1011,39 +1017,31 @@ html, body {
 .view-switch-btn:hover { color: var(--ink); }
 .view-switch-btn.active { background: var(--card); color: var(--ink); }
 
-/* Library card-size slider — a floating popup that hangs off the view
-   switcher. Opened by clicking the grid view icon (onGridViewClick);
-   closed by clicking the grid icon again, clicking outside, or switching
-   to another view. Floating rather than inline so it doesn't eat toolbar
-   space, especially on mobile. Small icons frame the track for visual
-   scale; the slider drives a CSS custom property the grid's sizing math
-   reads, so cards resize live. */
+/* Inline view-specific stepper — appears next to the view switcher
+   whenever its view is active (grid → rows, columns → columns). Always-
+   visible in-toolbar so the +/- controls are discoverable; replaces
+   the old floating popup that hid behind a click-the-active-icon
+   gesture nobody could find. Drives a CSS custom property the sizing
+   math reads so cards/rows reflow live. */
 .lib-size {
   display: none;
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 50;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--card);
-  border: 0.5px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-float);
+  gap: 4px;
 }
-.lib-size.open { display: flex; }
+.lib-size.is-visible { display: inline-flex; }
 .lib-size-label {
   font-family: var(--font-ui);
-  font-size: 12px;
-  color: var(--stone);
-  margin-right: 2px;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--fog);
+  margin-right: 4px;
 }
 .lib-size-btn {
   width: 24px; height: 24px;
   display: flex; align-items: center; justify-content: center;
   border: none; background: transparent;
-  color: var(--ink);
+  color: var(--stone);
   cursor: pointer;
   border-radius: 4px;
   font-family: var(--font-ui);
@@ -1056,9 +1054,9 @@ html, body {
 .lib-size-btn:disabled {
   opacity: 0.35;
   cursor: default;
-  color: var(--stone);
+  color: var(--fog);
 }
-.lib-size-btn:disabled:hover { background: transparent; color: var(--stone); }
+.lib-size-btn:disabled:hover { background: transparent; color: var(--fog); }
 .lib-size-num {
   display: inline-flex;
   align-items: center;
@@ -4140,28 +4138,26 @@ body.lib-select-mode .col-item {
          grid card-size slider hangs off this wrapper as a floating popup. -->
     <div class="view-switch-wrap">
       <div class="view-switch" id="view-switch" role="radiogroup" aria-label="Library view">
-        <button class="view-switch-btn active" data-view="grid" onclick="onGridViewClick()" title="Grid — browse covers" aria-label="Grid view" role="radio" aria-checked="true">
+        <button class="view-switch-btn active" data-view="grid" onclick="setView('grid')" title="Grid — browse covers" aria-label="Grid view" role="radio" aria-checked="true">
           <i class="ph ph-squares-four"></i>
         </button>
-        <button class="view-switch-btn" data-view="columns" onclick="onColumnsViewClick()" title="Text — scan titles fast" aria-label="Text view" role="radio" aria-checked="false">
+        <button class="view-switch-btn" data-view="columns" onclick="setView('columns')" title="Text — scan titles fast" aria-label="Text view" role="radio" aria-checked="false">
           <i class="ph ph-text-columns"></i>
         </button>
         <button class="view-switch-btn" data-view="table" onclick="setView('table')" title="Detail — full info" aria-label="Detail view" role="radio" aria-checked="false">
           <i class="ph ph-rows"></i>
         </button>
       </div>
-      <!-- Grid card-size slider — a floating popup, opened by clicking the
-           grid view icon (see onGridViewClick). Floating rather than inline
-           so it doesn't eat toolbar space, especially on mobile. -->
+      <!-- Inline view-specific stepper. Sits alongside the view switcher;
+           setView toggles which one is visible. Always in-toolbar when
+           its view is active, so the +/- controls are discoverable
+           without needing to know to click the active view icon. -->
       <div class="lib-size" id="lib-size" aria-label="Grid rows">
         <span class="lib-size-label">rows</span>
         <button class="lib-size-btn" id="lib-size-dec" onclick="libSizeDec()" aria-label="Fewer rows">−</button>
         <span class="lib-size-num" id="lib-size-num" aria-live="polite">3</span>
         <button class="lib-size-btn" id="lib-size-inc" onclick="libSizeInc()" aria-label="More rows">+</button>
       </div>
-      <!-- Text-view column count stepper — same shape as the grid rows
-           popup, opened by clicking the text view icon. Drives --lib-cols
-           which .view-columns reads to set grid-template-columns live. -->
       <div class="lib-size" id="lib-cols" aria-label="Text columns">
         <span class="lib-size-label">columns</span>
         <button class="lib-size-btn" id="lib-cols-dec" onclick="libColsDec()" aria-label="Fewer columns">−</button>
@@ -6427,13 +6423,11 @@ function setView(v) {
     // accurate for assistive tech.
     b.setAttribute('aria-checked', on ? 'true' : 'false');
   });
-  // Leaving grid view closes the floating card-size slider — it's a
-  // grid-only control. Switching TO grid doesn't auto-open it; that's
-  // onGridViewClick's job, so a programmatic setView (e.g. on load)
-  // doesn't pop the slider unprompted. Same pattern for the text-view
-  // columns popup: only the text view owns it.
-  if (v !== 'grid') setLibSizePopup(false);
-  if (v !== 'columns') setLibColsPopup(false);
+  // Show the inline view-specific stepper (rows for grid, columns for
+  // text); hide the other one. Steppers live in-toolbar so they're
+  // always discoverable when their view is active.
+  $('lib-size')?.classList.toggle('is-visible', v === 'grid');
+  $('lib-cols')?.classList.toggle('is-visible', v === 'columns');
   // Grid view: zero lib-body padding so books bleed to all four edges
   // of the viewport — they extend behind the transparent overlay
   // header at top and run off the screen edge horizontally as the
@@ -6453,75 +6447,11 @@ function setView(v) {
   setLibraryColumns(_currentLibCols());
 }
 
-// Grid view icon click. If grid is already the active view, toggle the
-// floating card-size slider; otherwise switch to grid and show the slider
-// once so the user sees the size control right after picking the view.
-function onGridViewClick() {
-  if (currentView === 'grid') {
-    toggleLibSizePopup();
-  } else {
-    setView('grid');
-    setLibSizePopup(true);
-  }
-}
-function setLibSizePopup(show) {
-  const el = $('lib-size');
-  if (el) el.classList.toggle('open', show);
-}
-function toggleLibSizePopup() {
-  const el = $('lib-size');
-  if (el) el.classList.toggle('open');
-}
-// Text-view click — symmetric to onGridViewClick. First click switches
-// to text view and reveals the column-count stepper; clicking the icon
-// again while text view is active toggles the popup.
-function onColumnsViewClick() {
-  if (currentView === 'columns') {
-    toggleLibColsPopup();
-  } else {
-    setView('columns');
-    setLibColsPopup(true);
-  }
-}
-function setLibColsPopup(show) {
-  const el = $('lib-cols');
-  if (el) el.classList.toggle('open', show);
-}
-function toggleLibColsPopup() {
-  const el = $('lib-cols');
-  if (el) el.classList.toggle('open');
-}
-// Close the card-size popup on any click outside it. The grid view icon
-// is excluded — onGridViewClick already toggles the popup, and letting
-// this handler fire on the same click would just cancel that out. Same
-// pattern for the text-view columns popup.
-document.addEventListener('click', e => {
-  const sizeEl = $('lib-size');
-  if (sizeEl && sizeEl.classList.contains('open')
-      && !e.target.closest('.lib-size')
-      && !e.target.closest('[data-view="grid"]')) {
-    sizeEl.classList.remove('open');
-  }
-  const colsEl = $('lib-cols');
-  if (colsEl && colsEl.classList.contains('open')
-      && !e.target.closest('#lib-cols')
-      && !e.target.closest('[data-view="columns"]')) {
-    colsEl.classList.remove('open');
-  }
-});
-// Scrolling the grid also closes the popup — once you start browsing the
-// shelf you're done sizing. scroll doesn't bubble, so listen in capture;
-// only the grid's own scroll counts (the popup is grid-view-only anyway).
-document.addEventListener('scroll', e => {
-  if (!e.target.classList || !e.target.classList.contains('view-grid')) return;
-  const el = $('lib-size');
-  if (!el || !el.classList.contains('open')) return;
-  // Don't close while the user is actively working the slider — dragging
-  // it reflows the grid and can clamp scrollLeft, firing a scroll we'd
-  // otherwise misread as the user scrolling the shelf.
-  if (document.activeElement && el.contains(document.activeElement)) return;
-  el.classList.remove('open');
-}, true);
+// Steppers are inline now (always visible alongside their view's button),
+// so the old onGridViewClick / onColumnsViewClick popup-toggle wrappers
+// and the outside-click / scroll-close handlers that supported them have
+// all been removed. The view buttons call setView directly, and setView
+// toggles `.is-visible` on the right stepper.
 
 // Live card-size adjustment in grid view. Writes a CSS custom property
 // the grid's sizing math reads, so cards reflow as soon as the user moves
