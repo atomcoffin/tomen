@@ -1008,7 +1008,7 @@ html, body {
   border-radius: 5px;
   color: var(--stone);
   cursor: pointer;
-  transition: color 140ms ease, background 140ms ease;
+  transition: color 200ms ease, background 200ms ease;
 }
 .view-switch-btn .ph { font-size: 20px; line-height: 1; }
 .view-switch-btn:hover { color: var(--ink); }
@@ -1036,7 +1036,10 @@ html, body {
   width: 32px; height: 40px;
   border: none;
   background: var(--card);
-  color: var(--stone);
+  /* Dimmer than the view icon (--ink) so the icon reads as the anchor
+     of the pill and the +/- as supporting controls — clear hierarchy
+     inside the connected white background. Hover lifts back to brand-ink. */
+  color: var(--fog);
   cursor: pointer;
   font-family: var(--font-ui);
   /* Match the view-icon glyph weight: 20px to match .view-switch-btn .ph,
@@ -1045,10 +1048,10 @@ html, body {
   font-weight: 700;
   line-height: 1;
   padding: 0;
-  transition: color 140ms ease;
+  transition: color 200ms ease;
 }
 .view-step-btn:hover { color: var(--brand-ink); }
-.view-step-btn:disabled { cursor: default; color: var(--fog); }
+.view-step-btn:disabled { cursor: default; opacity: 0.4; }
 .view-step-btn:disabled:hover { color: var(--fog); }
 .view-step-btn[hidden] { display: none; }
 #view-step-dec {
@@ -6443,6 +6446,12 @@ function placeViewSteppers(v) {
   const dec = $('view-step-dec');
   const inc = $('view-step-inc');
   if (!dec || !inc) return;
+  // FIRST — record the +/- pre-move positions so we can FLIP-animate
+  // them sliding to their new slots. Null if they were hidden (no
+  // animation needed; they'll fade in at the new spot via the bg
+  // transition on the active-pill underneath).
+  const decFirst = dec.hidden ? null : dec.getBoundingClientRect();
+  const incFirst = inc.hidden ? null : inc.getBoundingClientRect();
   // Clear any previous flanked marker — only the currently-active view
   // (when it has +/- siblings) should get the squared inner corners.
   document.querySelectorAll('#view-switch .view-switch-btn').forEach(b => b.classList.remove('flanked'));
@@ -6459,6 +6468,23 @@ function placeViewSteppers(v) {
   inc.hidden = false;
   targetBtn.classList.add('flanked');
   syncViewStepperDisabled();
+  // LAST + INVERT + PLAY — slide each stepper from its prior position
+  // to its new slot. Skipped under prefers-reduced-motion and when the
+  // delta is zero (e.g. setView called with the already-active view).
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (reduceMotion) return;
+  const slide = (el, first) => {
+    if (!first) return;
+    const last = el.getBoundingClientRect();
+    const dx = first.left - last.left;
+    if (!dx) return;
+    el.animate(
+      [{ transform: `translateX(${dx}px)` }, { transform: 'translateX(0)' }],
+      { duration: 220, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' }
+    );
+  };
+  slide(dec, decFirst);
+  slide(inc, incFirst);
 }
 
 // Reflect the active view's size bounds on the +/- buttons. Called by
