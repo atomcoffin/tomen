@@ -4882,6 +4882,11 @@ function bookMetaFromBook(book) {
     // user opened this book. Drives the table-view status indicator
     // (reading / stale / unread). Updated in openBookById.
     lastReadAt: book.lastReadAt || 0,
+    // True when the user has replaced the cover via the file picker. The
+    // original cover (if any) is preserved under `${id}_orig` in the
+    // covers store so a Reset can restore it. The flag drives whether
+    // the "Reset cover" menu item is shown.
+    customCover: !!book.customCover,
     // User-defined tags. Free-form strings, lowercased+trimmed on save
     // for stable de-duplication across the library. No separate tag
     // store — the global tag list is derived from this union at render.
@@ -5009,6 +5014,9 @@ async function deleteBook(id) {
   try { await dbDelete('books', id); } catch (err) { console.error('delete books meta failed:', err); }
   try { await dbDelete('content', id); } catch (err) { console.error('delete content failed:', err); }
   try { await dbDelete('covers', id); } catch (err) { console.error('delete cover failed:', err); }
+  // Best-effort: also remove the archived original cover (only present
+  // for books the user changed the cover on). Harmless if absent.
+  try { await dbDelete('covers', id + '_orig'); } catch (err) { console.error('delete original cover failed:', err); }
   _coverCache.delete(id);
   try { await deleteAllMarksForBook(id); } catch (err) { console.error('delete marks failed:', err); }
   // Clear lastRead pointer if it referenced this book — otherwise the next
@@ -5057,6 +5065,13 @@ function openBookMenu(ev, bookId, anchorEl) {
     </button>`;
     }
   }
+  // Reset-cover is gated on having a custom cover — for the unmodified
+  // default state there's nothing to reset to.
+  const resetCoverItem = book.customCover
+    ? `<button class="book-menu-item" role="menuitem" onclick="resetBookCover('${bookId}')">
+      <i class="ph ph-arrow-counter-clockwise"></i>Reset cover
+    </button>`
+    : '';
   menu.innerHTML = `
     <button class="book-menu-item" role="menuitem" onclick="openTagEditor('${bookId}')">
       <i class="ph ph-tag"></i>Tags…
@@ -5064,6 +5079,9 @@ function openBookMenu(ev, bookId, anchorEl) {
     <button class="book-menu-item" role="menuitem" onclick="openGroupPickerForBook('${bookId}')">
       <i class="ph ph-folder-simple"></i>Add to group…
     </button>${removeFromGroupItem}
+    <button class="book-menu-item" role="menuitem" onclick="changeBookCover('${bookId}')">
+      <i class="ph ph-image"></i>Change cover…
+    </button>${resetCoverItem}
     <button class="book-menu-item" role="menuitem" onclick="enterLibSelectMode('${bookId}')">
       <i class="ph ph-list-checks"></i>Select books
     </button>
@@ -6125,6 +6143,150 @@ async function shrinkCoverDataURL(dataUrl, maxWidth = 480, quality = 0.82) {
     img.onerror = () => resolve(null);
     img.src = dataUrl;
   });
+}
+
+// ===== CUSTOM BOOK COVERS =====
+// Lets the user replace a book's cover via the OS file picker. The
+// original cover (if any) is preserved alongside under `${id}_orig` in
+// the covers store so Reset can restore it; books that never had an
+// original (txt/md/html imports) reset to the gradient placeholder.
+
+// Lazily created singleton file input for cover picks. Lives at the top
+// of <body> like other hidden inputs; reuses across calls so multiple
+// invocations don't pile up DOM nodes.
+let _coverPickInput = null;
+let _coverPickTargetId = null;
+
+function _ensureCoverPickInput() {
+  if (_coverPickInput) return _coverPickInput;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.style.display = 'none';
+  input.addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    const bookId = _coverPickTargetId;
+    // Always clear so picking the same file twice still fires `change`.
+    input.value = '';
+    _coverPickTargetId = null;
+    if (!file || !bookId) return;
+    await _applyPickedCover(bookId, file);
+  });
+  document.body.appendChild(input);
+  _coverPickInput = input;
+  return input;
+}
+
+// Entry point from the book menu — opens the file picker for the given
+// book. The actual save happens in _applyPickedCover when the input
+// reports a `change` event.
+function changeBookCover(bookId) {
+  closeBookMenu();
+  _coverPickTargetId = bookId;
+  const input = _ensureCoverPickInput();
+  input.click();
+}
+
+// Read a picked image File, downscale + re-encode it, back up the
+// existing cover (if this is the first custom-cover swap for the book),
+// and write the new cover. Updates the in-memory caches and re-renders
+// so the change is visible immediately across every view.
+async function _applyPickedCover(bookId, file) {
+  const idx = library.findIndex(b => b.id === bookId);
+  if (idx < 0) return;
+  let dataURL;
+  try {
+    dataURL = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error || new Error('FileReader failed'));
+      r.readAsDataURL(file);
+    });
+  } catch (err) {
+    console.warn('[tomen] cover read failed', err);
+    alert('Could not read that image.');
+    return;
+  }
+  // Resize + re-encode. Slightly larger maxWidth than the auto-import
+  // migration (480) so manually-chosen covers look crisp on big grids.
+  const shrunken = await shrinkCoverDataURL(dataURL, 600, 0.85);
+  const finalURL = shrunken || dataURL;
+
+  const book = library[idx];
+  // First custom-cover swap: archive the existing cover under
+  // `${id}_orig` so Reset can restore it. Skip if the book already has
+  // an _orig (don't overwrite a real original with a previous custom
+  // cover) or if it never had a cover to begin with.
+  try {
+    if (!book.customCover) {
+      const existingOrig = await dbGet('covers', bookId + '_orig');
+      if (!existingOrig) {
+        const existingCurrent = await dbGet('covers', bookId);
+        if (existingCurrent && existingCurrent.dataURL) {
+          await dbPut('covers', { id: bookId + '_orig', dataURL: existingCurrent.dataURL });
+        }
+      }
+    }
+    await dbPut('covers', { id: bookId, dataURL: finalURL });
+  } catch (err) {
+    console.error('[tomen] cover save failed', err);
+    alert('Could not save the new cover.');
+    return;
+  }
+  // Update in-memory caches so all three views render the new cover
+  // on the next pass without re-fetching from IDB.
+  _coverCache.set(bookId, finalURL);
+  delete colorCache[bookId];
+  // Recompute the spine color from the new cover — drives the grid
+  // book's spine + the page-edge tint. Falls back to the title-hashed
+  // color if extraction fails (matches the import path).
+  let newSpine = null;
+  try { newSpine = await extractColor(finalURL); } catch { /* ignore */ }
+  book.customCover = true;
+  if (newSpine) book.spineColor = newSpine;
+  // The lazy-load path checks `book.cover` for the initial inline render
+  // before the cache fetch resolves; set it so freshly rendered cards
+  // pick up the new image instantly.
+  book.cover = finalURL;
+  _bumpLibraryVersion();
+  try { await saveBookMeta(book); } catch (err) { console.warn('[tomen] save meta after cover change failed', err); }
+  renderLibrary();
+}
+
+// Reset a book to its original cover. For books that had one (most
+// EPUBs), restore `${id}_orig` to `${id}` in the covers store. For
+// books that never had one (txt/md/html), drop the custom cover so
+// the gradient placeholder returns.
+async function resetBookCover(bookId) {
+  closeBookMenu();
+  const idx = library.findIndex(b => b.id === bookId);
+  if (idx < 0) return;
+  const book = library[idx];
+  try {
+    const orig = await dbGet('covers', bookId + '_orig');
+    if (orig && orig.dataURL) {
+      await dbPut('covers', { id: bookId, dataURL: orig.dataURL });
+      _coverCache.set(bookId, orig.dataURL);
+      book.cover = orig.dataURL;
+      let spine = null;
+      try { spine = await extractColor(orig.dataURL); } catch { /* ignore */ }
+      if (spine) book.spineColor = spine;
+    } else {
+      await dbDelete('covers', bookId);
+      _coverCache.set(bookId, null);
+      book.cover = null;
+      book.spineColor = null;
+    }
+  } catch (err) {
+    console.error('[tomen] cover reset failed', err);
+    alert('Could not reset the cover.');
+    return;
+  }
+  delete colorCache[bookId];
+  book.customCover = false;
+  _bumpLibraryVersion();
+  try { await saveBookMeta(book); } catch (err) { console.warn('[tomen] save meta after cover reset failed', err); }
+  renderLibrary();
 }
 
 // Extract dominant color from a cover image data URL
