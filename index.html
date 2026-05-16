@@ -1068,10 +1068,19 @@ html, body {
 /* Hover stays in the neutral gray family (--stone) instead of jumping to
    brand-ink — the +/- are supporting controls, not brand moments, and an
    olive-tinted hover on a white pill reads as "darker shade" against the
-   fog resting state. Disabled fades the whole button via opacity. */
+   fog resting state.
+
+   Disabled dims the glyph color only (via color-mix toward the pill bg)
+   rather than opacity on the whole element. Opacity would also fade the
+   white --card background and let the surrounding linen track show
+   through — that section of the pill actually got darker, the opposite
+   of what disabled should feel like. */
 .view-step-btn:hover { color: var(--stone); }
-.view-step-btn:disabled { cursor: default; opacity: 0.4; }
-.view-step-btn:disabled:hover { color: var(--fog); }
+.view-step-btn:disabled,
+.view-step-btn:disabled:hover {
+  cursor: default;
+  color: color-mix(in srgb, var(--fog) 35%, var(--card));
+}
 .view-step-btn.is-hidden {
   /* Collapse the slot entirely — width, padding, and the dec/inc negative
      margin all animate to nothing so the inactive view button reads as
