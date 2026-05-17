@@ -626,19 +626,20 @@ html, body {
    they travel as a unit when the header reflows on mobile. */
 .lib-search-row {
   display: flex; align-items: center; gap: 8px;
-  flex: 0 1 274px;
+  flex: 0 1 296px;
   min-width: 0;
 }
 /* Bordered-chip language: 0.5px border at rest, focus brightens the
-   border to brand-ink. Matches .sort-wrap and .view-switch so the
-   header reads as one chrome family. */
+   border to brand-ink. Height matches .view-switch (48px outer) so all
+   controls in the header row line up. Same 4px radius as the other chips. */
 .lib-search {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
+  height: 48px;
   display: flex; align-items: center;
   border: 0.5px solid var(--border);
-  border-radius: 0;
+  border-radius: 4px;
   background: transparent;
   transition: border-color 140ms ease;
 }
@@ -691,19 +692,19 @@ html, body {
    var(--brand) / --brand-text / --brand-deep mirror the active tag chip
    so "on brand" surfaces stay consistent across every theme. */
 .lib-search-add {
-  width: 30px; height: 30px;
+  width: 48px; height: 48px;
   flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
   border: none;
   background: var(--brand);
   color: var(--brand-text);
   cursor: pointer;
-  border-radius: 5px;
+  border-radius: 4px;
   line-height: 1;
   transition: background 140ms ease;
 }
 .lib-search-add:hover { background: var(--brand-deep); }
-.lib-search-add .ph { font-size: 18px; line-height: 1; }
+.lib-search-add .ph { font-size: 20px; line-height: 1; }
 
 /* Right third of the header — sort + profile, pushed to the far edge.
    flex:1 1 0 mirrors .lib-header-left so the two thirds stay equal. */
@@ -711,11 +712,14 @@ html, body {
   flex: 1 1 0; min-width: 0;
   display: flex; align-items: center; justify-content: flex-end; gap: 6px;
 }
-/* Library-nav settings button — bumped to match the bigger view buttons.
-   Borderless on purpose: it sits at the trailing edge of the header and
-   would visually pile up with the sort chip's border. Inherits the base
-   .icon-btn hover (transparent → linen). */
-.lib-toolbar .icon-btn { width: 40px; height: 40px; }
+/* Library-nav settings button — sized to match the rest of the header
+   row (48px) so the chrome aligns. Borderless on purpose: it sits at
+   the trailing edge of the header and would visually pile up with the
+   sort chip's border. 4px radius matches the bordered chips even though
+   the button itself isn't bordered, so the hover-fill curves the same
+   way as the others. Inherits the base .icon-btn transparent → linen
+   hover. */
+.lib-toolbar .icon-btn { width: 48px; height: 48px; border-radius: 4px; }
 .lib-toolbar .icon-btn .ph { font-size: 22px; }
 
 /* Import dropdown */
@@ -1011,7 +1015,10 @@ html, body {
   display: flex; gap: 3px;
   background: transparent;
   border: 0.5px solid var(--border);
-  border-radius: 0;
+  /* All header chips share this slight 4px radius — square enough to
+     read as utilitarian chrome, soft enough not to feel like a 90s
+     toolbar. */
+  border-radius: 4px;
   padding: 4px;
 }
 /* Icon-only view buttons, sized for tappability and to match the bumped
@@ -4080,7 +4087,7 @@ body.lib-select-mode .col-item {
 @media (min-width: 481px) and (max-width: 768px) {
   :root { --lib-edge-pad: 20px; }
   .lib-header { padding: 16px var(--lib-edge-pad); }
-  .lib-search-row { flex-basis: 214px; }
+  .lib-search-row { flex-basis: 240px; }
   /* Table view: drop tags + reading-time at tablet widths to keep the
      row from wrapping. Progress + format + status stay. */
   .tr-tags, .tr-time { display: none; }
@@ -4152,8 +4159,9 @@ body.lib-select-mode .col-item {
    the border + hover state; everything inside inherits color. */
 .sort-wrap {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 9px 10px;
-  border-radius: 0;
+  height: 48px;
+  padding: 0 12px;
+  border-radius: 4px;
   border: 0.5px solid var(--border);
   background: transparent;
   cursor: pointer;
