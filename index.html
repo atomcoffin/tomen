@@ -629,20 +629,20 @@ html, body {
   flex: 0 1 274px;
   min-width: 0;
 }
-/* Border lives on the wrap (not the input) so it matches the sort-wrap
-   chip and the input itself can stay borderless. Square corners, same
-   0.5px var(--border) as the sort chip. */
+/* Filled-chip language to match .view-switch: linen background at rest,
+   lifts to --card when focused (same way the active view button lifts
+   out of the linen track). No border — the linen pill defines the field. */
 .lib-search {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
   display: flex; align-items: center;
-  border: 0.5px solid var(--border);
+  border: none;
   border-radius: 0;
-  background: transparent;
-  transition: border-color 140ms ease;
+  background: var(--linen);
+  transition: background 140ms ease;
 }
-.lib-search:focus-within { border-color: var(--brand-ink); }
+.lib-search:focus-within { background: var(--card); }
 .lib-search-icon {
   position: absolute; left: 10px; top: 50%;
   transform: translateY(-50%);
@@ -682,7 +682,7 @@ html, body {
 }
 .lib-search-clear:hover {
   color: var(--brand-ink);
-  background: var(--linen);
+  background: var(--card);
 }
 .lib-search.has-value .lib-search-clear { display: flex; }
 
@@ -713,9 +713,18 @@ html, body {
 }
 /* Library-nav profile button is bumped a touch to match the bigger view
    buttons. Scoped to .lib-toolbar so the reader's icon-btn rules don't
-   pick this up. */
-.lib-toolbar .icon-btn { width: 40px; height: 40px; }
+   pick this up. Filled-chip language: linen at rest, lifts to --card on
+   hover so it reads like the active view button. Square corners match
+   the rest of the header chrome. */
+.lib-toolbar .icon-btn {
+  width: 40px; height: 40px;
+  background: var(--linen);
+  border-radius: 0;
+  color: var(--stone);
+}
 .lib-toolbar .icon-btn .ph { font-size: 22px; }
+.lib-toolbar .icon-btn:hover { background: var(--card); color: var(--brand-ink); }
+.lib-toolbar .icon-btn.active { background: var(--card); color: var(--brand-ink); }
 
 /* Import dropdown */
 .import-wrap { position: relative; }
@@ -4145,8 +4154,8 @@ body.lib-select-mode .col-item {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 9px 10px;
   border-radius: 0;
-  border: 0.5px solid var(--border);
-  background: transparent;
+  border: none;
+  background: var(--linen);
   cursor: pointer;
   color: var(--stone);
   font-family: var(--font-ui); font-size: 13px;
@@ -4154,7 +4163,7 @@ body.lib-select-mode .col-item {
   outline: none;
 }
 .sort-wrap:hover,
-.sort-wrap[aria-expanded="true"] { background: var(--linen); color: var(--ink); }
+.sort-wrap[aria-expanded="true"] { background: var(--card); color: var(--ink); }
 .sort-wrap:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 2px; }
 .sort-icon {
   font-size: 14px;
