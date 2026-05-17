@@ -564,7 +564,7 @@ html, body {
 /* The header itself is click-through (it overlays the scrolling library);
    only the actual controls inside the groups take pointer events back. */
 .lib-header-left, .lib-toolbar { pointer-events: none; }
-.lib-brand, .lib-search, .view-switch-wrap, .lib-toolbar > * { pointer-events: auto; }
+.lib-brand, .lib-search-row, .view-switch-wrap, .lib-toolbar > * { pointer-events: auto; }
 
 .lib-brand {
   font-family: var(--font-read); font-size: 21px; font-weight: 400;
@@ -620,10 +620,18 @@ html, body {
 /* Library search. Sits between the greeting and the toolbar, taking the
    flex growth slot so the toolbar stays pinned right. The input is styled
    minimally — single-underline focus ring, no drop-shadow, no pill border —
-   to match Tomen's typographic rather than chromed aesthetic. */
+   to match Tomen's typographic rather than chromed aesthetic.
+
+   .lib-search-row groups the input with the inline "+" Add-books button so
+   they travel as a unit when the header reflows on mobile. */
+.lib-search-row {
+  display: flex; align-items: center; gap: 8px;
+  flex: 0 1 274px;
+  min-width: 0;
+}
 .lib-search {
   position: relative;
-  flex: 0 1 240px;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex; align-items: center;
 }
@@ -637,9 +645,10 @@ html, body {
 }
 .lib-search-input {
   width: 100%;
-  /* Right padding clears both the clear-X (at right: 32px) and the
-     trailing "add books" + button (at right: 4px). */
-  padding: 8px 60px 8px 30px;
+  /* Right padding clears the clear-X (at right: 6px). The "+" Add-books
+     button now lives outside the input as a sibling, so we no longer need
+     to reserve space for it on the right. */
+  padding: 8px 30px 8px 30px;
   border: none;
   border-bottom: 0.5px solid var(--border);
   background: transparent;
@@ -654,7 +663,7 @@ html, body {
 .lib-search-input:focus { border-bottom-color: var(--brand-ink); }
 .lib-search:focus-within .lib-search-icon { color: var(--brand-ink); }
 .lib-search-clear {
-  position: absolute; right: 34px; top: 50%;
+  position: absolute; right: 6px; top: 50%;
   transform: translateY(-50%);
   width: 22px; height: 22px;
   border: none; background: transparent;
@@ -672,20 +681,13 @@ html, body {
 }
 .lib-search.has-value .lib-search-clear { display: flex; }
 
-/* "Add books" + button — pinned to the trailing end of the search bar.
-   .import-wrap is absolutely positioned here (it stays the containing
-   block for its own .import-menu dropdown). */
-.lib-search .import-wrap {
-  position: absolute;
-  right: 4px; top: 50%;
-  transform: translateY(-50%);
-}
-/* A small brand-filled square button — its own distinct element rather
-   than a transparent icon. var(--brand) / --brand-text / --brand-deep
-   mirror the active tag chip so "on brand" surfaces stay consistent
-   across every theme. */
+/* "Add books" + button — sits inline to the right of the search input
+   as a sibling, not inside it. A small brand-filled square button.
+   var(--brand) / --brand-text / --brand-deep mirror the active tag chip
+   so "on brand" surfaces stay consistent across every theme. */
 .lib-search-add {
-  width: 26px; height: 26px;
+  width: 30px; height: 30px;
+  flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
   border: none;
   background: var(--brand);
@@ -696,7 +698,7 @@ html, body {
   transition: background 140ms ease;
 }
 .lib-search-add:hover { background: var(--brand-deep); }
-.lib-search-add .ph { font-size: 17px; line-height: 1; }
+.lib-search-add .ph { font-size: 18px; line-height: 1; }
 
 /* Right third of the header — sort + profile, pushed to the far edge.
    flex:1 1 0 mirrors .lib-header-left so the two thirds stay equal. */
@@ -4027,7 +4029,7 @@ body.lib-select-mode .col-item {
   .lib-header-left { display: contents; }
   .lib-brand { font-size: 16px; order: 1; flex: 1 1 auto; }
   .lib-toolbar { order: 2; flex: 0 0 auto; }
-  .lib-search {
+  .lib-search-row {
     order: 3;
     flex: 1 1 100%;
     margin-top: 4px;
@@ -4058,12 +4060,14 @@ body.lib-select-mode .col-item {
   .icon-btn { width: 32px; height: 32px; }
   .icon-btn svg { width: 18px; height: 18px; }
   .icon-btn .ph { font-size: 18px; }
-  .sort-select { padding: 6px 24px 6px 8px; font-size: 11px; }
+  .sort-wrap { padding: 0 8px; gap: 4px; }
+  .sort-icon { font-size: 12px; }
+  .sort-select { padding: 6px 14px 6px 0; font-size: 11px; }
 }
 @media (min-width: 481px) and (max-width: 768px) {
   :root { --lib-edge-pad: 20px; }
   .lib-header { padding: 16px var(--lib-edge-pad); }
-  .lib-search { flex-basis: 180px; }
+  .lib-search-row { flex-basis: 214px; }
   /* Table view: drop tags + reading-time at tablet widths to keep the
      row from wrapping. Progress + format + status stay. */
   .tr-tags, .tr-time { display: none; }
@@ -4129,18 +4133,39 @@ body.lib-select-mode .col-item {
   .r-title { max-width: 100px; }
 }
 
-/* Sort select */
+/* Sort select. .sort-wrap holds an icon + the native <select> in one
+   pill so the icon reads as a label for the dropdown. The wrap owns the
+   border + hover state; the <select> inside is bare so the two never
+   double-paint a border. */
+.sort-wrap {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 10px 0 10px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  color: var(--stone);
+  transition: background 140ms ease, color 140ms ease;
+}
+.sort-wrap:hover,
+.sort-wrap:focus-within { background: var(--linen); color: var(--ink); }
+.sort-icon {
+  font-size: 14px;
+  line-height: 1;
+  color: inherit;
+  pointer-events: none;
+  flex: 0 0 auto;
+}
 .sort-select {
-  padding: 9px 12px; border-radius: var(--radius-sm);
-  border: 0.5px solid var(--border); background: transparent;
-  font-family: var(--font-ui); font-size: 13px; color: var(--stone);
+  padding: 9px 18px 9px 0;
+  border: none; background: transparent;
+  font-family: var(--font-ui); font-size: 13px; color: inherit;
   cursor: pointer; appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238A7E76' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 10px center;
-  padding-right: 28px;
+  background-position: right 0 center;
+  outline: none;
 }
-.sort-select:hover { background-color: var(--linen); color: var(--ink); }
 </style>
 </head>
 <body>
@@ -4157,21 +4182,26 @@ body.lib-select-mode .col-item {
          them sits dead-center in the bar. -->
     <div class="lib-header-left">
       <span class="lib-brand" id="lib-greeting"></span>
-      <div class="lib-search" id="lib-search">
-        <i class="ph ph-magnifying-glass lib-search-icon" aria-hidden="true"></i>
-        <input type="text" id="lib-search-input" class="lib-search-input"
-          placeholder="Search library"
-          aria-label="Search library"
-          oninput="setLibrarySearch(this.value)"
-          onkeydown="if (event.key === 'Escape') { this.value = ''; setLibrarySearch(''); this.blur(); }">
-        <button class="lib-search-clear" id="lib-search-clear"
-          onclick="clearLibrarySearch()"
-          aria-label="Clear search"
-          tabindex="-1">
-          <i class="ph ph-x"></i>
-        </button>
-        <!-- "Add books" — a plus at the trailing end of the search bar.
-             Opens the import menu (Add books / Add folder). -->
+      <!-- Search input + Add-books button as a horizontal unit so they stay
+           grouped on mobile (where .lib-header-left dissolves and the row
+           takes a full-width slot of its own). -->
+      <div class="lib-search-row">
+        <div class="lib-search" id="lib-search">
+          <i class="ph ph-magnifying-glass lib-search-icon" aria-hidden="true"></i>
+          <input type="text" id="lib-search-input" class="lib-search-input"
+            placeholder="Search library"
+            aria-label="Search library"
+            oninput="setLibrarySearch(this.value)"
+            onkeydown="if (event.key === 'Escape') { this.value = ''; setLibrarySearch(''); this.blur(); }">
+          <button class="lib-search-clear" id="lib-search-clear"
+            onclick="clearLibrarySearch()"
+            aria-label="Clear search"
+            tabindex="-1">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+        <!-- "Add books" — a plus sitting inline to the right of the search
+             bar. Opens the import menu (Add books / Add folder / New group). -->
         <div class="import-wrap">
           <button class="lib-search-add" onclick="toggleImportMenu()" title="Add books" aria-label="Add books">
             <i class="ph ph-plus"></i>
@@ -4214,17 +4244,23 @@ body.lib-select-mode .col-item {
         </button>
       </div>
     </div>
-    <!-- Right group: sort + profile. -->
+    <!-- Right group: sort + settings. -->
     <div class="lib-toolbar">
-      <select class="sort-select" id="sort-select" onchange="setSort(this.value)">
-        <option value="title">A — Z</option>
-        <option value="title-desc">Z — A</option>
-        <option value="author">Author</option>
-        <option value="recent">Recent</option>
-        <option value="progress">Progress</option>
-      </select>
-      <button class="icon-btn" id="lib-profile-btn" onclick="toggleProfile()" title="Profile & settings" aria-label="Profile and settings">
-        <i class="ph ph-user"></i>
+      <!-- Sort dropdown with a leading icon — purely decorative label so the
+           dropdown reads as "sort by ___" rather than an unlabeled menu. The
+           icon and select share a hover state via .sort-wrap:hover. -->
+      <label class="sort-wrap" for="sort-select" aria-label="Sort library">
+        <i class="ph ph-arrows-down-up sort-icon" aria-hidden="true"></i>
+        <select class="sort-select" id="sort-select" onchange="setSort(this.value)">
+          <option value="title">A — Z</option>
+          <option value="title-desc">Z — A</option>
+          <option value="author">Author</option>
+          <option value="recent">Recent</option>
+          <option value="progress">Progress</option>
+        </select>
+      </label>
+      <button class="icon-btn" id="lib-profile-btn" onclick="toggleProfile()" title="Settings" aria-label="Settings">
+        <i class="ph ph-gear-six"></i>
         <span class="update-dot" id="lib-profile-update-dot" hidden></span>
       </button>
     </div>
@@ -6462,6 +6498,71 @@ async function getSpineColor(book) {
 
 
 // ===== LIBRARY RENDERING =====
+// Ordered list of views in their on-screen left→right order. Swiping the
+// view-switch advances/retreats one step through this list.
+const VIEW_ORDER = ['grid', 'columns', 'table'];
+function nextViewName(cur, delta) {
+  const i = VIEW_ORDER.indexOf(cur);
+  if (i < 0) return cur;
+  const j = i + delta;
+  if (j < 0 || j >= VIEW_ORDER.length) return null;
+  return VIEW_ORDER[j];
+}
+
+// Horizontal swipe on the view-switch cycles between views — left swipe
+// advances (grid → columns → table), right swipe retreats. Mirrors the
+// reader's page-turn convention. Tracked at the touch level so taps on
+// the view + stepper buttons inside still register normally; only a
+// movement past the threshold is interpreted as a swipe.
+function _setupViewSwitchSwipe() {
+  const root = document.getElementById('view-switch');
+  if (!root) return;
+  let startX = 0, startY = 0, tracking = false, decided = false;
+  // Small pill — keep the threshold modest so the gesture feels willing.
+  const THRESH = 36;
+
+  root.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { tracking = false; return; }
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    tracking = true;
+    decided = false;
+  }, { passive: true });
+
+  root.addEventListener('touchmove', (e) => {
+    if (!tracking) return;
+    const t = e.touches[0];
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    // Lock in as a horizontal swipe once X movement dominates and is past
+    // the threshold; until then leave it ambiguous so a vertical scroll
+    // gesture starting on the pill passes through to the page.
+    if (!decided && Math.abs(dx) >= THRESH && Math.abs(dx) > Math.abs(dy) * 1.3) {
+      decided = true;
+    }
+  }, { passive: true });
+
+  root.addEventListener('touchend', (e) => {
+    if (!tracking) return;
+    tracking = false;
+    if (!decided) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - startX;
+    // Swipe left = advance (next view), swipe right = retreat (prev view).
+    const target = nextViewName(currentView, dx < 0 ? 1 : -1);
+    if (target) setView(target);
+    // Suppress the synthesized click that browsers may dispatch after the
+    // touch sequence so the underlying button doesn't also re-trigger the
+    // view it sat under when the swipe ended.
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  root.addEventListener('touchcancel', () => {
+    tracking = false;
+    decided = false;
+  }, { passive: true });
+}
+
 function setView(v) {
   currentView = v;
   localStorage.setItem('tomen_view', v);
@@ -12262,6 +12363,8 @@ function renderGreeting() {
   });
 
   setView(currentView);
+  // Horizontal swipe on the view pill cycles between Grid → Text → Detail.
+  _setupViewSwitchSwipe();
 
   // Long-press anywhere on a book card opens the per-book menu (Tags /
   // Select / Delete). Replaces the floating ⋯ buttons that used to
